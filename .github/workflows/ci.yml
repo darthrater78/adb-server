@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    # Not a bare `push:` — that also matches tag pushes, which would re-run
+    # this whole suite on release.yml's trigger against nothing new.
+    branches: ['**']
+    paths-ignore:
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'HANDOFF.md'
+      # Workflow files are covered by lint-workflows.yml instead.
+      - '.github/workflows/**'
+  pull_request:
+    branches: [feature/apk-pusher-scaffold]
+  # A commit that only touched a paths-ignore'd file has no CI run, and
+  # release.yml refuses to publish a commit CI never passed on. This is the
+  # escape hatch that gate points at.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Byte-compile the app
+        run: |
+          set -euo pipefail
+          # The runner's python is a minor version behind the image's 3.13;
+          # this is a syntax gate, not a runtime test — the real interpreter
+          # is exercised when the app image builds.
+          python3 -m compileall -q app
+
+      - name: VERSION and CHANGELOG agree
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          heading="$(grep -m1 '^## ' CHANGELOG.md)"
+          case "$heading" in
+            "## $version"*|"## [$version]"*)
+              echo "VERSION $version matches newest changelog heading: $heading" ;;
+            *)
+              echo "::error::VERSION says $version but the newest CHANGELOG.md heading is '$heading'."
+              exit 1 ;;
+          esac
+
+      - name: Validate compose file
+        run: |
+          set -euo pipefail
+          # `env_file: .env` is resolved when compose parses the file, even for
+          # a config-only run, so the file has to exist. The example is what
+          # the README tells a developer to copy.
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Audit Python dependencies
+        run: |
+          set -euo pipefail
+          # A venv, not a bare `pip install`: the runner's system python is
+          # externally managed (PEP 668) and refuses to be installed into.
+          python3 -m venv /tmp/audit
+          /tmp/audit/bin/pip install --quiet --disable-pip-version-check pip-audit==2.10.1
+          /tmp/audit/bin/pip-audit --requirement app/requirements.txt --strict
+
+  images:
+    name: Build ${{ matrix.image }} image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: adb-server
+            context: ./adb-server
+            dockerfile: ./adb-server/Dockerfile
+          - image: app
+            # Repo root, because app/Dockerfile copies VERSION from it —
+            # this mirrors docker-compose.yml exactly.
+            context: .
+            dockerfile: ./app/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          tags: adb-server-ci/${{ matrix.image }}:test
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

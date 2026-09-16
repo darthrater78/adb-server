@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # Action SHA pins go stale silently — this is what keeps them current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directory: /app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Both Dockerfiles: base images (debian:bookworm-slim, python:3.13-slim).
+  # The pinned Android tooling downloads inside them are checksum-verified by
+  # hand and are not something Dependabot can see.
+  - package-ecosystem: docker
+    directory: /app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: /adb-server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
