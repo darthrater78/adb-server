@@ -23,6 +23,17 @@ logger = logging.getLogger("adb_server")
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "10"))
 
+
+def _read_version() -> str:
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
+            return f.read().strip()
+    except OSError:
+        return "unknown"
+
+
+APP_VERSION = _read_version()
+
 scheduler = AsyncIOScheduler()
 
 
@@ -59,8 +70,24 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-def _tctx(session: dict | None = None, **extra) -> dict:
-    ctx = {}
+VALID_THEMES = {"flashbang", "dark", "oled"}
+# Exact allow-list, not a prefix/startswith check — the "next" field on the
+# theme form is client-supplied, and an open redirect is exactly what a
+# permissive check here would hand an attacker.
+KNOWN_NAV_PATHS = {"/repos", "/staged", "/devices", "/installs"}
+
+
+def _get_theme(request: Request) -> str:
+    theme = request.cookies.get("theme", "")
+    return theme if theme in VALID_THEMES else "auto"
+
+
+def _tctx(request: Request, session: dict | None = None, **extra) -> dict:
+    ctx = {
+        "app_version": APP_VERSION,
+        "theme": _get_theme(request),
+        "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/repos",
+    }
     if session is not None:
         ctx["csrf_token"] = session.get("csrf", "")
     ctx.update(extra)
@@ -84,7 +111,7 @@ def _redirect(path: str, status_code: int = 303, **params) -> RedirectResponse:
 def login_form(request: Request):
     if auth.read_session(request):
         return RedirectResponse("/repos", status_code=303)
-    return templates.TemplateResponse(request, "login.html", _tctx())
+    return templates.TemplateResponse(request, "login.html", _tctx(request))
 
 
 @app.post("/login")
@@ -97,7 +124,7 @@ def login_submit(
     if not auth.verify_credentials(username, password):
         auth.record_failed_attempt(request)
         return templates.TemplateResponse(
-            request, "login.html", _tctx(error="Invalid username or password"), status_code=401,
+            request, "login.html", _tctx(request, error="Invalid username or password"), status_code=401,
         )
     response = RedirectResponse("/repos", status_code=303)
     auth.create_session(response)
@@ -117,12 +144,36 @@ def index():
     return RedirectResponse("/repos", status_code=303)
 
 
+# ---- theme ----
+
+@app.post("/theme")
+def set_theme(
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    theme: str = Form(...),
+    next: str = Form("/repos"),
+):
+    _check_csrf(request, session, csrf_token)
+    if theme not in VALID_THEMES:
+        raise HTTPException(status_code=400, detail="Unknown theme")
+    next_path = next if next in KNOWN_NAV_PATHS else "/repos"
+    response = RedirectResponse(next_path, status_code=303)
+    # Cosmetic preference, not session state — plain cookie, not httponly, so
+    # it stays simple and separate from the signed auth session.
+    response.set_cookie(
+        "theme", theme, max_age=365 * 24 * 60 * 60,
+        samesite="lax", secure=auth.COOKIE_SECURE, path="/",
+    )
+    return response
+
+
 # ---- repos ----
 
 @app.get("/repos", response_class=HTMLResponse)
 def repos_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
     return templates.TemplateResponse(
-        request, "repos.html", _tctx(session, repos=db.list_repos(), error=error, ok=ok),
+        request, "repos.html", _tctx(request, session, repos=db.list_repos(), error=error, ok=ok),
     )
 
 
@@ -169,7 +220,7 @@ async def check_repo_now(repo_id: int, request: Request, session: dict = Depends
 @app.get("/staged", response_class=HTMLResponse)
 def staged_page(request: Request, session: dict = Depends(auth.require_auth)):
     return templates.TemplateResponse(
-        request, "staged.html", _tctx(session, apks=db.list_staged_apks(), devices=db.list_devices()),
+        request, "staged.html", _tctx(request, session, apks=db.list_staged_apks(), devices=db.list_devices()),
     )
 
 
@@ -178,7 +229,7 @@ def staged_page(request: Request, session: dict = Depends(auth.require_auth)):
 @app.get("/devices", response_class=HTMLResponse)
 def devices_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
     return templates.TemplateResponse(
-        request, "devices.html", _tctx(session, devices=db.list_devices(), error=error, ok=ok),
+        request, "devices.html", _tctx(request, session, devices=db.list_devices(), error=error, ok=ok),
     )
 
 
@@ -316,7 +367,7 @@ def push(
 
 @app.get("/installs", response_class=HTMLResponse)
 def installs_page(request: Request, session: dict = Depends(auth.require_auth)):
-    return templates.TemplateResponse(request, "installs.html", _tctx(session, installs=db.list_installs()))
+    return templates.TemplateResponse(request, "installs.html", _tctx(request, session, installs=db.list_installs()))
 
 
 @app.get("/installs/{install_id}", response_class=HTMLResponse)
@@ -324,4 +375,4 @@ def install_status_page(install_id: int, request: Request, session: dict = Depen
     install = db.get_install(install_id)
     if install is None:
         raise HTTPException(status_code=404)
-    return templates.TemplateResponse(request, "install_status.html", _tctx(session, install=install))
+    return templates.TemplateResponse(request, "install_status.html", _tctx(request, session, install=install))

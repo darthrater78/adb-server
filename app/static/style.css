@@ -21,6 +21,39 @@
   }
 }
 
+/* Explicit theme choice (data-theme attribute, set server-side from the
+   "theme" cookie) always wins over the OS preference above — an attribute
+   selector on :root is more specific than the plain :root it's overriding,
+   with or without the media query. No attribute means "auto": follow the
+   system, as before. */
+:root[data-theme="flashbang"] {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #666;
+  --border: #ddd;
+  --accent: #2563eb;
+  --danger: #b91c1c;
+  --ok: #15803d;
+}
+:root[data-theme="dark"] {
+  --bg: #14161a;
+  --fg: #e6e6e6;
+  --muted: #9aa0a6;
+  --border: #333740;
+  --accent: #6ea8fe;
+  --danger: #f87171;
+  --ok: #4ade80;
+}
+:root[data-theme="oled"] {
+  --bg: #000000;
+  --fg: #e6e6e6;
+  --muted: #86898f;
+  --border: #1c1c1c;
+  --accent: #6ea8fe;
+  --danger: #f87171;
+  --ok: #4ade80;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -47,6 +80,33 @@ nav a {
   font-weight: 600;
 }
 nav a:hover { color: var(--accent); }
+
+.version-badge {
+  margin-left: 8px;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.header-right { display: flex; align-items: center; gap: 12px; }
+
+.theme-switcher { display: flex; gap: 4px; }
+.theme-form { display: inline; }
+.theme-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+.theme-btn:hover { opacity: 1; color: var(--fg); }
+.theme-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 
 main { max-width: 1000px; margin: 0 auto; }
 

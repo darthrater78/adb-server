@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if theme and theme != "auto" %} data-theme="{{ theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,11 +15,24 @@
       <a href="/staged">Staged</a>
       <a href="/devices">Devices</a>
       <a href="/installs">Installs</a>
+      <span class="version-badge" title="adb-server version">v{{ app_version }}</span>
     </nav>
-    <form method="post" action="/logout" class="logout-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit">Log out</button>
-    </form>
+    <div class="header-right">
+      <div class="theme-switcher" role="group" aria-label="Theme">
+        {% for t, label in [("flashbang", "Flashbang"), ("dark", "Dark"), ("oled", "OLED")] %}
+        <form method="post" action="/theme" class="theme-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="{{ current_path }}">
+          <input type="hidden" name="theme" value="{{ t }}">
+          <button type="submit" class="theme-btn{{ ' active' if theme == t else '' }}">{{ label }}</button>
+        </form>
+        {% endfor %}
+      </div>
+      <form method="post" action="/logout" class="logout-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">Log out</button>
+      </form>
+    </div>
   </header>
   {% endif %}
 

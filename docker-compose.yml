@@ -16,7 +16,9 @@ services:
     # host networking would put that unauthenticated port directly on your LAN.
 
   app:
-    build: ./app
+    build:
+      context: .
+      dockerfile: app/Dockerfile
     networks: [internal]
     depends_on: [adb-server]
     ports:

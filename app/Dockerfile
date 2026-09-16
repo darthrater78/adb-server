@@ -55,10 +55,11 @@ COPY --from=android-tools /opt/build-tools /opt/build-tools
 ENV PATH="/opt/build-tools:${PATH}"
 
 WORKDIR /app
-COPY requirements.txt .
+COPY app/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY app/ .
+COPY VERSION .
 RUN mkdir -p /data/staging && chown -R appuser:appuser /data /app
 
 USER appuser
