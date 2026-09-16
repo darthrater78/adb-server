@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -255,9 +255,41 @@ def delete_device(serial: str, request: Request, session: dict = Depends(auth.re
 
 # ---- push ----
 
+def _run_push(install_id: int, device: dict, apk: dict) -> None:
+    """Runs off the request thread (via BackgroundTasks, which Starlette
+    executes in a threadpool for a sync callable) so a slow adb install
+    doesn't block the single-worker event loop the poller also runs on."""
+    db.set_install_status(install_id, "installing")
+    try:
+        # Wireless ADB serials drift with the device's address. Re-resolve and
+        # re-confirm identity immediately before installing rather than
+        # trusting whatever was true when the device was last paired.
+        if device["last_connect_addr"]:
+            adb_client.connect(device["last_connect_addr"])
+            confirmed = adb_client.get_serialno(device["last_connect_addr"])
+            if confirmed != device["serial"]:
+                raise adb_client.AdbError(
+                    "Device address now answers as a different serial — push aborted"
+                )
+
+        result = adb_client.install(device["serial"], apk["path"])
+        log = (result.stdout or "") + (result.stderr or "")
+        status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
+        db.finish_install(install_id, status, log.strip()[:8000])
+    except adb_client.AdbError as exc:
+        db.finish_install(install_id, "failed", str(exc))
+    except Exception:
+        # Anything unexpected here (DB hiccup, etc.) must still resolve the
+        # install row — otherwise it's stuck "installing" forever and the
+        # status page polls indefinitely with nothing to show for it.
+        logger.exception("push job %s crashed", install_id)
+        db.finish_install(install_id, "failed", "Internal error during push — check server logs")
+
+
 @app.post("/push")
 def push(
     request: Request,
+    background_tasks: BackgroundTasks,
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
     device_serial: str = Form(...),
@@ -276,28 +308,8 @@ def push(
         return _redirect("/staged", error="Device is not trusted")
 
     install_id = db.insert_install(device_serial, apk_id, status="pending")
-
-    try:
-        # Wireless ADB serials drift with the device's address. Re-resolve and
-        # re-confirm identity immediately before installing rather than
-        # trusting whatever was true when the device was last paired.
-        if device["last_connect_addr"]:
-            adb_client.connect(device["last_connect_addr"])
-            confirmed = adb_client.get_serialno(device["last_connect_addr"])
-            if confirmed != device_serial:
-                raise adb_client.AdbError(
-                    "Device address now answers as a different serial — push aborted"
-                )
-
-        result = adb_client.install(device_serial, apk["path"])
-        log = (result.stdout or "") + (result.stderr or "")
-        status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
-        db.finish_install(install_id, status, log.strip()[:8000])
-    except adb_client.AdbError as exc:
-        db.finish_install(install_id, "failed", str(exc))
-        return _redirect("/staged", error=f"Push failed: {exc}")
-
-    return RedirectResponse("/installs", status_code=303)
+    background_tasks.add_task(_run_push, install_id, dict(device), dict(apk))
+    return RedirectResponse(f"/installs/{install_id}", status_code=303)
 
 
 # ---- installs ----
@@ -305,3 +317,11 @@ def push(
 @app.get("/installs", response_class=HTMLResponse)
 def installs_page(request: Request, session: dict = Depends(auth.require_auth)):
     return templates.TemplateResponse(request, "installs.html", _tctx(session, installs=db.list_installs()))
+
+
+@app.get("/installs/{install_id}", response_class=HTMLResponse)
+def install_status_page(install_id: int, request: Request, session: dict = Depends(auth.require_auth)):
+    install = db.get_install(install_id)
+    if install is None:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(request, "install_status.html", _tctx(session, install=install))

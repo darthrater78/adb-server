@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Push status — adb-server{% endblock %}
+{% block head %}
+{% if install.status in ["pending", "installing"] %}
+<meta http-equiv="refresh" content="2">
+{% endif %}
+{% endblock %}
+{% block content %}
+<h1>Push status</h1>
+
+<p>
+  <strong>{{ install.owner }}/{{ install.repo }}</strong> {{ install.tag }} ({{ install.filename }})
+  → {{ install.nickname or install.device_serial }}
+</p>
+
+<div class="progress-track">
+  <div class="progress-bar {{ install.status if install.status in ['success', 'failed'] else 'indeterminate' }}"></div>
+</div>
+
+<p class="status-{{ install.status }}">
+  {% if install.status == "pending" %}Queued…
+  {% elif install.status == "installing" %}Installing on device…
+  {% elif install.status == "success" %}Install succeeded
+  {% elif install.status == "failed" %}Install failed
+  {% endif %}
+</p>
+
+{% if install.status in ["pending", "installing"] %}
+<p class="muted small">This page refreshes automatically every 2 seconds.</p>
+{% else %}
+<p class="muted">Finished {{ install.finished_at }}</p>
+{% if install.log %}<pre class="log">{{ install.log }}</pre>{% endif %}
+<p><a href="/staged">Back to staged APKs</a> · <a href="/installs">Install history</a></p>
+{% endif %}
+{% endblock %}

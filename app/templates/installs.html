@@ -6,7 +6,7 @@
 <table>
   <thead>
     <tr>
-      <th>Started</th><th>Device</th><th>APK</th><th>Status</th><th>Finished</th><th>Log</th>
+      <th>Started</th><th>Device</th><th>APK</th><th>Status</th><th>Finished</th><th>Log</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -18,9 +18,10 @@
       <td class="status-{{ i.status }}">{{ i.status }}</td>
       <td>{{ i.finished_at or "—" }}</td>
       <td><pre class="log">{{ i.log or "" }}</pre></td>
+      <td><a href="/installs/{{ i.id }}">View</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="6">No installs yet.</td></tr>
+    <tr><td colspan="7">No installs yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>

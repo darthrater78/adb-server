@@ -9,7 +9,7 @@
   <thead>
     <tr>
       <th>Repo</th><th>Tag</th><th>File</th><th>Package</th><th>Signer SHA-256</th>
-      <th>Downloaded</th><th>Push to</th>
+      <th>Downloaded</th><th>Release notes</th><th>Push to</th>
     </tr>
   </thead>
   <tbody>
@@ -21,6 +21,16 @@
       <td>{{ a.package_name }}</td>
       <td class="mono small">{{ a.signer_sha256[:16] }}…</td>
       <td>{{ a.downloaded_at }}</td>
+      <td>
+        {% if a.release_notes %}
+        <details>
+          <summary>Notes</summary>
+          <pre class="log release-notes">{{ a.release_notes }}</pre>
+        </details>
+        {% else %}
+        <span class="muted">—</span>
+        {% endif %}
+      </td>
       <td>
         {% if trusted_devices %}
         <form method="post" action="/push" class="inline-form">
@@ -39,7 +49,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
+    <tr><td colspan="8">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS staged_apks (
     signer_sha256 TEXT NOT NULL,
     path          TEXT NOT NULL,
     downloaded_at TEXT NOT NULL,
+    release_notes TEXT,
     UNIQUE(repo_id, tag)
 );
 
@@ -74,6 +75,15 @@ def init_db() -> None:
     with get_conn() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS never adds columns to a table that already
+    exists, so a DB created before a schema change needs an explicit ALTER."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(staged_apks)")}
+    if "release_notes" not in cols:
+        conn.execute("ALTER TABLE staged_apks ADD COLUMN release_notes TEXT")
 
 
 # ---- repos ----
@@ -130,14 +140,16 @@ def update_repo_check(
 def insert_staged_apk(
     repo_id: int, tag: str, filename: str, sha256: str,
     package_name: str, signer_sha256: str, path: str,
+    release_notes: str | None = None,
 ) -> int | None:
     with get_conn() as conn:
         try:
             cur = conn.execute(
                 """INSERT INTO staged_apks
-                   (repo_id, tag, filename, sha256, package_name, signer_sha256, path, downloaded_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (repo_id, tag, filename, sha256, package_name, signer_sha256, path, now()),
+                   (repo_id, tag, filename, sha256, package_name, signer_sha256, path,
+                    downloaded_at, release_notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (repo_id, tag, filename, sha256, package_name, signer_sha256, path, now(), release_notes),
             )
             return cur.lastrowid
         except sqlite3.IntegrityError:
@@ -233,6 +245,11 @@ def insert_install(device_serial: str, apk_id: int, status: str, log: str | None
         return cur.lastrowid
 
 
+def set_install_status(install_id: int, status: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE installs SET status = ? WHERE id = ?", (status, install_id))
+
+
 def finish_install(install_id: int, status: str, log: str) -> None:
     with get_conn() as conn:
         conn.execute(
@@ -241,15 +258,25 @@ def finish_install(install_id: int, status: str, log: str) -> None:
         )
 
 
+_INSTALL_SELECT = """
+    SELECT installs.*, devices.nickname, staged_apks.filename, staged_apks.tag,
+           repos.owner, repos.repo
+    FROM installs
+    JOIN devices ON devices.serial = installs.device_serial
+    JOIN staged_apks ON staged_apks.id = installs.apk_id
+    JOIN repos ON repos.id = staged_apks.repo_id
+"""
+
+
+def get_install(install_id: int) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute(
+            _INSTALL_SELECT + " WHERE installs.id = ?", (install_id,),
+        ).fetchone()
+
+
 def list_installs(limit: int = 100) -> list[sqlite3.Row]:
     with get_conn() as conn:
         return conn.execute(
-            """SELECT installs.*, devices.nickname, staged_apks.filename, staged_apks.tag,
-                      repos.owner, repos.repo
-               FROM installs
-               JOIN devices ON devices.serial = installs.device_serial
-               JOIN staged_apks ON staged_apks.id = installs.apk_id
-               JOIN repos ON repos.id = staged_apks.repo_id
-               ORDER BY installs.started_at DESC LIMIT ?""",
-            (limit,),
+            _INSTALL_SELECT + " ORDER BY installs.started_at DESC LIMIT ?", (limit,),
         ).fetchall()

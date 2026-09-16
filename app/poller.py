@@ -9,6 +9,7 @@ logger = logging.getLogger("poller")
 
 STAGING_ROOT = os.environ.get("STAGING_ROOT", "/data/staging")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN") or None
+MAX_RELEASE_NOTES_CHARS = 20_000
 
 
 async def check_repo(repo_row) -> None:
@@ -82,10 +83,13 @@ async def check_repo(repo_row) -> None:
 
     os.replace(tmp_dest, final_path)
 
+    release_notes = (release.get("body") or "").strip()[:MAX_RELEASE_NOTES_CHARS] or None
+
     apk_id = db.insert_staged_apk(
         repo_id=repo_row["id"], tag=tag, filename=asset["name"],
         sha256=sha256, package_name=package_name,
         signer_sha256=signer_sha256, path=final_path,
+        release_notes=release_notes,
     )
     if apk_id is None:
         # Duplicate (repo_id, tag) — another poll beat us to it (shouldn't
