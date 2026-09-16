@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Repos — adb-server{% endblock %}
+{% block content %}
+<h1>Watched repos</h1>
+
+<form method="post" action="/repos" class="inline-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Owner <input type="text" name="owner" required placeholder="octocat"></label>
+  <label>Repo <input type="text" name="repo" required placeholder="hello-world"></label>
+  <label>Asset glob <input type="text" name="asset_glob" value="*.apk"></label>
+  <button type="submit">Add repo</button>
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th>Repo</th><th>Asset glob</th><th>Pinned package</th><th>Last tag</th>
+      <th>Last checked</th><th>Status</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in repos %}
+    <tr>
+      <td><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a></td>
+      <td>{{ r.asset_glob }}</td>
+      <td>{{ r.expected_package or "—" }}</td>
+      <td>{{ r.last_tag or "—" }}</td>
+      <td>{{ r.last_checked_at or "never" }}</td>
+      <td>{% if r.last_error %}<span class="flash-error">{{ r.last_error }}</span>{% else %}ok{% endif %}</td>
+      <td class="actions">
+        <form method="post" action="/repos/{{ r.id }}/check-now">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit">Check now</button>
+        </form>
+        <form method="post" action="/repos/{{ r.id }}/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7">No repos registered yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

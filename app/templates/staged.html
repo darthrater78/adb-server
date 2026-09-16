@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Staged APKs — adb-server{% endblock %}
+{% block content %}
+<h1>Staged APKs</h1>
+
+{% set trusted_devices = devices | selectattr("trusted") | list %}
+
+<table>
+  <thead>
+    <tr>
+      <th>Repo</th><th>Tag</th><th>File</th><th>Package</th><th>Signer SHA-256</th>
+      <th>Downloaded</th><th>Push to</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in apks %}
+    <tr>
+      <td>{{ a.owner }}/{{ a.repo }}</td>
+      <td>{{ a.tag }}</td>
+      <td>{{ a.filename }}</td>
+      <td>{{ a.package_name }}</td>
+      <td class="mono small">{{ a.signer_sha256[:16] }}…</td>
+      <td>{{ a.downloaded_at }}</td>
+      <td>
+        {% if trusted_devices %}
+        <form method="post" action="/push" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="apk_id" value="{{ a.id }}">
+          <select name="device_serial" required>
+            {% for d in trusted_devices %}
+            <option value="{{ d.serial }}">{{ d.nickname or d.serial }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Push</button>
+        </form>
+        {% else %}
+        <span class="muted">No trusted devices</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

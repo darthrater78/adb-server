@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Devices — adb-server{% endblock %}
+{% block content %}
+<h1>Devices</h1>
+
+<section>
+  <h2>Pair a new device</h2>
+  <p class="muted">
+    On the phone: Settings → Developer options → Wireless debugging → "Pair device with
+    pairing code" gives you a pairing address + 6-digit code. The main Wireless debugging
+    screen separately shows a connect address (ip:port) — enter both below.
+  </p>
+  <form method="post" action="/devices/pair" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Pairing address <input type="text" name="pairing_addr" placeholder="192.168.1.50:41235" required></label>
+    <label>Pairing code <input type="text" name="pairing_code" pattern="\d{6}" maxlength="6" required></label>
+    <label>Connect address <input type="text" name="connect_addr" placeholder="192.168.1.50:37251" required></label>
+    <button type="submit">Pair</button>
+  </form>
+</section>
+
+<table>
+  <thead>
+    <tr>
+      <th>Device</th><th>Serial</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in devices %}
+    <tr>
+      <td>
+        <form method="post" action="/devices/{{ d.serial }}/nickname" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="text" name="nickname" value="{{ d.nickname or '' }}" placeholder="nickname">
+          <button type="submit">Save</button>
+        </form>
+      </td>
+      <td class="mono small">{{ d.serial }}</td>
+      <td>
+        {% if d.trusted %}
+        <form method="post" action="/devices/{{ d.serial }}/trust" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="trusted" value="0">
+          <button type="submit">Trusted — revoke</button>
+        </form>
+        {% else %}
+        <form method="post" action="/devices/{{ d.serial }}/trust" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="trusted" value="1">
+          <button type="submit" class="danger">Not trusted — trust</button>
+        </form>
+        {% endif %}
+      </td>
+      <td>
+        <form method="post" action="/devices/{{ d.serial }}/connect" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="text" name="connect_addr" value="{{ d.last_connect_addr or '' }}" placeholder="ip:port">
+          <button type="submit">Reconnect</button>
+        </form>
+      </td>
+      <td>{{ d.last_seen_at or "never" }}</td>
+      <td>
+        <form method="post" action="/devices/{{ d.serial }}/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Forget</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">No devices paired yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

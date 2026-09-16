@@ -1,0 +1,308 @@
+import logging
+import os
+import sqlite3
+from contextlib import asynccontextmanager
+from urllib.parse import quote
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+import adb_client
+import auth
+import db
+import github_client
+import poller
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("adb_server")
+
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "10"))
+
+scheduler = AsyncIOScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.init_db()
+    scheduler.add_job(
+        poller.poll_all_repos, "interval",
+        minutes=POLL_INTERVAL_MINUTES, id="poll_all_repos",
+        max_instances=1, coalesce=True,
+    )
+    scheduler.start()
+    logger.info("Polling every %s minutes", POLL_INTERVAL_MINUTES)
+    yield
+    scheduler.shutdown(wait=False)
+
+
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; style-src 'self'; script-src 'none'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    )
+    return response
+
+
+def _tctx(session: dict | None = None, **extra) -> dict:
+    ctx = {}
+    if session is not None:
+        ctx["csrf_token"] = session.get("csrf", "")
+    ctx.update(extra)
+    return ctx
+
+
+def _check_csrf(request: Request, session: dict, csrf_token: str | None) -> None:
+    auth.require_csrf(request, session, csrf_token)
+
+
+def _redirect(path: str, status_code: int = 303, **params) -> RedirectResponse:
+    if params:
+        qs = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v is not None)
+        path = f"{path}?{qs}" if qs else path
+    return RedirectResponse(path, status_code=status_code)
+
+
+# ---- auth ----
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    if auth.read_session(request):
+        return RedirectResponse("/repos", status_code=303)
+    return templates.TemplateResponse(request, "login.html", _tctx())
+
+
+@app.post("/login")
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    auth.check_rate_limit(request)
+    if not auth.verify_credentials(username, password):
+        auth.record_failed_attempt(request)
+        return templates.TemplateResponse(
+            request, "login.html", _tctx(error="Invalid username or password"), status_code=401,
+        )
+    response = RedirectResponse("/repos", status_code=303)
+    auth.create_session(response)
+    return response
+
+
+@app.post("/logout")
+def logout(request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    response = RedirectResponse("/login", status_code=303)
+    auth.clear_session(response)
+    return response
+
+
+@app.get("/")
+def index():
+    return RedirectResponse("/repos", status_code=303)
+
+
+# ---- repos ----
+
+@app.get("/repos", response_class=HTMLResponse)
+def repos_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
+    return templates.TemplateResponse(
+        request, "repos.html", _tctx(session, repos=db.list_repos(), error=error, ok=ok),
+    )
+
+
+@app.post("/repos")
+def create_repo(
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    owner: str = Form(...),
+    repo: str = Form(...),
+    asset_glob: str = Form("*.apk"),
+):
+    _check_csrf(request, session, csrf_token)
+    owner, repo, asset_glob = owner.strip(), repo.strip(), asset_glob.strip() or "*.apk"
+    try:
+        github_client.validate_owner_repo(owner, repo)
+    except github_client.GithubError as exc:
+        return _redirect("/repos", error=str(exc))
+    try:
+        db.create_repo(owner, repo, asset_glob)
+    except sqlite3.IntegrityError:
+        return _redirect("/repos", error="That repo is already registered")
+    return _redirect("/repos", ok="Repo added")
+
+
+@app.post("/repos/{repo_id}/delete")
+def delete_repo(repo_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    db.delete_repo(repo_id)
+    return _redirect("/repos", ok="Repo removed")
+
+
+@app.post("/repos/{repo_id}/check-now")
+async def check_repo_now(repo_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    repo_row = db.get_repo(repo_id)
+    if repo_row is None:
+        raise HTTPException(status_code=404)
+    await poller.check_repo(repo_row)
+    return _redirect("/repos", ok="Checked")
+
+
+# ---- staged apks ----
+
+@app.get("/staged", response_class=HTMLResponse)
+def staged_page(request: Request, session: dict = Depends(auth.require_auth)):
+    return templates.TemplateResponse(
+        request, "staged.html", _tctx(session, apks=db.list_staged_apks(), devices=db.list_devices()),
+    )
+
+
+# ---- devices ----
+
+@app.get("/devices", response_class=HTMLResponse)
+def devices_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
+    return templates.TemplateResponse(
+        request, "devices.html", _tctx(session, devices=db.list_devices(), error=error, ok=ok),
+    )
+
+
+@app.post("/devices/pair")
+def pair_device(
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    pairing_addr: str = Form(...),
+    pairing_code: str = Form(...),
+    connect_addr: str = Form(...),
+):
+    _check_csrf(request, session, csrf_token)
+    try:
+        adb_client.pair(pairing_addr.strip(), pairing_code.strip())
+        adb_client.connect(connect_addr.strip())
+        serial = adb_client.get_serialno(connect_addr.strip())
+    except adb_client.AdbError as exc:
+        return _redirect("/devices", error=str(exc))
+    db.upsert_paired_device(serial, connect_addr.strip())
+    return _redirect("/devices", ok="Paired. Trust the device below before it can receive pushes")
+
+
+@app.post("/devices/{serial}/connect")
+def reconnect_device(
+    serial: str, request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), connect_addr: str = Form(...),
+):
+    _check_csrf(request, session, csrf_token)
+    device = db.get_device(serial)
+    if device is None:
+        raise HTTPException(status_code=404)
+    try:
+        adb_client.connect(connect_addr.strip())
+        confirmed_serial = adb_client.get_serialno(connect_addr.strip())
+    except adb_client.AdbError as exc:
+        return _redirect("/devices", error=str(exc))
+    if confirmed_serial != serial:
+        return _redirect("/devices", error="That address now answers as a different device - not updated")
+    db.touch_device(serial, connect_addr.strip())
+    return _redirect("/devices", ok="Reconnected")
+
+
+@app.post("/devices/{serial}/trust")
+def trust_device(
+    serial: str, request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), trusted: str = Form(...),
+):
+    _check_csrf(request, session, csrf_token)
+    if db.get_device(serial) is None:
+        raise HTTPException(status_code=404)
+    db.set_device_trusted(serial, trusted == "1")
+    return _redirect("/devices", ok="Updated")
+
+
+@app.post("/devices/{serial}/nickname")
+def nickname_device(
+    serial: str, request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), nickname: str = Form(""),
+):
+    _check_csrf(request, session, csrf_token)
+    if db.get_device(serial) is None:
+        raise HTTPException(status_code=404)
+    db.set_device_nickname(serial, nickname.strip()[:100] or None)
+    return _redirect("/devices", ok="Updated")
+
+
+@app.post("/devices/{serial}/delete")
+def delete_device(serial: str, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    db.delete_device(serial)
+    return _redirect("/devices", ok="Device forgotten")
+
+
+# ---- push ----
+
+@app.post("/push")
+def push(
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    device_serial: str = Form(...),
+    apk_id: int = Form(...),
+):
+    _check_csrf(request, session, csrf_token)
+
+    device = db.get_device(device_serial)
+    apk = db.get_staged_apk(apk_id)
+    if device is None or apk is None:
+        raise HTTPException(status_code=404)
+
+    # The actual security boundary: enforced here, server-side, not just by
+    # hiding the button in the UI.
+    if not device["trusted"]:
+        return _redirect("/staged", error="Device is not trusted")
+
+    install_id = db.insert_install(device_serial, apk_id, status="pending")
+
+    try:
+        # Wireless ADB serials drift with the device's address. Re-resolve and
+        # re-confirm identity immediately before installing rather than
+        # trusting whatever was true when the device was last paired.
+        if device["last_connect_addr"]:
+            adb_client.connect(device["last_connect_addr"])
+            confirmed = adb_client.get_serialno(device["last_connect_addr"])
+            if confirmed != device_serial:
+                raise adb_client.AdbError(
+                    "Device address now answers as a different serial — push aborted"
+                )
+
+        result = adb_client.install(device_serial, apk["path"])
+        log = (result.stdout or "") + (result.stderr or "")
+        status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
+        db.finish_install(install_id, status, log.strip()[:8000])
+    except adb_client.AdbError as exc:
+        db.finish_install(install_id, "failed", str(exc))
+        return _redirect("/staged", error=f"Push failed: {exc}")
+
+    return RedirectResponse("/installs", status_code=303)
+
+
+# ---- installs ----
+
+@app.get("/installs", response_class=HTMLResponse)
+def installs_page(request: Request, session: dict = Depends(auth.require_auth)):
+    return templates.TemplateResponse(request, "installs.html", _tctx(session, installs=db.list_installs()))

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}adb-server{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  {% if csrf_token is defined %}
+  <header>
+    <nav>
+      <a href="/repos">Repos</a>
+      <a href="/staged">Staged</a>
+      <a href="/devices">Devices</a>
+      <a href="/installs">Installs</a>
+    </nav>
+    <form method="post" action="/logout" class="logout-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Log out</button>
+    </form>
+  </header>
+  {% endif %}
+
+  <main>
+    {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
+    {% if ok %}<p class="flash flash-ok">{{ ok }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

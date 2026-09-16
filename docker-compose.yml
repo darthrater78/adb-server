@@ -1,0 +1,39 @@
+services:
+  adb-server:
+    build: ./adb-server
+    networks: [internal]
+    volumes:
+      - adbkeys:/home/adb/.android
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    # No ports published — reachable only from `app`, over the internal compose
+    # network. Never add `network_mode: host` here: the adb server binds all
+    # interfaces inside its own container (needed so `app` can reach it), and
+    # host networking would put that unauthenticated port directly on your LAN.
+
+  app:
+    build: ./app
+    networks: [internal]
+    depends_on: [adb-server]
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - appdata:/data
+    env_file: .env
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Bound to loopback only. To reach it from elsewhere on your LAN, put a
+    # reverse proxy (Tailscale serve, Caddy, etc.) with TLS in front — do not
+    # change this to "8080:8080" and expose it directly.
+
+networks:
+  internal:
+
+volumes:
+  adbkeys:
+  appdata:

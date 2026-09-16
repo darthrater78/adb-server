@@ -1,0 +1,131 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #666;
+  --border: #ddd;
+  --accent: #2563eb;
+  --danger: #b91c1c;
+  --ok: #15803d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --fg: #e6e6e6;
+    --muted: #9aa0a6;
+    --border: #333740;
+    --accent: #6ea8fe;
+    --danger: #f87171;
+    --ok: #4ade80;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  padding: 0 16px 40px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+  margin-bottom: 24px;
+}
+
+nav a {
+  margin-right: 16px;
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 600;
+}
+nav a:hover { color: var(--accent); }
+
+main { max-width: 1000px; margin: 0 auto; }
+
+h1 { font-size: 1.4rem; }
+h2 { font-size: 1.1rem; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 0.9rem;
+}
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+th { color: var(--muted); font-weight: 600; }
+
+.inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.actions { display: flex; gap: 8px; }
+
+form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  color: var(--muted);
+  gap: 2px;
+}
+
+input[type="text"], input[type="password"], select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+button {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+button.danger { background: var(--danger); border-color: var(--danger); }
+button:hover { opacity: 0.85; }
+
+.flash { padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; }
+.flash-ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.flash-error { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+
+.muted { color: var(--muted); font-size: 0.85rem; }
+.mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+.small { font-size: 0.8rem; }
+
+.status-success { color: var(--ok); font-weight: 600; }
+.status-failed { color: var(--danger); font-weight: 600; }
+.status-pending { color: var(--muted); font-weight: 600; }
+
+.log {
+  max-width: 320px;
+  max-height: 100px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+.login-box {
+  max-width: 320px;
+  margin: 80px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-box form { display: flex; flex-direction: column; gap: 12px; }
+
+section { margin-bottom: 24px; }

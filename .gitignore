@@ -1,0 +1,12 @@
+.claude/dev-skills-gates.md
+
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# runtime data (sqlite db, staged apks) — lives in a docker volume, not the repo
+data/
