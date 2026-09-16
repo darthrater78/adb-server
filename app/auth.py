@@ -102,7 +102,13 @@ def require_csrf(request: Request, session: dict, submitted_token: str | None) -
     if not submitted_token or not secrets.compare_digest(submitted_token, expected):
         raise HTTPException(status_code=403, detail="Missing or invalid CSRF token")
     origin = request.headers.get("origin")
-    if origin is None:
+    # "null" is a real, legitimate value browsers send (private/incognito mode,
+    # tracking-prevention settings, some redirect chains) — it means "opaque,
+    # can't tell you," not "the origin is literally null." Treat it the same
+    # as a missing header: can't verify, so don't block on it. The CSRF token
+    # check above is the actual defense; this is only additional signal when
+    # a browser gives us something concrete to compare.
+    if origin is None or origin == "null":
         return
     # With ALLOWED_ORIGIN unset, same-origin is derived from this request's own
     # Host header rather than skipped — otherwise this check would silently
