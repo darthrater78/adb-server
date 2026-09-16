@@ -131,14 +131,13 @@ def create_repo(
     request: Request,
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
-    owner: str = Form(...),
-    repo: str = Form(...),
+    repo_url: str = Form(...),
     asset_glob: str = Form("*.apk"),
 ):
     _check_csrf(request, session, csrf_token)
-    owner, repo, asset_glob = owner.strip(), repo.strip(), asset_glob.strip() or "*.apk"
+    asset_glob = asset_glob.strip() or "*.apk"
     try:
-        github_client.validate_owner_repo(owner, repo)
+        owner, repo = github_client.parse_repo_reference(repo_url)
     except github_client.GithubError as exc:
         return _redirect("/repos", error=str(exc))
     try:

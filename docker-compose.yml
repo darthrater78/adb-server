@@ -20,16 +20,19 @@ services:
     networks: [internal]
     depends_on: [adb-server]
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
     volumes:
       - appdata:/data
     env_file: .env
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    # Bound to loopback only. To reach it from elsewhere on your LAN, put a
-    # reverse proxy (Tailscale serve, Caddy, etc.) with TLS in front — do not
-    # change this to "8080:8080" and expose it directly.
+    # Bound to all interfaces — reachable from your LAN over plain HTTP. This
+    # is a deliberate, deferred trade-off, not an oversight: the login
+    # password and session cookie travel in cleartext to anyone else on the
+    # same network. If this stops being a "trusted home LAN" situation, put a
+    # reverse proxy (Caddy, Tailscale serve) with TLS in front instead, and
+    # go back to binding this to "127.0.0.1:8080:8080".
 
 networks:
   internal:

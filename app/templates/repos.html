@@ -5,8 +5,7 @@
 
 <form method="post" action="/repos" class="inline-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label>Owner <input type="text" name="owner" required placeholder="octocat"></label>
-  <label>Repo <input type="text" name="repo" required placeholder="hello-world"></label>
+  <label>Repo URL <input type="text" name="repo_url" required placeholder="https://github.com/octocat/hello-world" size="40"></label>
   <label>Asset glob <input type="text" name="asset_glob" value="*.apk"></label>
   <button type="submit">Add repo</button>
 </form>

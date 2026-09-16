@@ -102,5 +102,11 @@ def require_csrf(request: Request, session: dict, submitted_token: str | None) -
     if not submitted_token or not secrets.compare_digest(submitted_token, expected):
         raise HTTPException(status_code=403, detail="Missing or invalid CSRF token")
     origin = request.headers.get("origin")
-    if origin is not None and ALLOWED_ORIGIN is not None and origin != ALLOWED_ORIGIN:
+    if origin is None:
+        return
+    # With ALLOWED_ORIGIN unset, same-origin is derived from this request's own
+    # Host header rather than skipped — otherwise this check would silently
+    # accept any Origin, contradicting what .env.example documents.
+    allowed = ALLOWED_ORIGIN or f"{request.url.scheme}://{request.headers.get('host', '')}"
+    if origin != allowed:
         raise HTTPException(status_code=403, detail="Request Origin does not match this app")

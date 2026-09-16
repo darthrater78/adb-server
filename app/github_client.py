@@ -22,6 +22,35 @@ def validate_owner_repo(owner: str, repo: str) -> None:
         raise GithubError("Owner and repo may not be '.' or '..'")
 
 
+def parse_repo_reference(text: str) -> tuple[str, str]:
+    """Accepts anything reasonable for "the repo you mean": a GitHub URL (with
+    or without scheme, a .git suffix, or a trailing path like /releases), an
+    SSH remote (git@github.com:owner/repo.git), or a bare 'owner/repo'.
+    Returns a (owner, repo) pair already passed through validate_owner_repo."""
+    text = text.strip()
+    if not text:
+        raise GithubError("Enter a GitHub repo URL or owner/repo")
+
+    ssh_match = re.match(r"^git@github\.com:(.+)$", text, re.IGNORECASE)
+    if ssh_match:
+        path = ssh_match.group(1)
+    else:
+        path = re.sub(r"^https?://", "", text, flags=re.IGNORECASE)
+        path = re.sub(r"^(www\.)?github\.com/", "", path, flags=re.IGNORECASE)
+
+    path = path.strip("/")
+    if path.lower().endswith(".git"):
+        path = path[:-4]
+
+    parts = path.split("/")
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        raise GithubError("Could not find an owner/repo in that — try pasting the repo's GitHub URL")
+
+    owner, repo = parts[0], parts[1]
+    validate_owner_repo(owner, repo)
+    return owner, repo
+
+
 async def get_latest_release(owner: str, repo: str, token: str | None) -> dict:
     validate_owner_repo(owner, repo)
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
