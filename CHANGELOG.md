@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 — 2026-09-16
+
+- Push is now a background job: submitting a push redirects immediately to a
+  status page (`/installs/<id>`) that auto-refreshes (no JavaScript — CSP
+  stays `script-src 'none'`) and shows an animated progress bar through
+  pending → installing → success/failed. A crash mid-install now always
+  resolves the install row instead of leaving it stuck "installing" forever.
+- Staged APKs now capture and display each release's GitHub release notes
+  (new `release_notes` column, auto-migrated for existing databases).
+- Repos page gets a visual pass: status badges, tag pills, and a
+  watched/error-count summary line.
+- The running app version now shows in the page header, read from `VERSION`
+  at container build time.
+- Theme switcher: Flashbang (light), Dark, and OLED black, chosen via a
+  CSRF-protected form and stored as a plain cookie — no client-side JS. With
+  no preference set, the app still follows the OS `prefers-color-scheme` as
+  before.
+
 ## 0.1.0 — 2026-09-16
 
 Initial scaffold: two-container system (`adb-server` for the ADB protocol,

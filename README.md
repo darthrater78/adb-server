@@ -19,10 +19,12 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-The UI is bound to `127.0.0.1:8080` only. To reach it from elsewhere on your
-LAN, put a reverse proxy with TLS in front (Tailscale serve, Caddy, etc.) —
-don't change the port binding to expose it directly; see the comment in
-`docker-compose.yml`.
+The UI is bound to all interfaces (`0.0.0.0:8080`), reachable from your LAN
+over plain HTTP by default — a deliberate trade-off for a trusted home
+network, not an oversight (see the comment in `docker-compose.yml`). The
+login password and session cookie travel in cleartext to anyone else on that
+network. If that stops being acceptable, put a reverse proxy with TLS in
+front (Tailscale serve, Caddy, etc.) and rebind this to `127.0.0.1:8080`.
 
 ## Using it
 
@@ -34,9 +36,14 @@ don't change the port binding to expose it directly; see the comment in
    The main Wireless debugging screen separately shows a connect address.
    Enter both on the Devices page to pair. A newly paired device is **not
    trusted** by default — trust it explicitly before it can receive pushes.
-3. **Staged** — every verified release lands here. Push it to any trusted
-   device.
-4. **Installs** — history and logs of every push attempt.
+3. **Staged** — every verified release lands here, with the release notes
+   GitHub reports for it (if any). Push it to any trusted device.
+4. **Installs** — history and logs of every push attempt. A push runs in the
+   background; submitting one takes you to a live status page that updates
+   until the install finishes.
+
+Pick a color theme (Flashbang / Dark / OLED) from the header — it's saved as
+a cookie and otherwise follows your OS's light/dark preference.
 
 ## Release verification
 
