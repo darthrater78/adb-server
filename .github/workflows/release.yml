@@ -215,6 +215,9 @@ jobs:
             echo "::warning::No CHANGELOG.md section found for $version."
             notes="Release $version"
           fi
+          # The backticks below are literal Markdown code spans in the release
+          # notes, which is exactly why these format strings are single-quoted.
+          # shellcheck disable=SC2016
           {
             printf '%s\n\n' "$notes"
             printf '### Container images\n\n'

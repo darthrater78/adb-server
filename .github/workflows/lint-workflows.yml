@@ -42,4 +42,9 @@ jobs:
           tar xzf actionlint.tar.gz actionlint
 
       - name: Run actionlint
+        # actionlint shells out to shellcheck for `run:` blocks and silently
+        # skips that pass when shellcheck is not installed. The GitHub runner
+        # has it; a bare container may not, so a local run can come back clean
+        # on a workflow that fails here. Install shellcheck before trusting a
+        # local actionlint run.
         run: ./actionlint -color
