@@ -13,14 +13,28 @@ class AdbError(Exception):
     pass
 
 
+def _split_host_port(addr: str) -> tuple[str, str]:
+    """Splits host:port, including the bracketed [v6::addr]:port form that a
+    plain rpartition(':') would tear apart at the wrong colon."""
+    if addr.startswith("["):
+        host, sep, rest = addr[1:].partition("]")
+        if not sep or not rest.startswith(":"):
+            raise AdbError("IPv6 addresses must be written as [address]:port")
+        return host, rest[1:]
+    host, sep, port = addr.rpartition(":")
+    if not sep:
+        raise AdbError("Address must be in host:port form")
+    return host, port
+
+
 def _validate_addr(addr: str) -> str:
-    """Only literal IP:port on a private/loopback range — never passed to a shell,
+    """Only a literal IP:port on a private/loopback range — never passed to a shell,
     but still validated so a malformed value can't be misread as an adb option
     (anything starting with '-') or reach an address outside the LAN."""
     if not addr or addr.startswith("-"):
         raise AdbError("Invalid address")
-    host, sep, port = addr.rpartition(":")
-    if not sep or not host or not port:
+    host, port = _split_host_port(addr)
+    if not host or not port:
         raise AdbError("Address must be in host:port form")
     try:
         ip = ipaddress.ip_address(host)
@@ -76,6 +90,8 @@ def connect(connect_addr: str) -> str:
 def get_serialno(target: str) -> str:
     """`target` may be an ip:port (validated as an address) or an already-known
     device serial (validated as an opaque, non-flag token)."""
+    # A wireless serial is itself an address (ip:port); anything without a
+    # colon is an opaque USB-style serial.
     validated = _validate_addr(target) if ":" in target else _validate_serial(target)
     result = _run("-s", validated, "get-serialno", timeout=10)
     serial = result.stdout.strip()

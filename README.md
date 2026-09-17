@@ -16,6 +16,9 @@ Two containers over a private Docker network:
 ```bash
 cp .env.example .env
 # edit .env: set SECRET_KEY (openssl rand -hex 32), APP_USERNAME, APP_PASSWORD
+# if you'll open the UI at anything other than localhost — a LAN IP, a
+# Tailscale name — add it to ALLOWED_HOSTS in the same file, or the app
+# answers 400 to every request for an unlisted host
 docker compose up -d --build
 ```
 

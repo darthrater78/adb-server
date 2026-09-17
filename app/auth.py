@@ -30,14 +30,32 @@ _serializer = URLSafeTimedSerializer(SECRET_KEY, salt="adb-server-session")
 _failed_attempts: dict[str, list[float]] = {}
 MAX_ATTEMPTS = 5
 WINDOW_SECONDS = 300
+# Hard ceiling on tracked clients. Pruning used to happen only for the key
+# being looked at, so every source IP that ever failed a login stayed in the
+# dict forever.
+MAX_TRACKED_CLIENTS = 4096
 
 
 def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _sweep(now: float) -> None:
+    """Drop clients whose attempts have all aged out, then enforce a ceiling."""
+    for key in [k for k, ts in _failed_attempts.items() if not ts or now - ts[-1] >= WINDOW_SECONDS]:
+        del _failed_attempts[key]
+    excess = len(_failed_attempts) - MAX_TRACKED_CLIENTS
+    if excess > 0:
+        # Still over budget: evict least-recently-seen first. Losing a partial
+        # failure count for an idle client is the cheaper of the two failures.
+        oldest = sorted(_failed_attempts.items(), key=lambda kv: kv[1][-1])[:excess]
+        for key, _ in oldest:
+            del _failed_attempts[key]
+
+
 def check_rate_limit(request: Request) -> None:
     now = time.time()
+    _sweep(now)
     key = _client_key(request)
     attempts = [t for t in _failed_attempts.get(key, []) if now - t < WINDOW_SECONDS]
     _failed_attempts[key] = attempts
@@ -46,8 +64,9 @@ def check_rate_limit(request: Request) -> None:
 
 
 def record_failed_attempt(request: Request) -> None:
-    key = _client_key(request)
-    _failed_attempts.setdefault(key, []).append(time.time())
+    now = time.time()
+    _sweep(now)
+    _failed_attempts.setdefault(_client_key(request), []).append(now)
 
 
 def verify_credentials(username: str, password: str) -> bool:
@@ -97,17 +116,18 @@ def require_auth(request: Request) -> dict:
     return session
 
 
-def require_csrf(request: Request, session: dict, submitted_token: str | None) -> None:
-    expected = session.get("csrf", "")
-    if not submitted_token or not secrets.compare_digest(submitted_token, expected):
-        raise HTTPException(status_code=403, detail="Missing or invalid CSRF token")
+def check_origin(request: Request) -> None:
+    """Origin check for any state-changing POST. Shared with /login, which has
+    no session to carry a CSRF token yet and so had no cross-origin defence at
+    all."""
     origin = request.headers.get("origin")
     # "null" is a real, legitimate value browsers send (private/incognito mode,
     # tracking-prevention settings, some redirect chains) — it means "opaque,
     # can't tell you," not "the origin is literally null." Treat it the same
-    # as a missing header: can't verify, so don't block on it. The CSRF token
-    # check above is the actual defense; this is only additional signal when
-    # a browser gives us something concrete to compare.
+    # as a missing header: can't verify, so don't block on it. On session
+    # routes the CSRF token in require_csrf is the actual defence and this is
+    # extra signal; on /login, where there is no session yet, it is the only
+    # cross-origin check there is.
     if origin is None or origin == "null":
         return
     # With ALLOWED_ORIGIN unset, same-origin is derived from this request's own
@@ -116,3 +136,10 @@ def require_csrf(request: Request, session: dict, submitted_token: str | None) -
     allowed = ALLOWED_ORIGIN or f"{request.url.scheme}://{request.headers.get('host', '')}"
     if origin != allowed:
         raise HTTPException(status_code=403, detail="Request Origin does not match this app")
+
+
+def require_csrf(request: Request, session: dict, submitted_token: str | None) -> None:
+    expected = session.get("csrf", "")
+    if not submitted_token or not secrets.compare_digest(submitted_token, expected):
+        raise HTTPException(status_code=403, detail="Missing or invalid CSRF token")
+    check_origin(request)

@@ -47,7 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < VERSION)"
-          heading="$(grep -m1 '^## ' CHANGELOG.md)"
+          # First real version heading — an "## Unreleased" section is a
+          # normal in-progress state, not a mismatch.
+          heading="$(grep '^## ' CHANGELOG.md | grep -viE '^## \[?unreleased\]?' | head -1)"
           case "$heading" in
             "## $version"*|"## [$version]"*)
               echo "VERSION $version matches newest changelog heading: $heading" ;;

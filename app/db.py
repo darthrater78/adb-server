@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS installs (
     finished_at   TEXT,
     log           TEXT
 );
+
+-- Every foreign key these tables join on, plus the columns each listing
+-- sorts by. IF NOT EXISTS means this runs against an existing database on
+-- the next start, the same way the CREATE TABLEs do.
+CREATE INDEX IF NOT EXISTS idx_staged_apks_repo_id ON staged_apks(repo_id);
+CREATE INDEX IF NOT EXISTS idx_staged_apks_downloaded_at ON staged_apks(downloaded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_devices_paired_at ON devices(paired_at DESC);
+CREATE INDEX IF NOT EXISTS idx_installs_device_serial ON installs(device_serial);
+CREATE INDEX IF NOT EXISTS idx_installs_apk_id ON installs(apk_id);
+CREATE INDEX IF NOT EXISTS idx_installs_started_at ON installs(started_at DESC);
 """
 
 
@@ -215,7 +225,7 @@ def set_device_trusted(serial: str, trusted: bool) -> None:
         conn.execute("UPDATE devices SET trusted = ? WHERE serial = ?", (1 if trusted else 0, serial))
 
 
-def set_device_nickname(serial: str, nickname: str) -> None:
+def set_device_nickname(serial: str, nickname: str | None) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE devices SET nickname = ? WHERE serial = ?", (nickname, serial))
 

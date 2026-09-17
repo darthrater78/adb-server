@@ -1,7 +1,8 @@
 # Builds `adb` from Google's official, checksum-verified platform-tools release
 # rather than trusting a third-party pre-built image with the private key that
 # will end up holding every paired device's trust relationship.
-FROM debian:bookworm-slim AS fetch
+# Digest-pinned: a tag is mutable, and this image carries the adb identity key.
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS fetch
 
 ARG PLATFORM_TOOLS_URL=https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip
 ARG PLATFORM_TOOLS_SHA1=477254aa5f903c15cf51001717bdf347fb6b53e0
@@ -15,7 +16,7 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
     && unzip -q /tmp/platform-tools.zip -d /opt \
     && rm /tmp/platform-tools.zip
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin adb
 

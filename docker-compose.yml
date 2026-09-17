@@ -29,6 +29,11 @@ services:
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      # Everything this container writes belongs on the appdata volume. /tmp is
+      # still needed: apksigner runs under a JVM, which writes there.
+      - /tmp
     # Bound to all interfaces — reachable from your LAN over plain HTTP. This
     # is a deliberate, deferred trade-off, not an oversight: the login
     # password and session cookie travel in cleartext to anyone else on the

@@ -3,16 +3,32 @@ import hashlib
 import os
 import re
 import zipfile
+from urllib.parse import urlsplit
 
 import httpx
 
 OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 GITHUB_API = "https://api.github.com"
 MAX_ASSET_BYTES = 500 * 1024 * 1024  # 500 MB
+# Hosts the asset endpoint is allowed to hand us off to. Deliberately narrow
+# and fail-closed: the error names the host it refused, so a future GitHub CDN
+# change is a one-line edit here rather than an open-ended fetch of whatever a
+# Location header asks for.
+ALLOWED_REDIRECT_HOSTS = ("githubusercontent.com", "github.com")
 
 
 class GithubError(Exception):
     pass
+
+
+def _validated_redirect(url: str) -> str:
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        raise GithubError("Refusing to follow a non-HTTPS redirect for a release asset")
+    host = (parts.hostname or "").lower()
+    if not any(host == h or host.endswith(f".{h}") for h in ALLOWED_REDIRECT_HOSTS):
+        raise GithubError(f"Refusing to follow the asset redirect to unexpected host '{host}'")
+    return url
 
 
 def validate_owner_repo(owner: str, repo: str) -> None:
@@ -107,6 +123,7 @@ async def download_asset(asset: dict, dest_path: str, token: str | None) -> tupl
                     redirect_url = resp.headers.get("location")
                     if not redirect_url:
                         raise GithubError("GitHub returned a redirect with no Location header")
+                    redirect_url = _validated_redirect(redirect_url)
                 else:
                     resp.raise_for_status()
                     await _stream_to_file(resp)

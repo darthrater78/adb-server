@@ -26,7 +26,7 @@ POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "10"))
 
 def _read_version() -> str:
     try:
-        with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
+        with open(os.path.join(os.path.dirname(__file__), "VERSION"), encoding="utf-8") as f:
             return f.read().strip()
     except OSError:
         return "unknown"
@@ -47,6 +47,11 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     logger.info("Polling every %s minutes", POLL_INTERVAL_MINUTES)
+    # A request whose Host header is not in this list is rejected with a bare
+    # 400 by TrustedHostMiddleware, which looks like the app is broken rather
+    # than configured. Log the list so the cause is one glance away.
+    logger.info("Accepting requests for hosts: %s (set ALLOWED_HOSTS to add your LAN name or IP)",
+                ", ".join(ALLOWED_HOSTS))
     yield
     scheduler.shutdown(wait=False)
 
@@ -121,6 +126,9 @@ def login_submit(
     password: str = Form(...),
 ):
     auth.check_rate_limit(request)
+    # No session exists yet, so there is no CSRF token to compare — the Origin
+    # check is what stops a cross-site form from driving this endpoint.
+    auth.check_origin(request)
     if not auth.verify_credentials(username, password):
         auth.record_failed_attempt(request)
         return templates.TemplateResponse(

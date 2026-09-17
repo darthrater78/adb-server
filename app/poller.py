@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 
 import apk_verify
 import db
@@ -37,14 +38,27 @@ async def check_repo(repo_row) -> None:
 
     repo_dir = os.path.join(STAGING_ROOT, str(repo_row["id"]))
     os.makedirs(repo_dir, exist_ok=True)
-    tmp_dest = os.path.join(repo_dir, f"_download_{tag}")
+    # The tag is upstream-controlled and must never reach a path. Git allows
+    # '/' inside a ref name (release/1.0 is ordinary), which os.path.join
+    # turns into a subdirectory that does not exist — the download then dies
+    # on FileNotFoundError, which is not a GithubError and so escaped all the
+    # way out of the scheduled job. mkstemp also gives an unpredictable name
+    # (0600), closing the symlink race a fixed name leaves open.
+    fd, tmp_dest = tempfile.mkstemp(dir=repo_dir, prefix="_download_")
+    os.close(fd)
 
     try:
         sha256, _size = await github_client.download_asset(asset, tmp_dest, GITHUB_TOKEN)
     except github_client.GithubError as exc:
         logger.warning("%s: download failed: %s", label, exc)
         db.update_repo_check(repo_row["id"], last_error=f"Download failed: {exc}")
+        _discard(tmp_dest)
         return
+    except Exception:
+        # An HTTP error from the CDN is not a GithubError and is handled a
+        # level up — but the empty mkstemp file is ours to clean up either way.
+        _discard(tmp_dest)
+        raise
 
     final_path = os.path.join(repo_dir, f"{sha256}.apk")
 
@@ -52,7 +66,7 @@ async def check_repo(repo_row) -> None:
         signer_sha256 = apk_verify.verify_signature(tmp_dest)
         package_name = apk_verify.get_package_name(tmp_dest)
     except apk_verify.ApkVerifyError as exc:
-        os.remove(tmp_dest)
+        _discard(tmp_dest)
         logger.warning("%s: verification failed: %s", label, exc)
         db.update_repo_check(repo_row["id"], last_error=f"APK verification failed: {exc}")
         return
@@ -69,7 +83,7 @@ async def check_repo(repo_row) -> None:
             expected_package=package_name, signer_sha256=signer_sha256,
         )
     elif package_name != expected_package or signer_sha256 != expected_signer:
-        os.remove(tmp_dest)
+        _discard(tmp_dest)
         msg = (
             f"Pin mismatch: expected package '{expected_package}' signed by "
             f"{expected_signer}, got '{package_name}' signed by {signer_sha256}. "
@@ -101,6 +115,24 @@ async def check_repo(repo_row) -> None:
     logger.info("%s: staged %s (%s)", label, tag, asset["name"])
 
 
+def _discard(path: str) -> None:
+    """Remove a staging temp file, tolerating one that is already gone."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
 async def poll_all_repos() -> None:
     for repo_row in db.list_repos():
-        await check_repo(repo_row)
+        try:
+            await check_repo(repo_row)
+        except Exception:
+            # This loop is the scheduled job: an exception escaping here
+            # skipped every repo after this one, on every cycle, for as long
+            # as the offending repo stayed in the list.
+            logger.exception("%s/%s: check failed", repo_row["owner"], repo_row["repo"])
+            db.update_repo_check(
+                repo_row["id"],
+                last_error="Internal error while checking this repo — see server logs",
+            )
