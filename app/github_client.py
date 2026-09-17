@@ -2,14 +2,15 @@ import fnmatch
 import hashlib
 import os
 import re
-import zipfile
 from urllib.parse import urlsplit
 
 import httpx
 
+import apk_verify
+
 OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 GITHUB_API = "https://api.github.com"
-MAX_ASSET_BYTES = 500 * 1024 * 1024  # 500 MB
+MAX_ASSET_BYTES = apk_verify.MAX_APK_BYTES
 # Hosts the asset endpoint is allowed to hand us off to. Deliberately narrow
 # and fail-closed: the error names the host it refused, so a future GitHub CDN
 # change is a one-line edit here rather than an open-ended fetch of whatever a
@@ -134,14 +135,10 @@ async def download_asset(asset: dict, dest_path: str, token: str | None) -> tupl
                     resp2.raise_for_status()
                     await _stream_to_file(resp2)
 
-        with open(tmp_path, "rb") as f:
-            header = f.read(4)
-        if header != b"PK\x03\x04":
-            raise GithubError("Downloaded file is not a valid zip/APK")
-
-        with zipfile.ZipFile(tmp_path) as zf:
-            if "AndroidManifest.xml" not in zf.namelist():
-                raise GithubError("Downloaded file has no AndroidManifest.xml — not a valid APK")
+        try:
+            apk_verify.assert_apk_container(tmp_path)
+        except apk_verify.ApkVerifyError as exc:
+            raise GithubError(f"Downloaded {exc}") from exc
 
         digest = hasher.hexdigest()
         expected = asset.get("digest")  # e.g. "sha256:<hex>", not always present

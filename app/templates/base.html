@@ -38,6 +38,7 @@
 
   <main>
     {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
+    {% if warn %}<p class="flash flash-warn">{{ warn }}</p>{% endif %}
     {% if ok %}<p class="flash flash-ok">{{ ok }}</p>{% endif %}
     {% block content %}{% endblock %}
   </main>

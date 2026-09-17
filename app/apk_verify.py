@@ -1,5 +1,10 @@
 import re
 import subprocess
+import zipfile
+from typing import NamedTuple
+
+# One cap for any APK entering staging, wherever it came from.
+MAX_APK_BYTES = 500 * 1024 * 1024  # 500 MB
 
 # The default Android debug certificate is generated locally per machine (it is
 # NOT one fixed keypair everyone shares), so there is no single fingerprint to
@@ -12,8 +17,35 @@ class ApkVerifyError(Exception):
     pass
 
 
-def verify_signature(apk_path: str) -> str:
-    """Returns the signer certificate SHA-256 fingerprint(s), lowercase hex.
+class SignerInfo(NamedTuple):
+    """What the APK's signature says about it. `debug` is reported, not
+    enforced: the poller refuses a debug-signed release outright, while a
+    manual upload is allowed to be one and is marked instead. Keeping the
+    policy in the callers means the two paths can differ on purpose rather
+    than by accident."""
+
+    fingerprint: str
+    debug: bool
+
+
+def assert_apk_container(apk_path: str) -> None:
+    """Cheap structural check before handing a file to apksigner: it must be a
+    zip, and it must carry an AndroidManifest.xml. Shared by the poller and by
+    manual uploads so both reject the same things for the same reasons."""
+    with open(apk_path, "rb") as f:
+        if f.read(4) != b"PK\x03\x04":
+            raise ApkVerifyError("File is not a valid zip/APK")
+    try:
+        with zipfile.ZipFile(apk_path) as zf:
+            if "AndroidManifest.xml" not in zf.namelist():
+                raise ApkVerifyError("File has no AndroidManifest.xml — not a valid APK")
+    except zipfile.BadZipFile as exc:
+        raise ApkVerifyError(f"File is not a readable zip/APK: {exc}") from exc
+
+
+def verify_signature(apk_path: str) -> SignerInfo:
+    """Returns the signer certificate SHA-256 fingerprint(s), lowercase hex,
+    and whether any signer is the default Android debug certificate.
 
     An APK may carry more than one signer. Checking only the first left the
     remaining signers unexamined for the debug certificate and outside the
@@ -22,8 +54,8 @@ def verify_signature(apk_path: str) -> str:
     APK still returns one bare fingerprint, so pins written by earlier
     versions keep matching.
 
-    Raises if verification fails, the APK is unsigned, or any signer uses the
-    default Android debug certificate."""
+    Raises if verification fails or the APK is unsigned. A debug certificate
+    is reported via SignerInfo.debug, not raised on — see SignerInfo."""
     result = subprocess.run(
         ["apksigner", "verify", "--print-certs", apk_path],
         capture_output=True, text=True, timeout=60, check=False,
@@ -35,11 +67,7 @@ def verify_signature(apk_path: str) -> str:
 
     lines = result.stdout.splitlines()
 
-    for line in (l for l in lines if "certificate DN" in l):
-        if DEBUG_CERT_CN_RE.search(line):
-            raise ApkVerifyError(
-                "APK is signed with the default Android debug certificate (CN=Android Debug)"
-            )
+    debug = any(DEBUG_CERT_CN_RE.search(l) for l in lines if "certificate DN" in l)
 
     # "certificate SHA-256 digest", not any line containing "SHA-256 digest":
     # apksigner also prints a *public key* SHA-256 digest per signer, so the
@@ -55,7 +83,7 @@ def verify_signature(apk_path: str) -> str:
             raise ApkVerifyError("Unexpected apksigner output format for signer fingerprint")
         fingerprints.append(fingerprint)
 
-    return ",".join(sorted(set(fingerprints)))
+    return SignerInfo(fingerprint=",".join(sorted(set(fingerprints))), debug=debug)
 
 
 def get_package_name(apk_path: str) -> str:

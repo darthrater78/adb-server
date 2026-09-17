@@ -32,8 +32,10 @@ services:
     read_only: true
     tmpfs:
       # Everything this container writes belongs on the appdata volume. /tmp is
-      # still needed: apksigner runs under a JVM, which writes there.
-      - /tmp
+      # still needed: apksigner runs under a JVM, which writes there. Sized,
+      # because tmpfs is memory — uploads are spooled to the volume instead
+      # (see the tempfile.tempdir line in main.py), so nothing here is large.
+      - /tmp:size=64m
     # Bound to all interfaces — reachable from your LAN over plain HTTP. This
     # is a deliberate, deferred trade-off, not an oversight: the login
     # password and session cookie travel in cleartext to anyone else on the

@@ -52,21 +52,30 @@ async def check_repo(repo_row) -> None:
     except github_client.GithubError as exc:
         logger.warning("%s: download failed: %s", label, exc)
         db.update_repo_check(repo_row["id"], last_error=f"Download failed: {exc}")
-        _discard(tmp_dest)
+        discard_temp(tmp_dest)
         return
     except Exception:
         # An HTTP error from the CDN is not a GithubError and is handled a
         # level up — but the empty mkstemp file is ours to clean up either way.
-        _discard(tmp_dest)
+        discard_temp(tmp_dest)
         raise
 
     final_path = os.path.join(repo_dir, f"{sha256}.apk")
 
     try:
-        signer_sha256 = apk_verify.verify_signature(tmp_dest)
+        signer = apk_verify.verify_signature(tmp_dest)
+        if signer.debug:
+            # A polled release is staged unattended, so a debug-signed one is
+            # refused outright. Debug builds reach staging by manual upload,
+            # where an operator is present to see the warning.
+            raise apk_verify.ApkVerifyError(
+                "Release is signed with the default Android debug certificate "
+                "(CN=Android Debug). Upload it by hand if you meant to stage a debug build."
+            )
+        signer_sha256 = signer.fingerprint
         package_name = apk_verify.get_package_name(tmp_dest)
     except apk_verify.ApkVerifyError as exc:
-        _discard(tmp_dest)
+        discard_temp(tmp_dest)
         logger.warning("%s: verification failed: %s", label, exc)
         db.update_repo_check(repo_row["id"], last_error=f"APK verification failed: {exc}")
         return
@@ -83,7 +92,7 @@ async def check_repo(repo_row) -> None:
             expected_package=package_name, signer_sha256=signer_sha256,
         )
     elif package_name != expected_package or signer_sha256 != expected_signer:
-        _discard(tmp_dest)
+        discard_temp(tmp_dest)
         msg = (
             f"Pin mismatch: expected package '{expected_package}' signed by "
             f"{expected_signer}, got '{package_name}' signed by {signer_sha256}. "
@@ -115,7 +124,7 @@ async def check_repo(repo_row) -> None:
     logger.info("%s: staged %s (%s)", label, tag, asset["name"])
 
 
-def _discard(path: str) -> None:
+def discard_temp(path: str) -> None:
     """Remove a staging temp file, tolerating one that is already gone."""
     try:
         os.remove(path)

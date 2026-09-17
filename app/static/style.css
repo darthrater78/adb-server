@@ -7,6 +7,7 @@
   --accent: #2563eb;
   --danger: #b91c1c;
   --ok: #15803d;
+  --warn: #b45309;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -18,6 +19,7 @@
     --accent: #6ea8fe;
     --danger: #f87171;
     --ok: #4ade80;
+    --warn: #fbbf24;
   }
 }
 
@@ -34,6 +36,7 @@
   --accent: #2563eb;
   --danger: #b91c1c;
   --ok: #15803d;
+  --warn: #b45309;
 }
 :root[data-theme="dark"] {
   --bg: #14161a;
@@ -43,6 +46,7 @@
   --accent: #6ea8fe;
   --danger: #f87171;
   --ok: #4ade80;
+  --warn: #fbbf24;
 }
 :root[data-theme="oled"] {
   --bg: #000000;
@@ -52,6 +56,7 @@
   --accent: #6ea8fe;
   --danger: #f87171;
   --ok: #4ade80;
+  --warn: #fbbf24;
 }
 
 * { box-sizing: border-box; }
@@ -161,6 +166,7 @@ button:hover { opacity: 0.85; }
 .flash { padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; }
 .flash-ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
 .flash-error { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.flash-warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
 
 .muted { color: var(--muted); font-size: 0.85rem; }
 .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
@@ -179,6 +185,8 @@ button:hover { opacity: 0.85; }
   font-weight: 600;
 }
 .badge-ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.badge-neutral { background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted); cursor: help; }
+.badge-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); cursor: help; }
 .badge-error { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); cursor: help; }
 
 .tag-pill {

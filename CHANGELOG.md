@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Manual APK upload: stage a build directly from the Staged page without it
+  having to be a GitHub release. The signature must still verify and the
+  signer fingerprint is recorded; uploads are stored by content hash, so
+  re-uploading the same file is refused rather than duplicated.
+- Debug-signed APKs are now accepted on the upload path — staging a dev build
+  is the point of uploading by hand — and are flagged `Debug` in the Staged
+  list, with a warning shown when one is staged. A *polled* release that is
+  debug-signed is still refused: nothing is watching when the poller runs. An uploaded APK belongs to no
+  watched repo and so neither sets nor is checked against a repo's
+  package/signer pin — `staged_apks.repo_id` is now nullable, migrated
+  automatically for existing databases.
+- Security and quality audit fixes: the upstream release tag no longer reaches
+  a filesystem path (a tag containing `/` previously stopped the poll loop for
+  every repo after it), APK verification now covers every signer rather than
+  only the first, the login rate limiter no longer grows without bound,
+  `/login` gets an Origin check, base images are pinned by digest, the app
+  container runs read-only, IPv6 device addresses parse, and the database has
+  indexes on the columns it joins and sorts by.
+
 ## 0.2.0 — 2026-09-16
 
 - Push is now a background job: submitting a push redirects immediately to a

@@ -21,7 +21,16 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE TABLE IF NOT EXISTS staged_apks (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_id       INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    -- NULL for a manually uploaded APK: it has no upstream repo to belong to,
+    -- and the operator who uploaded it is its provenance. UNIQUE(repo_id, tag)
+    -- below therefore does not constrain uploads, since SQLite treats NULLs in
+    -- a unique index as distinct.
+    repo_id       INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+    source        TEXT NOT NULL DEFAULT 'github',
+    -- Signed with the default Android debug certificate. Only ever 1 for an
+    -- uploaded APK: a polled release that is debug-signed is refused, never
+    -- staged.
+    is_debug      INTEGER NOT NULL DEFAULT 0,
     tag           TEXT NOT NULL,
     filename      TEXT NOT NULL,
     sha256        TEXT NOT NULL,
@@ -56,6 +65,10 @@ CREATE TABLE IF NOT EXISTS installs (
 -- sorts by. IF NOT EXISTS means this runs against an existing database on
 -- the next start, the same way the CREATE TABLEs do.
 CREATE INDEX IF NOT EXISTS idx_staged_apks_repo_id ON staged_apks(repo_id);
+-- The same file uploaded twice is the same APK; identical content from two
+-- different repos is not our business to collapse, so this is upload-only.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_staged_apks_upload_sha256
+    ON staged_apks(sha256) WHERE source = 'upload';
 CREATE INDEX IF NOT EXISTS idx_staged_apks_downloaded_at ON staged_apks(downloaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_devices_paired_at ON devices(paired_at DESC);
 CREATE INDEX IF NOT EXISTS idx_installs_device_serial ON installs(device_serial);
@@ -82,10 +95,97 @@ def get_conn():
 
 def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    # Runs first: the rebuild below drops and recreates staged_apks, which
+    # would take the SCHEMA indexes with it if they had already been created.
+    _migrate_staged_apks_shape()
     with get_conn() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
         _migrate(conn)
+
+
+_STAGED_APKS_COLUMNS = (
+    "id, repo_id, source, is_debug, tag, filename, sha256, package_name, "
+    "signer_sha256, path, downloaded_at, release_notes"
+)
+
+# Columns added since the first release, as (name, definition). Applied with
+# ALTER TABLE ADD COLUMN before any table rebuild, so the rebuild's column
+# list is present on both sides of the copy.
+_ADDED_COLUMNS = (
+    ("source", "TEXT NOT NULL DEFAULT 'github'"),
+    ("is_debug", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
+def _migrate_staged_apks_shape() -> None:
+    """Brings an existing staged_apks up to the current shape: a `source`
+    column, and a `repo_id` that admits NULL for manual uploads.
+
+    SQLite cannot drop a NOT NULL constraint in place, so the documented
+    workaround is to rebuild the table. Done on its own autocommit connection
+    because PRAGMA foreign_keys cannot be changed inside a transaction, and
+    with an explicit row count check before the old table is dropped."""
+    if not os.path.exists(DB_PATH):
+        return
+
+    conn = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'staged_apks'"
+        ).fetchone()
+        if table is None:
+            return
+
+        info = list(conn.execute("PRAGMA table_info(staged_apks)"))
+        columns = {row["name"] for row in info}
+        for name, definition in _ADDED_COLUMNS:
+            if name not in columns:
+                conn.execute(f"ALTER TABLE staged_apks ADD COLUMN {name} {definition}")
+
+        repo_id_is_not_null = any(row["name"] == "repo_id" and row["notnull"] for row in info)
+        if not repo_id_is_not_null:
+            return
+
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            before = conn.execute("SELECT COUNT(*) AS n FROM staged_apks").fetchone()["n"]
+            conn.execute("""
+                CREATE TABLE staged_apks_new (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    repo_id       INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+                    source        TEXT NOT NULL DEFAULT 'github',
+                    is_debug      INTEGER NOT NULL DEFAULT 0,
+                    tag           TEXT NOT NULL,
+                    filename      TEXT NOT NULL,
+                    sha256        TEXT NOT NULL,
+                    package_name  TEXT NOT NULL,
+                    signer_sha256 TEXT NOT NULL,
+                    path          TEXT NOT NULL,
+                    downloaded_at TEXT NOT NULL,
+                    release_notes TEXT,
+                    UNIQUE(repo_id, tag)
+                )
+            """)
+            conn.execute(
+                f"INSERT INTO staged_apks_new ({_STAGED_APKS_COLUMNS}) "
+                f"SELECT {_STAGED_APKS_COLUMNS} FROM staged_apks"
+            )
+            after = conn.execute("SELECT COUNT(*) AS n FROM staged_apks_new").fetchone()["n"]
+            if after != before:
+                raise RuntimeError(f"staged_apks rebuild copied {after} of {before} rows — rolled back")
+            conn.execute("DROP TABLE staged_apks")
+            conn.execute("ALTER TABLE staged_apks_new RENAME TO staged_apks")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
+    finally:
+        conn.close()
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -148,22 +248,32 @@ def update_repo_check(
 # ---- staged apks ----
 
 def insert_staged_apk(
-    repo_id: int, tag: str, filename: str, sha256: str,
+    repo_id: int | None, tag: str, filename: str, sha256: str,
     package_name: str, signer_sha256: str, path: str,
-    release_notes: str | None = None,
+    release_notes: str | None = None, source: str = "github", is_debug: bool = False,
 ) -> int | None:
+    """Returns None when the row already exists — a duplicate (repo_id, tag)
+    for a polled release, or a re-upload of a file already staged."""
     with get_conn() as conn:
         try:
             cur = conn.execute(
                 """INSERT INTO staged_apks
-                   (repo_id, tag, filename, sha256, package_name, signer_sha256, path,
-                    downloaded_at, release_notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (repo_id, tag, filename, sha256, package_name, signer_sha256, path, now(), release_notes),
+                   (repo_id, source, is_debug, tag, filename, sha256, package_name,
+                    signer_sha256, path, downloaded_at, release_notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (repo_id, source, 1 if is_debug else 0, tag, filename, sha256, package_name,
+                 signer_sha256, path, now(), release_notes),
             )
             return cur.lastrowid
         except sqlite3.IntegrityError:
             return None
+
+
+def get_uploaded_apk_by_sha256(sha256: str) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM staged_apks WHERE sha256 = ? AND source = 'upload'", (sha256,),
+        ).fetchone()
 
 
 def list_staged_apks(repo_id: int | None = None) -> list[sqlite3.Row]:
@@ -171,13 +281,13 @@ def list_staged_apks(repo_id: int | None = None) -> list[sqlite3.Row]:
         if repo_id is not None:
             return conn.execute(
                 """SELECT staged_apks.*, repos.owner, repos.repo
-                   FROM staged_apks JOIN repos ON repos.id = staged_apks.repo_id
+                   FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
                    WHERE repo_id = ? ORDER BY downloaded_at DESC""",
                 (repo_id,),
             ).fetchall()
         return conn.execute(
             """SELECT staged_apks.*, repos.owner, repos.repo
-               FROM staged_apks JOIN repos ON repos.id = staged_apks.repo_id
+               FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
                ORDER BY downloaded_at DESC"""
         ).fetchall()
 
@@ -186,7 +296,7 @@ def get_staged_apk(apk_id: int) -> sqlite3.Row | None:
     with get_conn() as conn:
         return conn.execute(
             """SELECT staged_apks.*, repos.owner, repos.repo
-               FROM staged_apks JOIN repos ON repos.id = staged_apks.repo_id
+               FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
                WHERE staged_apks.id = ?""",
             (apk_id,),
         ).fetchone()
@@ -274,7 +384,7 @@ _INSTALL_SELECT = """
     FROM installs
     JOIN devices ON devices.serial = installs.device_serial
     JOIN staged_apks ON staged_apks.id = installs.apk_id
-    JOIN repos ON repos.id = staged_apks.repo_id
+    LEFT JOIN repos ON repos.id = staged_apks.repo_id
 """
 
 

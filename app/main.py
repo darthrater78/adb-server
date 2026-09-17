@@ -1,17 +1,21 @@
+import hashlib
 import logging
 import os
+import re
 import sqlite3
+import tempfile
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import adb_client
+import apk_verify
 import auth
 import db
 import github_client
@@ -40,6 +44,13 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    # Starlette spools multipart file parts through tempfile. The container's
+    # /tmp is a small tmpfs (memory), so a large APK upload would be held in
+    # RAM; point tempfile at the data volume instead. Assigning tempdir is the
+    # documented override and beats TMPDIR, which gettempdir() caches.
+    spool_dir = os.path.join(os.path.dirname(db.DB_PATH), "tmp")
+    os.makedirs(spool_dir, exist_ok=True)
+    tempfile.tempdir = spool_dir
     scheduler.add_job(
         poller.poll_all_repos, "interval",
         minutes=POLL_INTERVAL_MINUTES, id="poll_all_repos",
@@ -225,11 +236,123 @@ async def check_repo_now(repo_id: int, request: Request, session: dict = Depends
 
 # ---- staged apks ----
 
+UPLOAD_DIR = os.path.join(poller.STAGING_ROOT, "uploads")
+MAX_UPLOAD_BYTES = apk_verify.MAX_APK_BYTES
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+
+
+class UploadRejected(Exception):
+    """Something the operator can fix, reported as a flash message rather than
+    an error page."""
+
+
+def _display_filename(raw: str | None) -> str:
+    """The client-supplied filename is display text and nothing else — the
+    stored path is always <sha256>.apk under UPLOAD_DIR. Reduced to a basename
+    and a conservative character set so it cannot be read as a path anywhere
+    it is later rendered, logged, or copied."""
+    name = os.path.basename((raw or "").replace("\\", "/").strip())
+    name = _UNSAFE_NAME_CHARS.sub("_", name).lstrip(".")[:120]
+    return name or "upload.apk"
+
+
+def _receive_upload(upload: UploadFile, tmp_path: str) -> tuple[str, int]:
+    """Streams the upload to tmp_path under a size cap, returning its
+    (sha256, size). Chunked rather than .read() so a 500MB APK never has to
+    exist in memory."""
+    hasher = hashlib.sha256()
+    total = 0
+    with open(tmp_path, "wb") as out:
+        while chunk := upload.file.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise UploadRejected(f"APK exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB size cap")
+            hasher.update(chunk)
+            out.write(chunk)
+    if total == 0:
+        raise UploadRejected("That file was empty — nothing was uploaded")
+    return hasher.hexdigest(), total
+
+
 @app.get("/staged", response_class=HTMLResponse)
-def staged_page(request: Request, session: dict = Depends(auth.require_auth)):
+def staged_page(
+    request: Request, session: dict = Depends(auth.require_auth),
+    error: str | None = None, ok: str | None = None, warn: str | None = None,
+):
     return templates.TemplateResponse(
-        request, "staged.html", _tctx(request, session, apks=db.list_staged_apks(), devices=db.list_devices()),
+        request, "staged.html",
+        _tctx(request, session, apks=db.list_staged_apks(), devices=db.list_devices(),
+              error=error, ok=ok, warn=warn, max_upload_mb=MAX_UPLOAD_BYTES // (1024 * 1024)),
     )
+
+
+@app.post("/staged/upload")
+def upload_apk(
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    apk: UploadFile = File(...),
+    label: str = Form(""),
+):
+    """Stages an APK the operator supplies directly. A manual upload has no
+    upstream repo, so it neither reads nor writes a repo's package/signer pin
+    — the operator is its provenance. The signature still has to verify and
+    the signer fingerprint is recorded, so what got pushed stays auditable.
+
+    Unlike a polled release, a debug-signed upload is allowed: staging a dev
+    build is the point of uploading by hand. It is flagged on the row and
+    warned about on the way in, because a debug certificate is generated
+    locally per machine and proves nothing about who built the APK.
+
+    Defined as a sync function on purpose: Starlette runs it in a threadpool,
+    keeping apksigner and aapt off the event loop the poller shares."""
+    _check_csrf(request, session, csrf_token)
+
+    display_name = _display_filename(apk.filename)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=UPLOAD_DIR, prefix="_upload_")
+    os.close(fd)
+
+    try:
+        digest, _size = _receive_upload(apk, tmp_path)
+        apk_verify.assert_apk_container(tmp_path)
+        signer = apk_verify.verify_signature(tmp_path)
+        package_name = apk_verify.get_package_name(tmp_path)
+    except (UploadRejected, apk_verify.ApkVerifyError) as exc:
+        poller.discard_temp(tmp_path)
+        logger.warning("upload rejected (%s): %s", display_name, exc)
+        return _redirect("/staged", error=str(exc))
+    except Exception:
+        poller.discard_temp(tmp_path)
+        raise
+
+    existing = db.get_uploaded_apk_by_sha256(digest)
+    if existing is not None:
+        poller.discard_temp(tmp_path)
+        return _redirect("/staged", error=f"That exact APK is already staged as \"{existing['filename']}\"")
+
+    final_path = os.path.join(UPLOAD_DIR, f"{digest}.apk")
+    os.replace(tmp_path, final_path)
+
+    apk_id = db.insert_staged_apk(
+        repo_id=None, tag=(label.strip() or display_name)[:120], filename=display_name,
+        sha256=digest, package_name=package_name, signer_sha256=signer.fingerprint,
+        path=final_path, source="upload", is_debug=signer.debug,
+    )
+    if apk_id is None:
+        # Another upload of the same file won the race. final_path is that
+        # row's file too — identical content, same name — so leave it.
+        return _redirect("/staged", error="That exact APK is already staged")
+
+    logger.info("staged upload %s (%s, sha256 %s, debug=%s)",
+                display_name, package_name, digest[:12], signer.debug)
+    if signer.debug:
+        return _redirect("/staged", warn=(
+            f"Staged {display_name} ({package_name}) — signed with the default Android "
+            "debug certificate. A debug certificate is generated locally per machine, so it "
+            "identifies nobody: only push this to a device you are testing on."
+        ))
+    return _redirect("/staged", ok=f"Staged {display_name} ({package_name})")
 
 
 # ---- devices ----

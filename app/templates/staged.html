@@ -3,6 +3,24 @@
 {% block content %}
 <h1>Staged APKs</h1>
 
+<form method="post" action="/staged/upload" enctype="multipart/form-data" class="inline-form panel">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>APK file
+    <input type="file" name="apk" accept=".apk,application/vnd.android.package-archive" required>
+  </label>
+  <label>Label
+    <input type="text" name="label" placeholder="optional — defaults to the filename" size="28">
+  </label>
+  <button type="submit">Upload &amp; stage</button>
+</form>
+<p class="muted">
+  An uploaded APK must still carry a valid signature, and its signer is
+  recorded. A debug-signed build is accepted here — unlike a polled release,
+  which is refused — and marked <span class="badge badge-warn">Debug</span> in
+  the list. It belongs to no watched repo, so it neither sets nor is checked
+  against a repo's pin. Maximum {{ max_upload_mb }}MB.
+</p>
+
 {% set trusted_devices = devices | selectattr("trusted") | list %}
 
 <table>
@@ -15,10 +33,19 @@
   <tbody>
     {% for a in apks %}
     <tr>
-      <td>{{ a.owner }}/{{ a.repo }}</td>
+      <td>
+        {% if a.owner %}{{ a.owner }}/{{ a.repo }}
+        {% else %}<span class="badge badge-neutral" title="Uploaded by hand — no upstream repo">Uploaded</span>
+        {% endif %}
+      </td>
       <td>{{ a.tag }}</td>
       <td>{{ a.filename }}</td>
-      <td>{{ a.package_name }}</td>
+      <td>
+        {{ a.package_name }}
+        {% if a.is_debug %}
+        <span class="badge badge-warn" title="Signed with the default Android debug certificate — identifies nobody">Debug</span>
+        {% endif %}
+      </td>
       <td class="mono small">{{ a.signer_sha256[:16] }}…</td>
       <td>{{ a.downloaded_at }}</td>
       <td>
@@ -49,7 +76,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
+    <tr><td colspan="8">Nothing staged yet — add a repo and wait for the next poll, use "Check now", or upload an APK above.</td></tr>
     {% endfor %}
   </tbody>
 </table>
