@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Docs: the README quickstart no longer needs a clone. It creates the
+  directories, generates `.env` from a copy-paste block (session key, login,
+  and `ALLOWED_HOSTS` set to the server's IP and hostname, which fixes
+  "Invalid host header" on a LAN IP), and gives `compose.yaml` to save next
+  to it.
+- Changed: `docker-compose.yml` is now `compose.yaml`. It pulls the published
+  images, pinned to the release (`ghcr.io/darthrater78/adb-server/*:3.0.0`),
+  sets fixed container names, and keeps one comment line per setting at the
+  bottom. Building from a checkout moved to `compose.build.yaml`
+  (`docker compose -f compose.yaml -f compose.build.yaml up -d --build`).
+
 ## 3.0.0 — 2026-09-23
 
 - **Breaking:** removed QR-code pairing and the `mdns` container it needed.

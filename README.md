@@ -39,7 +39,7 @@ up.*
 
 ## How it fits together
 
-Two containers, defined in `docker-compose.yml`, neither on the host network:
+Two containers, defined in `compose.yaml`, neither on the host network:
 
 | Container | What it does | Network |
 |---|---|---|
@@ -53,48 +53,164 @@ Two containers, defined in `docker-compose.yml`, neither on the host network:
 
 ## Quickstart
 
-```bash
-cp .env.example .env
-chmod 600 .env                 # it holds the session key and your password
-# edit .env: SECRET_KEY (openssl rand -hex 32), APP_USERNAME, APP_PASSWORD,
-# and ALLOWED_HOSTS (the name or IP you'll browse to)
+Everything lives in one directory, `/opt/docker/adb-server`:
 
-# Data is bind-mounted from /opt/docker/adb-server (edit docker-compose.yml to
-# change it). The containers run as uid 10001, so the directories must be theirs.
-sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata}
-sudo chown -R 10001:10001 /opt/docker/adb-server
-sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
-
-docker compose up -d --build
+```
+/opt/docker/adb-server/
+├── compose.yaml   ← you create it (step 3)
+├── .env           ← you create it (step 2); must sit next to compose.yaml
+├── adbkeys/       ← data: the adb key (owned by uid 10001)
+└── appdata/       ← data: the database and staged APKs (owned by uid 10001)
 ```
 
-> **Upgrading from 1.x?** 1.x kept its data in named Docker volumes. Copy them
-> into the new directories *before* `docker compose up`, or the adb key (and
-> with it every phone pairing) and the database are lost. `<project>` is the
-> compose project name, usually the checkout's folder name
-> (`docker volume ls` shows it):
+`compose.yaml` finds `.env` in its own directory, so those two always stay
+together. The data folders can live anywhere. If you keep them somewhere else,
+change the left side of each `volumes:` line, and leave `.env` next to
+`compose.yaml`.
+
+**1. Create the directories.** The top directory is yours; the two data
+folders belong to uid 10001, the user the containers run as:
+
+```bash
+sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata} && sudo chown "$USER": /opt/docker/adb-server && sudo chown 10001:10001 /opt/docker/adb-server/{adbkeys,appdata} && sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata} && cd /opt/docker/adb-server
+```
+
+**2. Create `.env`.** First run this line on its own. It asks for the username
+and password you'll sign in with, so the password stays out of your shell
+history:
+
+```bash
+read -rp 'Username: ' ADB_USER && read -rsp 'Password: ' ADB_PASS && echo
+```
+
+Then paste this block. It writes `.env` next to where `compose.yaml` will go,
+generates the session key, and allows the server's IP and hostname as
+addresses to browse to:
+
+```bash
+cat > /opt/docker/adb-server/.env <<EOF
+SECRET_KEY=$(openssl rand -hex 32)
+APP_USERNAME='$ADB_USER'
+APP_PASSWORD='$ADB_PASS'
+ALLOWED_HOSTS=localhost,$(hostname -I | awk '{print $1}'),$(hostname)
+COOKIE_SECURE=false
+EOF
+chmod 600 /opt/docker/adb-server/.env && unset ADB_PASS && grep ALLOWED_HOSTS /opt/docker/adb-server/.env
+```
+
+Check the `ALLOWED_HOSTS` line it printed. What each setting does:
+
+| Setting | What it's for |
+|---|---|
+| `SECRET_KEY` | Signs the session cookies. Changing it signs everyone out. |
+| `APP_USERNAME`, `APP_PASSWORD` | Your sign-in. Placeholders like `admin` or `changeme` are refused as passwords. Don't use `'` in the password. |
+| `ALLOWED_HOSTS` | Every name or IP you'll type in the address bar, without `http://` or a port. If yours isn't listed, every page shows only **Invalid host header**. Add any other name, such as `adb.home.lan`, with a comma. |
+| `COOKIE_SECURE` | `false` for plain `http://<IP>:8080`, or the browser drops the session cookie and sign-in silently fails. Behind a TLS proxy, set it to `true` and add `ALLOWED_ORIGIN=https://<your-name>`. |
+
+Everything else has a working default ([Configuration](#configuration)). After
+editing `.env`, run `docker compose up -d` again: `docker compose restart`
+doesn't re-read it.
+
+**3. Create `compose.yaml`** in `/opt/docker/adb-server`, next to `.env`:
+
+```yaml
+services:
+  adb-server:
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.0.0
+    container_name: adb-server
+    hostname: adbserver
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - /opt/docker/adb-server/adbkeys:/home/adb/.android
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "adb", "-P", "5037", "devices"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  app:
+    image: ghcr.io/darthrater78/adb-server/app:3.0.0
+    container_name: adb-server-app
+    restart: unless-stopped
+    depends_on:
+      - adb-server
+    env_file: .env
+    ports:
+      - "8080:8080"
+    networks:
+      - internal
+    volumes:
+      - /opt/docker/adb-server/appdata:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+      - /home/appuser/.android:size=1m,uid=10001,gid=10001,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  internal:
+
+# image: both pinned to this release (3.0.0), updated with every release
+# hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
+# adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
+# env_file: .env holds the login, session key and ALLOWED_HOSTS (see Quickstart). chmod 600 it
+# ALLOWED_HOSTS must list the name or IP in your address bar, or every page is "Invalid host header"
+# ports: 8080 is the web UI over plain HTTP. Behind a TLS proxy, bind "127.0.0.1:8080:8080"
+# /opt/docker/adb-server/adbkeys: the adb key every paired phone trusts. Back it up, keep it private
+# /opt/docker/adb-server/appdata: the database and staged APKs. Back this directory up
+# adbkeys and appdata must be owned by uid 10001 (the containers' user), or they can't write to them
+# read_only + tmpfs: /tmp is scratch for apksigner; ~/.android is needed by the adb client, holds no keys
+```
+
+**4. Start it:** `docker compose up -d`, from `/opt/docker/adb-server`. To
+build the images yourself instead, see [Development](#development).
+
+> **Upgrading from a checkout (1.x or 2.x)?** Earlier releases ran from a
+> clone of this repo with `docker compose up -d --build`. Do step 1, then
+> stop the old stack from the checkout and move its `.env` over instead of
+> doing step 2:
 >
 > ```bash
-> docker compose down
-> sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata}
+> docker compose down --remove-orphans
+> cp .env /opt/docker/adb-server/.env && chmod 600 /opt/docker/adb-server/.env
+> ```
+>
+> **From 1.x**, also copy the named volumes into the new directories *before*
+> the first `docker compose up`, or the adb key (and with it every phone
+> pairing) and the database are lost. `<project>` is the old compose project
+> name, usually the checkout's folder name (`docker volume ls` shows it):
+>
+> ```bash
 > docker run --rm -v <project>_adbkeys:/src -v /opt/docker/adb-server/adbkeys:/dst alpine cp -a /src/. /dst/
 > docker run --rm -v <project>_appdata:/src -v /opt/docker/adb-server/appdata:/dst alpine cp -a /src/. /dst/
-> sudo chown -R 10001:10001 /opt/docker/adb-server
-> sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
-> docker compose up -d --build
+> sudo chown -R 10001:10001 /opt/docker/adb-server/{adbkeys,appdata}
 > ```
 >
 > Remove the old volumes only once the phones still show up as paired.
-
-> **Upgrading from 2.x?** 3.0 drops the `mdns` container and QR pairing, so
-> nothing runs on the host network any more. Pull the new compose file, then
-> remove the orphaned container and its directory. Paired phones and the
-> database are untouched:
 >
-> ```bash
-> docker compose up -d --build --remove-orphans
-> sudo rm -rf /opt/docker/adb-server/mdns
-> ```
+> **From 2.x**, 3.0 drops the `mdns` container and QR pairing, so nothing runs
+> on the host network any more. Remove its directory; paired phones and the
+> database are untouched: `sudo rm -rf /opt/docker/adb-server/mdns`.
+>
+> Then carry on with steps 3 and 4.
 
 Then open `http://<server>:8080`, sign in, and:
 
@@ -109,7 +225,7 @@ Then open `http://<server>:8080`, sign in, and:
 > for `http://<LAN-IP>:8080` set `COOKIE_SECURE=false`. The better setup is
 > TLS: put a reverse proxy (Caddy, Tailscale Serve, …) in front, keep
 > `COOKIE_SECURE=true`, set `ALLOWED_ORIGIN=https://<your-name>`, and bind the
-> app to `127.0.0.1:8080` in `docker-compose.yml`.
+> app to `127.0.0.1:8080` in `compose.yaml`.
 
 <img src="docs/screenshots/login.png" alt="Sign-in page" width="640">
 
@@ -535,7 +651,8 @@ before release, with a regression test that fails without the fix. See
 
 ## Configuration
 
-All settings live in `.env` (copy `.env.example`).
+All settings live in `.env`, next to `compose.yaml`. Quickstart step 2
+creates it with the required ones; [`.env.example`](.env.example) lists them all.
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -563,6 +680,13 @@ bash scripts/test.sh
 
 The tests stub out GitHub, `adb`, `apksigner` and `aapt`, so they need no
 Android tooling and no device.
+
+To run the stack from your own build instead of the published images,
+`compose.build.yaml` layers the two `build:` sections over `compose.yaml`:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
 
 CI (`.github/workflows/ci.yml`) runs on every push and PR. It runs the same
 test script, checks that `VERSION` matches `CHANGELOG.md`, validates the
