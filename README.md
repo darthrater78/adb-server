@@ -59,6 +59,13 @@ cp .env.example .env
 chmod 600 .env                 # it holds the session key and your password
 # edit .env: SECRET_KEY (openssl rand -hex 32), APP_USERNAME, APP_PASSWORD,
 # and ALLOWED_HOSTS (the name or IP you'll browse to)
+
+# Data is bind-mounted from /opt/docker/adb-server (edit docker-compose.yml to
+# change it). The containers run as uid 10001, so the directories must be theirs.
+sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,mdns}
+sudo chown -R 10001:10001 /opt/docker/adb-server
+sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
+
 docker compose up -d --build
 ```
 
@@ -437,7 +444,7 @@ below).
   private compose network. Never put `adb-server` on `network_mode: host`.
 - **Least privilege everywhere.** All three containers run as a non-root user
   (uid 10001) with `cap_drop: [ALL]`, `no-new-privileges`, and a **read-only
-  root filesystem**. Writable paths are only the data volumes and small
+  root filesystem**. Writable paths are only the data bind mounts and small
   tmpfs mounts.
 - **The `mdns` sidecar** is the only container on host networking. It only
   listens, holds no keys, opens no port of its own besides mDNS, and reaches
@@ -451,13 +458,13 @@ below).
 
 | Data | Where | Protection |
 |---|---|---|
-| adb private key (every paired phone trusts it) | `adbkeys` volume | Only `adb-server` mounts it |
-| Database: repos, devices, audit log, settings | `appdata` volume (`/data/app.db`) | Only `app` mounts it |
-| TOTP secret, notification service URLs | In the database | **Not encrypted.** Same protection as `.env` and the volume. |
+| adb private key (every paired phone trusts it) | `/opt/docker/adb-server/adbkeys` | Only `adb-server` mounts it |
+| Database: repos, devices, audit log, settings | `/opt/docker/adb-server/appdata` (`app.db`) | Only `app` mounts it |
+| TOTP secret, notification service URLs | In the database | **Not encrypted.** Same protection as `.env` and the data directory. |
 | Recovery codes, trusted-browser tokens | In the database | SHA-256 hashes only |
 | `SECRET_KEY`, password, `GITHUB_TOKEN` | `.env` | Keep it `chmod 600`. It's gitignored and excluded from image builds. |
 
-Anyone who can read the `appdata` or `adbkeys` volumes, or `.env`, can act as
+Anyone who can read the `appdata` or `adbkeys` directories, or `.env`, can act as
 this server. Back those up, and protect the backups the same way.
 
 ### Supply chain and CI
@@ -484,7 +491,7 @@ this server. Back those up, and protect the backups the same way.
 - [ ] Use a fine-grained, read-only `GITHUB_TOKEN`, or none for public repos.
 - [ ] Pair with a code (not QR) when you want to review a device before
       trusting it.
-- [ ] Back up the `appdata` and `adbkeys` volumes, and protect the backups.
+- [ ] Back up the `appdata` and `adbkeys` directories, and protect the backups.
 - [ ] Review the **Audit** page from time to time, and the Repos page whenever
       a signing change is flagged.
 
