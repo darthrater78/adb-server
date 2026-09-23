@@ -17,7 +17,9 @@ SIGNER = "d" * 64
 def _apk_bytes(marker: str = "x") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("AndroidManifest.xml", marker)
+        # A fixed timestamp: writestr(name) stamps the current time, so two
+        # calls straddling a 2-second tick would hash differently.
+        z.writestr(zipfile.ZipInfo("AndroidManifest.xml", date_time=(2020, 1, 1, 0, 0, 0)), marker)
     return buf.getvalue()
 
 
