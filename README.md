@@ -69,6 +69,24 @@ sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
 docker compose up -d --build
 ```
 
+> **Upgrading from 1.x?** 1.x kept its data in named Docker volumes. Copy them
+> into the new directories *before* `docker compose up`, or the adb key (and
+> with it every phone pairing) and the database are lost. `<project>` is the
+> compose project name, usually the checkout's folder name
+> (`docker volume ls` shows it):
+>
+> ```bash
+> docker compose down
+> sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,mdns}
+> docker run --rm -v <project>_adbkeys:/src -v /opt/docker/adb-server/adbkeys:/dst alpine cp -a /src/. /dst/
+> docker run --rm -v <project>_appdata:/src -v /opt/docker/adb-server/appdata:/dst alpine cp -a /src/. /dst/
+> sudo chown -R 10001:10001 /opt/docker/adb-server
+> sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
+> docker compose up -d --build
+> ```
+>
+> Remove the old volumes only once the phones still show up as paired.
+
 Then open `http://<server>:8080`, sign in, and:
 
 1. **Settings → Security**: turn on two-factor sign-in.

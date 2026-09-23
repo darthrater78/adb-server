@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 — 2026-09-23
 
 - **Breaking:** data now lives in bind mounts under `/opt/docker/adb-server`
   (`adbkeys`, `appdata`, `mdns`) instead of named volumes. Before recreating
@@ -11,6 +11,8 @@
   and the same for `appdata`. `mdns` needs no copy.
 - Changed: the explanatory comments in `docker-compose.yml` moved to a Notes
   block after the services, so the compose block itself is clean.
+- Fixed: a test that could fail at random (its sample APK carried the current
+  time, so two copies made a second apart were not identical).
 
 ## 1.0.0 — 2026-09-23
 
