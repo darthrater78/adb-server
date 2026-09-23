@@ -1,12 +1,12 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.0.0](https://github.com/darthrater78/adb-server/releases/tag/v3.0.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.1.0](https://github.com/darthrater78/adb-server/releases/tag/v3.1.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
 Android devices you've explicitly trusted.
 
-![Status page: every watched app against every trusted device](docs/screenshots/status.png)
+![Status: every device with the apps pushed to it](docs/screenshots/status.png)
 
 - **Watches GitHub releases** and downloads matching APKs as soon as they're
   published, including per-ABI builds and, if you ask, pre-releases.
@@ -35,7 +35,7 @@ up.*
 - [Security](#security)
 - [Configuration](#configuration)
 - [Development](#development)
-- [Non-goals](#non-goals-v1)
+- [Non-goals](#non-goals)
 
 ## How it fits together
 
@@ -53,29 +53,27 @@ Two containers, defined in `compose.yaml`, neither on the host network:
 
 ## Quickstart
 
-Everything lives in one directory, `/opt/docker/adb-server`:
+The stack uses two places, which are often in different directories:
 
-```
-/opt/docker/adb-server/
-├── compose.yaml   ← you create it (step 3)
-├── .env           ← you create it (step 2); must sit next to compose.yaml
-├── adbkeys/       ← data: the adb key (owned by uid 10001)
-└── appdata/       ← data: the database and staged APKs (owned by uid 10001)
-```
+| Where | What's in it | Example |
+|---|---|---|
+| **Stack directory** | `compose.yaml` and `.env`, always side by side | Wherever you keep compose files, e.g. `~/stacks/adb-server` |
+| **Data directory** | `adbkeys/` (the adb key every paired phone trusts) and `appdata/` (the database and staged APKs) | `/opt/docker/adb-server`, as in the `volumes:` lines below |
 
-`compose.yaml` finds `.env` in its own directory, so those two always stay
-together. The data folders can live anywhere. If you keep them somewhere else,
-change the left side of each `volumes:` line, and leave `.env` next to
-`compose.yaml`.
+`compose.yaml` reads `.env` from its own directory, so `.env` goes wherever
+`compose.yaml` goes, never into the data directory. To keep the data somewhere
+other than `/opt/docker/adb-server`, change the left side of both `volumes:`
+lines.
 
-**1. Create the directories.** The top directory is yours; the two data
-folders belong to uid 10001, the user the containers run as:
+**1. Create the data directories.** They belong to uid 10001, the user the
+containers run as:
 
 ```bash
-sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata} && sudo chown "$USER": /opt/docker/adb-server && sudo chown 10001:10001 /opt/docker/adb-server/{adbkeys,appdata} && sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata} && cd /opt/docker/adb-server
+sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata} && sudo chown 10001:10001 /opt/docker/adb-server/{adbkeys,appdata} && sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
 ```
 
-**2. Create `.env`.** First run this line on its own. It asks for the username
+**2. Create `.env` in the stack directory.** `cd` into it first (create it if
+it doesn't exist yet). Then run this line on its own. It asks for the username
 and password you'll sign in with, so the password stays out of your shell
 history:
 
@@ -83,19 +81,19 @@ history:
 read -rp 'Username: ' ADB_USER && read -rsp 'Password: ' ADB_PASS && echo
 ```
 
-Then paste this block. It writes `.env` next to where `compose.yaml` will go,
-generates the session key, and allows the server's IP and hostname as
-addresses to browse to:
+Then paste this block. It writes `.env` into the current directory, generates
+the session key, and allows the server's IP and hostname as addresses to
+browse to:
 
 ```bash
-cat > /opt/docker/adb-server/.env <<EOF
+cat > .env <<EOF
 SECRET_KEY=$(openssl rand -hex 32)
 APP_USERNAME='$ADB_USER'
 APP_PASSWORD='$ADB_PASS'
 ALLOWED_HOSTS=localhost,$(hostname -I | awk '{print $1}'),$(hostname)
 COOKIE_SECURE=false
 EOF
-chmod 600 /opt/docker/adb-server/.env && unset ADB_PASS && grep ALLOWED_HOSTS /opt/docker/adb-server/.env
+chmod 600 .env && unset ADB_PASS && grep ALLOWED_HOSTS .env
 ```
 
 Check the `ALLOWED_HOSTS` line it printed. What each setting does:
@@ -108,15 +106,15 @@ Check the `ALLOWED_HOSTS` line it printed. What each setting does:
 | `COOKIE_SECURE` | `false` for plain `http://<IP>:8080`, or the browser drops the session cookie and sign-in silently fails. Behind a TLS proxy, set it to `true` and add `ALLOWED_ORIGIN=https://<your-name>`. |
 
 Everything else has a working default ([Configuration](#configuration)). After
-editing `.env`, run `docker compose up -d` again: `docker compose restart`
+editing `.env`, run `docker compose up -d` again. `docker compose restart`
 doesn't re-read it.
 
-**3. Create `compose.yaml`** in `/opt/docker/adb-server`, next to `.env`:
+**3. Create `compose.yaml` in the stack directory**, next to `.env`:
 
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.0.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.1.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -138,7 +136,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.0.0
+    image: ghcr.io/darthrater78/adb-server/app:3.1.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,10 +166,10 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.0.0), updated with every release
+# image: both pinned to this release (3.1.0), updated with every release
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
-# env_file: .env holds the login, session key and ALLOWED_HOSTS (see Quickstart). chmod 600 it
+# env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
 # ALLOWED_HOSTS must list the name or IP in your address bar, or every page is "Invalid host header"
 # ports: 8080 is the web UI over plain HTTP. Behind a TLS proxy, bind "127.0.0.1:8080:8080"
 # /opt/docker/adb-server/adbkeys: the adb key every paired phone trusts. Back it up, keep it private
@@ -180,43 +178,17 @@ networks:
 # read_only + tmpfs: /tmp is scratch for apksigner; ~/.android is needed by the adb client, holds no keys
 ```
 
-**4. Start it:** `docker compose up -d`, from `/opt/docker/adb-server`. To
-build the images yourself instead, see [Development](#development).
+**4. Start it:** `docker compose up -d` from the stack directory. To build the
+images yourself instead, see [Development](#development).
 
-> **Upgrading from a checkout (1.x or 2.x)?** Earlier releases ran from a
-> clone of this repo with `docker compose up -d --build`. Do step 1, then
-> stop the old stack from the checkout and move its `.env` over instead of
-> doing step 2:
->
-> ```bash
-> docker compose down --remove-orphans
-> cp .env /opt/docker/adb-server/.env && chmod 600 /opt/docker/adb-server/.env
-> ```
->
-> **From 1.x**, also copy the named volumes into the new directories *before*
-> the first `docker compose up`, or the adb key (and with it every phone
-> pairing) and the database are lost. `<project>` is the old compose project
-> name, usually the checkout's folder name (`docker volume ls` shows it):
->
-> ```bash
-> docker run --rm -v <project>_adbkeys:/src -v /opt/docker/adb-server/adbkeys:/dst alpine cp -a /src/. /dst/
-> docker run --rm -v <project>_appdata:/src -v /opt/docker/adb-server/appdata:/dst alpine cp -a /src/. /dst/
-> sudo chown -R 10001:10001 /opt/docker/adb-server/{adbkeys,appdata}
-> ```
->
-> Remove the old volumes only once the phones still show up as paired.
->
-> **From 2.x**, 3.0 drops the `mdns` container and QR pairing, so nothing runs
-> on the host network any more. Remove its directory; paired phones and the
-> database are untouched: `sudo rm -rf /opt/docker/adb-server/mdns`.
->
-> Then carry on with steps 3 and 4.
+Then open `http://<server>:8080` and sign in. The home page walks you through
+the rest:
 
-Then open `http://<server>:8080`, sign in, and:
+1. **Sources**: watch the GitHub repos you want to follow, or upload an APK.
+2. **Devices**: pair your phone with its pairing code, and trust it.
+3. **Install**: push an app to it.
 
-1. **Settings → Security**: turn on two-factor sign-in.
-2. **Repos**: add the GitHub repos you want to follow.
-3. **Devices**: pair your phone with its pairing code, and trust it.
+Then turn on two-factor sign-in under **Settings → Security**.
 
 > **Plain HTTP or TLS?** Out of the box the UI is served over plain HTTP on
 > all interfaces. That's a deliberate trade-off for a trusted home network
@@ -231,71 +203,59 @@ Then open `http://<server>:8080`, sign in, and:
 
 ## Features
 
+The app follows the order you use it in: **Status · Sources · Devices ·
+Install · Settings**.
+
 ### Status: the home page
 
-Every watched app against every trusted device: the installed version, the
-latest staged version, and an **Update** or **Install** button. The button
-picks the right APK for that device's CPU and asks you to confirm first.
-**Refresh installed versions** asks each device what it has now; versions also
-refresh after every push. When a release has notes, a link takes you to them.
+One card per device, with everything pushed to it: each watched app's
+installed version against the latest staged one, with an **Update** or
+**Install** button, and anything you uploaded and pushed by hand. The button
+picks the right APK for that device's CPU and asks you to confirm first. Each
+card also lists the device's last few installs. **Refresh installed versions**
+asks each device what it has now; versions also refresh after every push.
+Untrusted devices are shown, but offer nothing to push.
 
 **Auto-update** is set per app and per device. When it's on, each newly staged
 release is pushed to that device automatically. This only works for trusted
 devices, and a device that already has that version or a newer one is skipped.
 
-<p>
-  <img src="docs/screenshots/status-dark.png" alt="Status page, dark theme" width="640">
-  <img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
-</p>
+Until you've added a source, trusted a device and installed something, the
+page shows a setup checklist instead.
 
-### Repos
+<img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
 
-Add a GitHub repo as a URL, `owner/repo` or an SSH remote, plus an asset glob
-(default `*.apk`). Repos are polled every `POLL_INTERVAL_MINUTES` (default 10).
-**Check now** checks immediately, in the background. Pre-releases are ignored
-unless you choose **Include pre-releases** for that repo. Polls use
-conditional requests (ETags), so an unchanged repo doesn't use up GitHub's
-rate limit.
+### Sources: repos and uploads
 
-When a release is signed by a different certificate than the pinned one, a
-**Signing change** panel shows both certificates and whether the new APK
-proves the rotation (see [Release verification](#release-verification)).
+Everything APKs come from, on one page.
 
-![Repos page with a signing-key change awaiting review](docs/screenshots/repos.png)
+**Watch a GitHub repo** as a URL, `owner/repo` or an SSH remote, plus an asset
+glob (default `*.apk`). Repos are polled every `POLL_INTERVAL_MINUTES`
+(default 10). **Check now** checks immediately, in the background.
+Pre-releases are ignored unless you turn **Pre-releases** on for that repo.
+Polls use conditional requests (ETags), so an unchanged repo doesn't use up
+GitHub's rate limit. When a release is signed by a different certificate than
+the pinned one, a **Signing change** panel shows both certificates and whether
+the new APK proves the rotation (see [Release verification](#release-verification)).
 
-### Staged APKs
-
-Every verified release lands here. When a release has several APKs that match
-the glob (per-ABI builds such as `arm64-v8a`, `armeabi-v7a` or universal), all
-of them are staged, up to 6. A push refuses an APK the device's CPU can't run.
-Release notes open in a full-width panel under their APK.
-
-Only the newest `KEEP_RELEASES_PER_REPO` releases per repo (default 3) are
-kept on disk. Older ones are deleted automatically, and you can delete any
-file by hand. Install history is kept either way.
-
-![Staged APKs, including a manually uploaded debug build](docs/screenshots/staged.png)
-
-### Upload a development build
-
-The **Upload** page stages an APK directly (up to 500 MB), for builds that
-aren't published as GitHub releases. Its signature must still verify, and its
-signer is recorded. It belongs to no watched repo, so it neither sets nor is
-checked against a repo's pin: you, the uploader, are its provenance. Uploads
-may be debug-signed. Staging a dev build is the point of this page, and such
-builds are marked **debug build** for as long as they stay staged. If the
+**Upload an APK** (up to 500 MB) for builds that aren't published as GitHub
+releases. Its signature must still verify, and its signer is recorded. It
+belongs to no watched repo, so it neither sets nor is checked against a repo's
+pin: you, the uploader, are its provenance. Uploads may be debug-signed, and
+such builds are marked **debug build** for as long as they stay staged. If the
 upload's package matches a watched repo but its signer doesn't, you're warned
 that Android will refuse one over the other. Re-uploading a file that's
 already staged is refused.
 
-![Upload page](docs/screenshots/upload.png)
+![Sources: add a repo or upload an APK, with a signing-key change awaiting review](docs/screenshots/sources.png)
 
 ### Devices
 
-**Pair**: on the phone, open Settings → Developer options → Wireless
-debugging → *Pair device with pairing code*, then enter the pairing address and 6-digit code the phone
-shows, plus its connect address. A device paired this way starts **untrusted**.
-Trust it explicitly before it can receive pushes.
+Follow the steps at the top of the page. On the phone, open Settings →
+Developer options → Wireless debugging → *Pair device with pairing code*, then
+enter the pairing address and 6-digit code the phone shows, plus its connect
+address. A new device starts **untrusted**: press **Trust** before it can
+receive pushes.
 
 The connect port changes whenever wireless debugging restarts. Before every
 push, the app reconnects to the device. If the stored port is dead, it scans
@@ -305,29 +265,43 @@ accepts a port only if the device there reports the **same hardware serial**.
 **Reconnect** with its new address. Nicknames, trust and forgetting a device
 are all on this page. Phones list this server as `@adbserver`.
 
-<p>
-  <img src="docs/screenshots/devices.png" alt="Devices page" width="640">
-</p>
+![Devices: the pairing steps and the device list](docs/screenshots/devices.png)
 
-### Installs
+### Install
+
+Every verified APK, one card per app. Pick a trusted device and **Push**: for
+a watched repo, the newest release is pushed, in the build that fits the
+device's CPU. When a release has several APKs that match the glob (per-ABI
+builds such as `arm64-v8a`, `armeabi-v7a` or universal), all of them are
+staged, up to 6. Release notes open under the card. **All builds and older
+versions** lists every staged file, to push a specific one or delete it.
+
+Only the newest `KEEP_RELEASES_PER_REPO` releases per repo (default 3) are
+kept on disk. Older ones are deleted automatically. Install history is kept
+either way.
+
+![Install: every app with its latest version and a push button](docs/screenshots/install.png)
 
 Every push runs in the background. Submitting one takes you to a live status
 page that refreshes until the install finishes, including `adb`'s own output.
-The **Installs** page keeps the full history.
+
+![A failed push, with adb's output](docs/screenshots/install-status.png)
+
+### Activity: install history and audit log
+
+Both are under **Settings → Activity**. **Install history** keeps every push
+and its log.
+
+**Audit log**: logins (including failed ones and how the second step was
+passed), two-factor changes, trust changes, signer re-pins, repo and device
+changes, uploads, auto-update toggles, pushes and notification changes, each
+with the client IP. The newest 5000 entries are kept. Secrets are never
+written to it.
 
 <p>
-  <img src="docs/screenshots/install-status.png" alt="A failed push, with adb's output" width="640">
   <img src="docs/screenshots/installs.png" alt="Install history" width="640">
+  <img src="docs/screenshots/audit.png" alt="Audit log" width="640">
 </p>
-
-### Audit log
-
-Logins (including failed ones and how the second step was passed), two-factor
-changes, trust changes, signer re-pins, repo and device changes, uploads,
-auto-update toggles, pushes and notification changes, each with the client IP.
-The newest 5000 entries are kept. Secrets are never written to it.
-
-![Audit log](docs/screenshots/audit.png)
 
 ### Notifications
 
@@ -409,7 +383,7 @@ answers a bare "Invalid host header", the name you browsed to isn't in
 
 - **Trust on first use, then pinned.** The first release staged for a repo
   pins its **package name** and **signing certificate SHA-256**. Every later
-  release must match both. A mismatch is rejected and shown on the Repos page.
+  release must match both. A mismatch is rejected and shown on the Sources page.
   It is never skipped silently and never trusted automatically. This stops a
   compromised upstream account, or a malicious asset uploaded to someone
   else's release, from reaching your devices unnoticed.
@@ -421,7 +395,7 @@ answers a bare "Invalid host header", the name you browsed to isn't in
   debug-signed release never becomes a pin.
 - **One release, one identity.** Every APK in a release must share the same
   package and signer, or the whole release is rejected.
-- **Signing-key rotation** is a reviewed decision. The Repos page shows both
+- **Signing-key rotation** is a reviewed decision. The Sources page shows both
   certificates and whether the new APK carries an APK Signature Scheme v3
   proof-of-rotation linking it to the pinned key. Accepting the new
   certificate re-pins the repo and stages that release. The acceptance is
@@ -528,11 +502,6 @@ below).
 - **Identity is the hardware serial** (`ro.serialno`), not the address. Before
   every push the app reconnects and confirms the serial. It never pushes to
   whatever happens to answer on an old address.
-- **Upgrading older records.** Devices paired before 1.0 were stored under
-  their `ip:port`. They're upgraded to their serial the first time they're
-  found. Re-pairing one keeps its nickname and history, but **clears trust**,
-  because the same IP isn't proof of the same phone. An old record is never
-  merged into a different phone that already has its own record.
 - **Narrow network reach.** Device addresses must be literal IPs on private or
   loopback ranges (never hostnames, never public IPs), and they're checked so
   they can't be read as `adb` options. A port scan only ever touches the last
@@ -614,7 +583,7 @@ this server. Back those up, and protect the backups the same way.
 - [ ] `chmod 600 .env`.
 - [ ] Use a fine-grained, read-only `GITHUB_TOKEN`, or none for public repos.
 - [ ] Back up the `appdata` and `adbkeys` directories, and protect the backups.
-- [ ] Review the **Audit** page from time to time, and the Repos page whenever
+- [ ] Review the **Audit log** (Settings → Activity) from time to time, and Sources whenever
       a signing change is flagged.
 
 ### Known limitations and accepted risks
@@ -639,10 +608,9 @@ maintainer directly.
 
 ### Security review
 
-The whole codebase was reviewed from top to bottom for 1.0.0 (2026-09-23):
-routes, authentication and two-factor, sessions and CSRF, uploads, APK
-verification, GitHub access, device identity and pushes, QR pairing and the
-mDNS sidecar (both removed in 3.0.0), containers, CI and dependencies.
+The whole codebase has been reviewed from top to bottom: routes,
+authentication and two-factor, sessions and CSRF, uploads, APK verification,
+GitHub access, device identity and pushes, containers, CI and dependencies.
 `bandit` reports only reviewed false positives (constant SQL fragments, and
 `subprocess` with argument lists and validated input). `pip-audit` is clean, every pin is the latest release,
 and Dependabot has no open alerts. Everything the review found was fixed
@@ -651,8 +619,8 @@ before release, with a regression test that fails without the fix. See
 
 ## Configuration
 
-All settings live in `.env`, next to `compose.yaml`. Quickstart step 2
-creates it with the required ones; [`.env.example`](.env.example) lists them all.
+All settings live in `.env`, in the stack directory next to `compose.yaml`.
+Quickstart step 2 creates it with the required ones; [`.env.example`](.env.example) lists them all.
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -695,7 +663,7 @@ compose file, audits the dependencies and builds both images. Pushing a
 to `ghcr.io/darthrater78/adb-server/{app,adb-server}` and creates the
 GitHub release, but only for a commit CI already passed.
 
-## Non-goals (v1)
+## Non-goals
 
 - Multi-user accounts or roles.
 - Push-to-all: one device per push (auto-update covers the rest).

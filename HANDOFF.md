@@ -16,7 +16,7 @@
 - Local checkout is on `main`, in sync. Uncommitted, on purpose:
   `.claude/dev-skills-gates.md` (carries the v2.0.0 SHIP ✅ line; folds into
   the next release PR — never a bookkeeping-only PR).
-- 319 tests pass. No system pytest: run them in a container (`python:3.13-slim`,
+- 321 tests pass. No system pytest: run them in a container (`python:3.13-slim`,
   `pip install -r requirements-dev.txt`, `bash scripts/test.sh`) or a venv.
 - Private vulnerability reporting is enabled on the repo (README points at it).
 
@@ -55,12 +55,16 @@ session must ask again.
 **Lessons:**
 - The auto-mode permission check blocks creating `main` / changing the default
   branch from here — hand those to the user.
-- Screenshots: throwaway compose project `adbshots` with `env_file: !reset []`
-  (never the real `.env`), fresh volumes, seeded by piping a script into
-  `docker compose exec -T app python -`; capture with
-  `mcr.microsoft.com/playwright/python:v1.62.0-jammy` (`--network host`).
-  Rewrite `172.*` client IPs in the DB before shooting Audit/Settings.
-  Take them once, after all UI changes.
+- Screenshots: **Dark theme** (user rule: never Flashbang). Throwaway project
+  from `compose.yaml` + `compose.build.yaml` + a scratch override
+  (`env_file: !reset []`, `volumes: !override` to scratch dirs owned by 10001,
+  own `container_name`s and port), seeded by piping a script into
+  `docker exec -i <app> python -`; capture with
+  `mcr.microsoft.com/playwright/python:v1.62.0-jammy` (`--network host`), a
+  `theme=dark` cookie on every context. Enabling 2FA for the MFA shots adds
+  audit rows: `mfa_admin.py reset` before a rerun, and delete the extra
+  `mfa_*`/`login` rows and rewrite `172.*` IPs before shooting Audit/Settings.
+  Take them once, after all UI changes and the VERSION bump.
 - The app container is `read_only`; `adb` needs the tmpfs `~/.android`.
 - `request_body_guard` in `main.py` caps every POST before parsing — keep it.
 - `adb connect` returning "connected" ≠ ready; wait for `get-state`.

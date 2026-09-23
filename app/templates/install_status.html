@@ -30,6 +30,6 @@
 {% else %}
 <p class="muted">Finished {{ install.finished_at | when }}</p>
 {% if install.log %}<pre class="log">{{ install.log }}</pre>{% endif %}
-<p><a href="/staged">Back to staged APKs</a> · <a href="/installs">Install history</a></p>
+<p><a href="/status">Device status</a> · <a href="/install">Install another</a> · <a href="/installs">Install history</a></p>
 {% endif %}
 {% endblock %}

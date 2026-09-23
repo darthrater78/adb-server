@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Sources — ADB Server{% endblock %}
+{% block content %}
+<h1>Sources</h1>
+<p class="page-intro muted">Where APKs come from. Watch a GitHub repo and every new release is verified and
+  staged automatically, or upload an APK you built yourself. Staged APKs show up on
+  <a href="/install">Install</a>.</p>
+
+<div class="add-grid">
+  <section class="panel">
+    <h2>Watch a GitHub repo</h2>
+    <form method="post" action="/repos" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Repo <input type="text" name="repo_url" required placeholder="https://github.com/octocat/hello-world"></label>
+      <label>Asset glob <input type="text" name="asset_glob" value="*.apk"></label>
+      <label class="check"><input type="checkbox" name="include_prereleases" value="1"> Include pre-releases</label>
+      <button type="submit">Add repo</button>
+    </form>
+    <p class="muted small">A URL, <code>owner/repo</code> or an SSH remote. The first release pins the app's
+      package name and signing certificate; later releases must match.</p>
+  </section>
+
+  <section class="panel" id="upload">
+    <h2>Upload an APK</h2>
+    <form method="post" action="/staged/upload" enctype="multipart/form-data" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="file" name="apk" accept=".apk,application/vnd.android.package-archive" required>
+      <label>Label <input type="text" name="label" maxlength="120" placeholder="optional, e.g. dev build"></label>
+      <button type="submit">Upload APK</button>
+    </form>
+    <p class="muted small">For a build that isn't a GitHub release. Up to {{ max_upload_mb }} MB. The signature
+      must verify; debug-signed builds are allowed and marked "debug build".</p>
+  </section>
+</div>
+
+{% for r in repos if r.pending_signer %}
+<section class="panel panel-warn">
+  <h2>Signing change: {{ r.owner }}/{{ r.repo }} {{ r.rejected_tag }}</h2>
+  <p>
+    This release is signed differently from the one this repo was pinned to, so it was <strong>not staged</strong>.
+    Accept it only if you're sure the change is genuine (for example, the developer announced a key rotation).
+  </p>
+  <dl>
+    <dt>Pinned package</dt><dd class="mono small">{{ r.expected_package }}</dd>
+    <dt>New package</dt><dd class="mono small">{{ r.pending_package }}{% if r.pending_package != r.expected_package %} <span class="badge badge-error">different app</span>{% endif %}</dd>
+    <dt>Pinned signer</dt><dd class="mono small">{{ r.signer_sha256 }}</dd>
+    <dt>New signer</dt><dd class="mono small">{{ r.pending_signer }}</dd>
+    <dt>Rotation proof</dt>
+    <dd>
+      {% if r.pending_lineage_ok %}
+      <span class="badge badge-ok">Proven</span> The new APK's signing lineage includes the pinned certificate (APK Signature Scheme v3 key rotation).
+      {% else %}
+      <span class="badge badge-error">None</span> Nothing in the APK links the new certificate to the pinned one. Check with the developer before accepting.
+      {% endif %}
+    </dd>
+  </dl>
+  <form method="post" action="/repos/{{ r.id }}/accept-signer" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label><input type="checkbox" name="confirm" value="yes" required> I've verified this new certificate is genuine</label>
+    <button type="submit" class="danger">Accept new signer and stage</button>
+  </form>
+</section>
+{% endfor %}
+
+<h2 class="section-title">Watched repos</h2>
+{% if repos %}
+{% set error_count = repos | selectattr("last_error") | list | length %}
+<p class="muted">
+  {{ repos | length }} repo{{ "" if repos | length == 1 else "s" }} watched
+  {% if error_count %}· <span class="badge badge-error">{{ error_count }} with errors</span>{% endif %}
+</p>
+{% endif %}
+
+<div class="table-wrap">
+
+<table>
+  <thead>
+    <tr>
+      <th>Repo</th><th>Pinned package</th><th>Last tag</th><th>Last checked</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in repos %}
+    <tr>
+      <td data-label="Repo">
+        <a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a>
+        <span class="mono small muted" title="Asset glob">{{ r.asset_glob }}</span>
+      </td>
+      <td data-label="Pinned package" class="mono small">{{ r.expected_package or "—" }}</td>
+      <td data-label="Last tag">
+        {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}
+        {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
+      </td>
+      <td data-label="Last checked" class="small">
+        {{ r.last_checked_at | when }}
+        {% if r.last_error %}
+        <span class="badge badge-error" title="{{ r.last_error }}">Error</span>
+        {% else %}
+        <span class="badge badge-ok">OK</span>
+        {% endif %}
+      </td>
+      <td><div class="actions">
+        <form method="post" action="/repos/{{ r.id }}/check-now">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="secondary small">Check now</button>
+        </form>
+        <form method="post" action="/repos/{{ r.id }}/prereleases">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="include" value="{{ '0' if r.include_prereleases else '1' }}">
+          <button type="submit" class="secondary small" title="Also stage pre-releases from this repo">Pre-releases: {{ "on" if r.include_prereleases else "off" }}</button>
+        </form>
+        <form method="post" action="/repos/{{ r.id }}/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger small">Remove</button>
+        </form>
+      </div></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty-state">No repos watched yet. Add one above.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2 class="section-title">Uploaded APKs</h2>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Label</th><th>Version</th><th>Package</th><th>CPU</th><th>Uploaded</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for a in uploads %}
+    <tr>
+      <td data-label="Label">
+        <span class="clip" title="{{ a.filename }}">{{ a.tag }}</span>
+        {% if a.is_debug %}<span class="badge badge-warn" title="Signed with the default Android debug certificate">debug build</span>{% endif %}
+      </td>
+      <td data-label="Version" class="nowrap">{{ a.version_name or "—" }}</td>
+      <td data-label="Package"><span class="clip mono small" title="{{ a.package_name }}">{{ a.package_name }}</span></td>
+      <td data-label="CPU" class="mono small">{{ a.abis or "any" }}</td>
+      <td data-label="Uploaded" class="small">{{ a.downloaded_at | when }}</td>
+      <td><div class="actions">
+        <a href="/install#upload-{{ a.id }}" class="button-link secondary">Install</a>
+        <form method="post" action="/staged/{{ a.id }}/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </div></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty-state">No uploads.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

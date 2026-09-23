@@ -29,7 +29,7 @@ _background: set[asyncio.Task] = set()
 
 
 class _Rejected(Exception):
-    """The release as a whole is rejected; message is shown on the Repos page."""
+    """The release as a whole is rejected; message is shown on the Sources page."""
 
     def __init__(
         self, message: str, pending: tuple[str, str, bool] | None = None, permanent: bool = True,

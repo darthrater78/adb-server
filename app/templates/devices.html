@@ -2,18 +2,19 @@
 {% block title %}Devices — ADB Server{% endblock %}
 {% block content %}
 <h1>Devices</h1>
+<p class="page-intro muted">Phones this server can push to. See what each one has on <a href="/status">Status</a>.</p>
 
-<section>
-  <h2>Pair a new device</h2>
-  <p class="muted">
-    On the phone: Settings → Developer options → Wireless debugging → "Pair device with
-    pairing code" gives you a pairing address + 6-digit code. The main Wireless debugging
-    screen separately shows a connect address (ip:port) — enter both below.
-  </p>
-  <p class="muted">
-    The connect port changes whenever wireless debugging restarts. Pushes find the new port
-    automatically by scanning the device's last known IP; "Find" does the same on demand.
-  </p>
+<section class="panel">
+  <h2>Add a device</h2>
+  <ol class="steps">
+    <li>On the phone, turn on <strong>Settings → Developer options → Wireless debugging</strong>. The phone and
+      this server must be on the same network.</li>
+    <li>Note the <strong>IP address &amp; port</strong> shown on the Wireless debugging screen. That's the
+      connect address.</li>
+    <li>Tap <strong>Pair device with pairing code</strong>. Enter the address and 6-digit code it shows,
+      plus the connect address, below.</li>
+    <li>Once it's paired, press <strong>Trust</strong> in the list. Nothing is ever pushed to an untrusted device.</li>
+  </ol>
   <form method="post" action="/devices/pair" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Pairing address <input type="text" name="pairing_addr" placeholder="192.168.1.50:41235" required></label>
@@ -21,6 +22,8 @@
     <label>Connect address <input type="text" name="connect_addr" placeholder="192.168.1.50:37251" required></label>
     <button type="submit">Pair</button>
   </form>
+  <p class="muted small">The connect port changes whenever wireless debugging restarts. Pushes find the new port
+    automatically by scanning the device's last known IP; <strong>Find</strong> does the same on demand.</p>
 </section>
 
 <div class="table-wrap">
@@ -48,13 +51,15 @@
         <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="trusted" value="0">
-          <button type="submit" class="secondary">Trusted — revoke</button>
+          <span class="badge badge-ok">Trusted</span>
+          <button type="submit" class="secondary small">Revoke</button>
         </form>
         {% else %}
         <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="trusted" value="1">
-          <button type="submit" class="danger">Not trusted — trust</button>
+          <span class="badge badge-warn">Not trusted</span>
+          <button type="submit">Trust</button>
         </form>
         {% endif %}
       </td>
@@ -78,7 +83,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7">No devices paired yet.</td></tr>
+    <tr><td colspan="7" class="empty-state">No devices yet. Add one above.</td></tr>
     {% endfor %}
   </tbody>
 </table>

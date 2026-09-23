@@ -166,7 +166,9 @@ VALID_THEMES = {"flashbang", "dark", "oled"}
 # Exact allow-list, not a prefix/startswith check — the "next" field on the
 # theme form is client-supplied, and an open redirect is exactly what a
 # permissive check here would hand an attacker.
-KNOWN_NAV_PATHS = {"/status", "/repos", "/staged", "/upload", "/devices", "/installs", "/audit", "/settings"}
+KNOWN_NAV_PATHS = {"/status", "/sources", "/devices", "/install", "/settings", "/installs", "/audit"}
+# Pages reached from Settings rather than the top bar highlight Settings.
+NAV_SECTION = {"/installs": "/settings", "/audit": "/settings"}
 
 
 def _get_theme(request: Request) -> str:
@@ -183,7 +185,8 @@ def _tctx(request: Request, session: dict | None = None, **extra) -> dict:
         "accent_version": "".join((db.get_meta(k) or "") for k in ("accent_color", "accent2_color")).replace("#", "")
                           or "default",
         "theme": _get_theme(request),
-        "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/repos",
+        "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/status",
+        "nav_path": NAV_SECTION.get(request.url.path, request.url.path),
     }
     if session is not None:
         ctx["csrf_token"] = session.get("csrf", "")
@@ -338,12 +341,12 @@ def set_theme(
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
     theme: str = Form(...),
-    next: str = Form("/repos"),
+    next: str = Form("/status"),
 ):
     _check_csrf(request, session, csrf_token)
     if theme not in VALID_THEMES:
         raise HTTPException(status_code=400, detail="Unknown theme")
-    next_path = next if next in KNOWN_NAV_PATHS else "/repos"
+    next_path = next if next in KNOWN_NAV_PATHS else "/status"
     response = RedirectResponse(next_path, status_code=303)
     # Cosmetic preference, not session state — plain cookie, not httponly, so
     # it stays simple and separate from the signed auth session.
@@ -354,13 +357,32 @@ def set_theme(
     return response
 
 
-# ---- repos ----
+def _moved(request: Request, path: str) -> RedirectResponse:
+    """Old page URLs from before 3.1 land on the page that replaced them,
+    flash message and all."""
+    query = request.url.query
+    return RedirectResponse(f"{path}?{query}" if query else path, status_code=303)
 
-@app.get("/repos", response_class=HTMLResponse)
-def repos_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
+
+# ---- sources: watched repos and uploads ----
+
+@app.get("/sources", response_class=HTMLResponse)
+def sources_page(
+    request: Request, session: dict = Depends(auth.require_auth),
+    error: str | None = None, ok: str | None = None, warn: str | None = None,
+):
+    uploads = [a for a in db.list_staged_apks() if a["repo_id"] is None]
     return templates.TemplateResponse(
-        request, "repos.html", _tctx(request, session, repos=db.list_repos(), error=error, ok=ok),
+        request, "sources.html",
+        _tctx(request, session, repos=db.list_repos(), uploads=uploads, error=error, ok=ok, warn=warn,
+              max_upload_mb=MAX_UPLOAD_BYTES // (1024 * 1024)),
     )
+
+
+@app.get("/repos")
+@app.get("/upload")
+def old_sources_pages(request: Request, session: dict = Depends(auth.require_auth)):
+    return _moved(request, "/sources")
 
 
 @app.post("/repos")
@@ -377,13 +399,13 @@ def create_repo(
     try:
         owner, repo = github_client.parse_repo_reference(repo_url)
     except github_client.GithubError as exc:
-        return _redirect("/repos", error=str(exc))
+        return _redirect("/sources", error=str(exc))
     try:
         db.create_repo(owner, repo, asset_glob, include_prereleases == "1")
     except sqlite3.IntegrityError:
-        return _redirect("/repos", error="That repo is already registered")
+        return _redirect("/sources", error="That repo is already registered")
     _audit(request, "repo_add", f"{owner}/{repo} glob={asset_glob}")
-    return _redirect("/repos", ok="Repo added")
+    return _redirect("/sources", ok="Repo added")
 
 
 @app.post("/repos/{repo_id}/delete")
@@ -394,7 +416,7 @@ def delete_repo(repo_id: int, request: Request, session: dict = Depends(auth.req
     staging.remove_repo_dir(repo_id)
     if repo_row is not None:
         _audit(request, "repo_remove", f"{repo_row['owner']}/{repo_row['repo']}")
-    return _redirect("/repos", ok="Repo removed")
+    return _redirect("/sources", ok="Repo removed")
 
 
 @app.post("/repos/{repo_id}/check-now")
@@ -409,7 +431,7 @@ def check_repo_now(
     if repo_row is None:
         raise HTTPException(status_code=404)
     background_tasks.add_task(poller.check_repo, repo_row)
-    return _redirect("/repos", ok="Check started — reload this page in a moment to see the result")
+    return _redirect("/sources", ok="Check started — reload this page in a moment to see the result")
 
 
 @app.post("/repos/{repo_id}/prereleases")
@@ -423,7 +445,7 @@ def toggle_prereleases(
         raise HTTPException(status_code=404)
     db.set_include_prereleases(repo_id, include == "1")
     _audit(request, "repo_prereleases", f"{repo_row['owner']}/{repo_row['repo']} include={include == '1'}")
-    return _redirect("/repos", ok="Updated")
+    return _redirect("/sources", ok="Updated")
 
 
 @app.post("/repos/{repo_id}/accept-signer")
@@ -434,10 +456,10 @@ def accept_signer(
 ):
     _check_csrf(request, session, csrf_token)
     if confirm != "yes":
-        return _redirect("/repos", error="Tick the confirmation box to accept a new signer")
+        return _redirect("/sources", error="Tick the confirmation box to accept a new signer")
     before = db.get_repo(repo_id)
     if before is None or not db.accept_pending_signer(repo_id):
-        return _redirect("/repos", error="No pending signer change for that repo")
+        return _redirect("/sources", error="No pending signer change for that repo")
     logger.warning("repo %s: operator accepted a new signing certificate", repo_id)
     _audit(
         request, "signer_accepted",
@@ -445,29 +467,47 @@ def accept_signer(
         f"package={before['pending_package']} lineage_proven={bool(before['pending_lineage_ok'])}",
     )
     background_tasks.add_task(poller.check_repo, db.get_repo(repo_id))
-    return _redirect("/repos", ok="New signer pinned — re-checking the release now")
+    return _redirect("/sources", ok="New signer pinned — re-checking the release now")
 
 
-# ---- staged apks ----
+# ---- install: staged apks, ready to push ----
 
-@app.get("/staged", response_class=HTMLResponse)
-def staged_page(
+def _install_groups() -> list[dict]:
+    """Staged APKs by app: one group per repo (its releases newest first,
+    each release's CPU variants together) and one per uploaded APK."""
+    groups: list[dict] = []
+    by_repo: dict[int, dict] = {}
+    for a in db.list_staged_apks():  # newest first
+        if a["repo_id"] is None:
+            # An upload's tag is its label (or version, or filename).
+            groups.append({"repo_id": None, "label": a["tag"], "releases": [{"tag": a["tag"], "apks": [a]}]})
+            continue
+        group = by_repo.get(a["repo_id"])
+        if group is None:
+            group = by_repo[a["repo_id"]] = {"repo_id": a["repo_id"], "label": a["source_label"], "releases": []}
+            groups.append(group)
+        if not group["releases"] or group["releases"][-1]["tag"] != a["tag"]:
+            group["releases"].append({"tag": a["tag"], "apks": []})
+        group["releases"][-1]["apks"].append(a)
+    # Watched repos first, alphabetically; uploads after them, newest first.
+    return sorted(groups, key=lambda g: (g["repo_id"] is None, g["label"].lower() if g["repo_id"] else ""))
+
+
+@app.get("/install", response_class=HTMLResponse)
+def install_page(
     request: Request, session: dict = Depends(auth.require_auth),
     error: str | None = None, ok: str | None = None, warn: str | None = None,
 ):
+    trusted = [d for d in db.list_devices() if d["trusted"]]
     return templates.TemplateResponse(
-        request, "staged.html",
-        _tctx(request, session, apks=db.list_staged_apks(), devices=db.list_devices(),
-              error=error, ok=ok, warn=warn, max_upload_mb=MAX_UPLOAD_BYTES // (1024 * 1024)),
+        request, "install.html",
+        _tctx(request, session, groups=_install_groups(), devices=trusted, error=error, ok=ok, warn=warn),
     )
 
 
-@app.get("/upload", response_class=HTMLResponse)
-def upload_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None):
-    return templates.TemplateResponse(
-        request, "upload.html",
-        _tctx(request, session, error=error, max_upload_mb=MAX_UPLOAD_BYTES // (1024 * 1024)),
-    )
+@app.get("/staged")
+def old_staged_page(request: Request, session: dict = Depends(auth.require_auth)):
+    return _moved(request, "/install")
 
 
 class UploadRejected(Exception):
@@ -557,7 +597,7 @@ def upload_apk(
     except (UploadRejected, apk_verify.ApkVerifyError) as exc:
         staging.remove_file(tmp_path)
         logger.warning("upload rejected (%s): %s", display_name, exc)
-        return _redirect("/upload", error=f"Upload refused: {exc}")
+        return _redirect("/sources", error=f"Upload refused: {exc}")
     except BaseException:
         staging.remove_file(tmp_path)
         raise
@@ -565,7 +605,7 @@ def upload_apk(
     existing = db.get_uploaded_apk_by_sha256(digest)
     if existing is not None:
         staging.remove_file(tmp_path)
-        return _redirect("/upload", error=f"That exact APK is already staged as \"{existing['filename']}\"")
+        return _redirect("/sources", error=f"That exact APK is already staged as \"{existing['filename']}\"")
 
     final_path = os.path.join(upload_dir, f"{digest}.apk")
     os.replace(tmp_path, final_path)
@@ -578,14 +618,14 @@ def upload_apk(
     )
     if apk_id is None:
         # A concurrent upload of the same file won; final_path is its file too.
-        return _redirect("/upload", error="That exact APK is already staged")
+        return _redirect("/sources", error="That exact APK is already staged")
 
     _audit(request, "upload", f"{display_name} {info.name} sha256={digest[:12]} debug={signer.debug}")
     staged = f"Staged {display_name} ({info.name})."
     warnings = _upload_warnings(info, signer)
     if warnings:
-        return _redirect("/staged", warn=" ".join([staged, *warnings]))
-    return _redirect("/staged", ok=staged)
+        return _redirect("/install", warn=" ".join([staged, *warnings]))
+    return _redirect("/install", ok=staged)
 
 
 @app.post("/staged/{apk_id}/delete")
@@ -597,7 +637,7 @@ def delete_staged(apk_id: int, request: Request, session: dict = Depends(auth.re
     staging.remove_file(apk["path"])
     db.mark_apk_pruned(apk_id)
     _audit(request, "staged_delete", f"{apk['source_label']} {apk['tag']} {apk['filename']}")
-    return _redirect("/staged", ok="Staged file deleted")
+    return _redirect("/install", ok="Staged file deleted")
 
 
 # ---- devices ----
@@ -753,7 +793,11 @@ def push(
     apk = db.get_staged_apk(apk_id)
     if device is None or apk is None:
         raise HTTPException(status_code=404)
-    return _queue_push(request, background_tasks, device, apk, "/staged")
+    return _queue_push(request, background_tasks, device, apk, "/install")
+
+
+# Where a failed push-latest sends you back to: the two pages that offer it.
+PUSH_BACK_PATHS = {"/status", "/install"}
 
 
 @app.post("/push-latest")
@@ -764,52 +808,86 @@ def push_latest(
     csrf_token: str = Form(...),
     device_serial: str = Form(...),
     repo_id: int = Form(...),
+    back: str = Form("/status"),
 ):
     """Pushes the repo's newest staged release, choosing the APK variant
     that fits the device's CPU."""
     _check_csrf(request, session, csrf_token)
+    back = back if back in PUSH_BACK_PATHS else "/status"
     device = db.get_device(device_serial)
     if device is None:
         raise HTTPException(status_code=404)
     variants = [v for v in db.list_latest_variants() if v["repo_id"] == repo_id]
     if not variants:
-        return _redirect("/status", error="Nothing staged for that repo")
+        return _redirect(back, error="Nothing staged for that repo")
     apk = selection.pick_variant(variants, device["abis"])
     if apk is None:
-        return _redirect("/status", error="No APK in the latest release supports this device's CPU")
-    return _queue_push(request, background_tasks, device, apk, "/status")
+        return _redirect(back, error="No APK in the latest release supports this device's CPU")
+    return _queue_push(request, background_tasks, device, apk, back)
 
 
 # ---- status ----
 
-def _status_rows(devices) -> list[dict]:
+def _device_cards() -> list[dict]:
+    """One card per device: each watched app's latest release against what
+    the device has, then anything else pushed to it (uploads), then its most
+    recent installs. Trusted devices first."""
     installed = db.device_packages_map()
     follows = db.follows_set()
-    rows = []
     variants_by_repo: dict[int, list] = {}
     for v in db.list_latest_variants():
         variants_by_repo.setdefault(v["repo_id"], []).append(v)
-    for repo_id, variants in variants_by_repo.items():
-        latest = variants[0]
-        cells = []
-        for d in devices:
+    repo_packages = {vs[0]["package_name"] for vs in variants_by_repo.values()}
+    upload_labels: dict[str, str] = {}
+    for a in db.list_staged_apks():  # newest first, so the first label wins
+        if a["repo_id"] is None:
+            upload_labels.setdefault(a["package_name"], a["tag"])
+    installs = db.list_installs()
+    cards = []
+    for d in sorted(db.list_devices(), key=lambda d: not d["trusted"]):
+        apps = []
+        for repo_id, variants in variants_by_repo.items():
+            latest = variants[0]
             have = installed.get((d["serial"], latest["package_name"]))
-            cells.append({
-                "device": d, "installed": have,
+            apps.append({
+                "repo_id": repo_id, "latest": latest, "installed": have,
                 "state": selection.update_state(have, latest),
                 "fits": selection.pick_variant(variants, d["abis"]) is not None,
                 "following": (d["serial"], repo_id) in follows,
             })
-        rows.append({"repo_id": repo_id, "latest": latest, "cells": cells})
-    return rows
+        others = [
+            {"package": pkg, "label": upload_labels.get(pkg), "installed": row}
+            for (serial, pkg), row in sorted(installed.items())
+            if serial == d["serial"] and row["installed"] and pkg not in repo_packages
+        ]
+        recent = [i for i in installs if i["device_serial"] == d["serial"]][:3]
+        cards.append({"device": d, "apps": apps, "others": others, "recent": recent})
+    return cards
+
+
+def _setup_steps(cards: list[dict]) -> list[dict]:
+    """The first-run checklist, in the order the app is set up."""
+    has_source = bool(db.list_repos()) or bool(db.list_staged_apks())
+    has_trusted = any(c["device"]["trusted"] for c in cards)
+    has_install = any(i["status"] == "success" for c in cards for i in c["recent"])
+    return [
+        {"done": has_source, "href": "/sources", "title": "Add a source",
+         "hint": "Watch a GitHub repo for releases, or upload an APK."},
+        {"done": has_trusted, "href": "/devices", "title": "Pair and trust a device",
+         "hint": "Pair with the phone's wireless debugging code, then trust it."},
+        {"done": has_install, "href": "/install", "title": "Install an app",
+         "hint": "Push a staged APK to a trusted device."},
+    ]
 
 
 @app.get("/status", response_class=HTMLResponse)
 def status_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
-    devices = [d for d in db.list_devices() if d["trusted"]]
+    cards = _device_cards()
+    steps = _setup_steps(cards)
     return templates.TemplateResponse(
         request, "status.html",
-        _tctx(request, session, devices=devices, rows=_status_rows(devices), error=error, ok=ok),
+        _tctx(request, session, cards=cards, steps=steps, setup_done=all(s["done"] for s in steps),
+              error=error, ok=ok),
     )
 
 

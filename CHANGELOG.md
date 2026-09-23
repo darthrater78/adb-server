@@ -1,17 +1,33 @@
 # Changelog
 
-## Unreleased
+## 3.1.0 — 2026-09-23
 
-- Docs: the README quickstart no longer needs a clone. It creates the
-  directories, generates `.env` from a copy-paste block (session key, login,
-  and `ALLOWED_HOSTS` set to the server's IP and hostname, which fixes
-  "Invalid host header" on a LAN IP), and gives `compose.yaml` to save next
-  to it.
+- Changed: a simpler flow. The top bar is now **Status · Sources · Devices ·
+  Install · Settings**, in the order you set things up, down from eight tabs.
+  - **Sources** replaces Repos and Upload: watch a GitHub repo and upload an
+    APK on the same page, with one list of repos and one of uploads.
+  - **Install** replaces Staged: one card per app with its latest version and
+    a **Push** button that picks the right build for the device's CPU. Older
+    versions and individual files are one click down.
+  - **Status** is one card per device: every app on it (installed against
+    latest, **Update** / **Install**, auto-update) plus uploads pushed to it,
+    and its last few installs. Until everything is set up it shows a
+    checklist: add a source, pair and trust a device, install an app.
+  - **Devices** explains pairing step by step, and trust is a plain
+    **Trust** / **Revoke** button.
+  - Install history and the audit log moved to **Settings → Activity**.
+  - The old addresses (`/repos`, `/upload`, `/staged`) redirect to the new pages.
 - Changed: `docker-compose.yml` is now `compose.yaml`. It pulls the published
-  images, pinned to the release (`ghcr.io/darthrater78/adb-server/*:3.0.0`),
-  sets fixed container names, and keeps one comment line per setting at the
-  bottom. Building from a checkout moved to `compose.build.yaml`
+  images, pinned to the release, sets fixed container names, and keeps one
+  comment line per setting at the bottom. Building from a checkout moved to
+  `compose.build.yaml`
   (`docker compose -f compose.yaml -f compose.build.yaml up -d --build`).
+- Docs: the quickstart no longer needs a clone. It treats the stack
+  directory (`compose.yaml` and `.env`) and the data directory as separate
+  places, which they often are. It generates `.env` from a copy-paste block
+  with the server's IP and hostname in `ALLOWED_HOSTS` (the cause of "Invalid
+  host header"), and explains each setting. Screenshots retaken in the Dark
+  theme.
 
 ## 3.0.0 — 2026-09-23
 

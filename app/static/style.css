@@ -691,7 +691,7 @@ section { margin-bottom: 24px; }
   nav {
     grid-area: nav;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 4px;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -773,3 +773,62 @@ section { margin-bottom: 24px; }
   .panel { padding: 14px 14px 16px; }
 }
 #security details { margin-top: 16px; }
+
+/* ---- Simpler flow (3.1): Sources, Install, Status cards ---- */
+.page-intro { margin: -4px 0 18px; max-width: 70ch; }
+.section-title { margin: 28px 0 6px; }
+.breadcrumb { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.settings-jump { margin: -4px 0 20px; font-size: 0.9rem; }
+.link-list { padding-left: 18px; line-height: 1.7; }
+.steps { padding-left: 20px; margin: 6px 0 14px; line-height: 1.55; }
+.steps li + li { margin-top: 4px; }
+
+.add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 8px; }
+.add-grid .panel h2 { margin: 0 0 10px; }
+.add-grid .panel > p:last-child { margin: 12px 0 0; }
+.stack-form { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.stack-form label { display: flex; flex-direction: column; gap: 4px; }
+.stack-form label.check { flex-direction: row; align-items: center; }
+.stack-form input[type="text"] { width: 100%; }
+.stack-form button { align-self: flex-start; }
+
+.app-card, .device-card { margin-bottom: 16px; }
+.app-card-head, .device-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.app-card-head h2, .device-card-head h2 { margin: 0; }
+.app-card-head p, .device-card-head p { margin: 2px 0 0; }
+.app-card-meta { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.app-card-latest { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 12px 0; }
+.push-form { margin-bottom: 12px; }
+.app-card details { margin-top: 10px; }
+.app-card details table { margin-top: 8px; }
+details.nested { margin-left: 12px; }
+
+.setup { margin-bottom: 20px; }
+.setup h2 { margin: 0 0 8px; }
+.checklist { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.checklist li { display: flex; gap: 12px; align-items: flex-start; }
+.check-mark {
+  flex: none; width: 26px; height: 26px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.85rem;
+  border: 2px solid var(--accent); color: var(--accent);
+}
+.checklist li.done .check-mark { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+.step-hint { display: block; }
+
+.refresh-form { margin-bottom: 16px; }
+.device-card h3 { font-size: 0.95rem; margin: 16px 0 6px; }
+.device-card table { width: 100%; }
+.inventory { margin-top: 10px; }
+.recent-installs { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 0.9rem; }
+.recent-installs li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+
+@media (max-width: 960px) {
+  .app-card-head, .device-card-head { flex-direction: column; }
+  .app-card-meta { justify-content: flex-start; }
+  .push-form select { width: 100%; }
+  /* The cell already draws the divider; its action group doesn't repeat it. */
+  td > .actions { border-top: none; padding-top: 0; margin-top: 0; }
+}
+
+.panel > h2:first-child { margin-top: 0; }
