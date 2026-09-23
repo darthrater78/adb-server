@@ -1,60 +1,50 @@
-# Handoff: ADB Server (APK Pusher) — v1.0.0 shipped
+# Handoff: ADB Server (APK Pusher) — v2.0.0 shipped
 
-**Goal:** v1.0.0 is released. Next work is whatever the user asks for
-(post-release follow-ups below).
+**Goal:** v2.0.0 is released. Next work is whatever the user asks for
+(follow-ups below).
 
 **Current state (2026-09-23, end of session 3):**
-- `main` is the default branch, at `41b4647` (PR #5), two work-commit PRs past
-  the release. Tag `v1.0.0` → `8cc08ec` (PR #1). Release run succeeded; GitHub release published;
-  `ghcr.io/darthrater78/adb-server/{app,adb-server,mdns}:1.0.0` pullable.
-  Older tags `v0.1.0` (3c600ae), `v0.2.0` (03c2235) exist.
+- `main` is the default branch, at merge commit `be123aa` (PR #7). Tag
+  `v2.0.0` → `be123aa`; release run 35875285979 succeeded; GitHub release
+  published and marked Latest; `ghcr.io/darthrater78/adb-server/{app,adb-server,mdns}:2.0.0`
+  pullable, `:latest` moved to 2.0.0. Older tags: `v1.0.0` (8cc08ec),
+  `v0.2.0` (03c2235), `v0.1.0` (3c600ae).
+- 2.0.0 is **breaking**: data moved from named volumes to bind mounts under
+  `/opt/docker/adb-server` (`adbkeys`, `appdata`, `mdns`), owned by uid 10001,
+  `adbkeys`/`appdata` chmod 700. Compose comments sit in a Notes block after
+  the services. The README "Upgrading from 1.x" block has the migration.
 - Local checkout is on `main`, in sync. Uncommitted, on purpose:
-  `.claude/dev-skills-gates.md` (carries the v1.0.0 SHIP ✅ line; folds into
+  `.claude/dev-skills-gates.md` (carries the v2.0.0 SHIP ✅ line; folds into
   the next release PR — never a bookkeeping-only PR).
-- 2.0.0 (release/v2.0.0, CHANGELOG `## 2.0.0`): **breaking** — data moved
-  from named volumes to bind mounts under `/opt/docker/adb-server`
-  (`adbkeys`, `appdata`, `mdns`), owned by uid 10001, `adbkeys`/`appdata`
-  chmod 700. Compose comments now sit in a Notes block after the services.
-  User chose 2.0.0 (major). README has an "Upgrading from 1.x" block.
-- 319 tests pass. No system pytest: make a venv, `pip install -r
-  requirements-dev.txt` (now includes `mdns/requirements.txt`), then
-  `bash scripts/test.sh`.
+- 319 tests pass. No system pytest: run them in a container (`python:3.13-slim`,
+  `pip install -r requirements-dev.txt`, `bash scripts/test.sh`) or a venv.
 - Private vulnerability reporting is enabled on the repo (README points at it).
 
-**Gate status:** v1.0.0 complete. Session 3 was work commits only (PR #4, #5
-merged; RELEASE/SHIP ➖ N/A). 🔒 0 open. A new change starts a fresh track.
+**Gate status:** 🔢 ✅ 🔨 ✅ 🔒 ✅ 0 open 📄 ✅ 📦 ✅ 🚀 ✅ — v2.0.0 complete.
+A new change starts a fresh track (work commit or release sequence).
 
-**Mode:** this session ran semi-autonomous. The next session must ask again.
+**Mode:** this session ran semi-autonomous (on Opus, user-approved). The next
+session must ask again.
 
 **Done in session 3:**
-- PR #4: bind mounts + compose comments moved below the block; README
-  quickstart creates/chowns the dirs; CHANGELOG entry with migration commands.
-  Tested with a throwaway compose project using `!override` volumes pointing at
-  scratch dirs chowned to 10001.
-- PR #5: `tests/test_upload.py` `_apk_bytes()` used a wall-clock zip
-  timestamp, so the duplicate-upload test flaked across a 2 s tick → fixed
-  `ZipInfo.date_time`.
-
-**Done this session:**
-- Full top-to-bottom security review: 5 Low fixed with regression tests (TOTP
-  race → atomic `db.increment_meta`/`advance_meta`; legacy re-pair clears
-  trust; legacy record never merges into another registered phone;
-  `pushes.run_push` re-checks trust; mdns listener evicts oldest when full),
-  plus the dev-server `.env` 0664 → 0600.
-- README rewritten: architecture, every feature, detailed Security section,
-  15 screenshots in `docs/screenshots/` (mock data only).
-- Header links: version → `…/releases/tag/v<VERSION>`, plus a GitHub link
-  (`main.REPO_URL`, `RELEASE_NOTES_URL`). `_read_version` falls back to the
-  repo-root `VERSION` outside the image.
+- PR #4: named volumes → bind mounts; compose comments moved below the block;
+  README quickstart creates/chowns the dirs.
+- PR #5: flaky duplicate-upload test fixed (fixed `ZipInfo.date_time`).
+- PR #6: handoff update. PR #7: release 2.0.0 (VERSION, dated CHANGELOG,
+  README "Upgrading from 1.x").
 
 **Waiting on the user:**
-1. Production (a different server, no access from here): pulling current
-   `main` needs the data copied out of the named volumes first, or the adb key
-   (every pairing) and the DB are lost — commands in the README "Upgrading from 1.x" block
-   and the PR #4 description. Then `docker compose up -d`.
-2. Test stack `adbtest` (port 18080, the user's phone is paired to it) is
-   still running — ask before `docker compose -p adbtest down -v`.
+1. Delete merged branches `release/v2.0.0` and `docs/handoff-session-3` on
+   origin (ref deletions are the user's).
+2. Production (a different server, no access from here): follow the README
+   "Upgrading from 1.x" block before `docker compose up` on 2.0.0, or the adb
+   key (every pairing) and the DB are lost.
+3. Test stack `adbtest` (port 18080, the user's phone is paired to it) still
+   runs on the old named volumes. Recreating it from current `main` without
+   migrating loses its pairing. Ask before `docker compose -p adbtest down -v`.
    `logtest-logger-1` is not ours; leave it.
+4. Dependabot PRs #2/#3 (base images python 3.13 → 3.14) are open. Not
+   security fixes; CI pins 3.13 to match the images, so bump both together.
 
 **Open questions (not blocking):**
 - Encrypt the TOTP secret / notification URLs at rest (key from `SECRET_KEY`,
@@ -92,5 +82,5 @@ default.
 
 **Shell environment:** Linux Terminal (bash).
 
-**Next step:** ask the user what's next (a release for the bind-mount change,
-production migration, `adbtest` teardown, or one of the open questions).
+**Next step:** ask the user what's next (production migration, the Python
+3.14 Dependabot PRs, `adbtest` teardown, or one of the open questions).
