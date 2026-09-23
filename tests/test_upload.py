@@ -140,7 +140,7 @@ def test_uploaded_apk_push_and_install_history(authed, verify, monkeypatch):
     assert "Manual upload" in authed.get("/installs").text
 
 
-def test_staged_notes_are_full_width_and_linked_from_status(authed):
+def test_release_notes_are_on_the_install_page_and_linked_from_status(authed):
     rid = db.create_repo("o", "r", "*.apk")
     os.makedirs(staging.repo_dir(rid), exist_ok=True)
     path = os.path.join(staging.repo_dir(rid), "a.apk")
@@ -149,9 +149,10 @@ def test_staged_notes_are_full_width_and_linked_from_status(authed):
                                   release_notes="Long notes", version_name="1.0")
     db.upsert_paired_device("SER", "192.168.1.50:37000")
     db.set_device_trusted("SER", True)
-    staged = authed.get("/staged").text
-    assert 'class="notes-row"' in staged and f'id="apk-{apk_id}"' in staged
-    assert f'href="/staged#apk-{apk_id}"' in authed.get("/status").text
+    page = authed.get("/install").text
+    assert f'id="app-{rid}"' in page and f'id="apk-{apk_id}"' in page
+    assert "Release notes for 1.0" in page and "Long notes" in page
+    assert f'href="/install#app-{rid}"' in authed.get("/status").text
 
 
 def test_migration_from_pre_upload_schema(tmp_path, monkeypatch):
@@ -208,13 +209,15 @@ def test_upload_matching_pinned_repo_signer_is_not_warned(authed, verify):
     assert "ok=" in r.headers["location"]
 
 
-def test_upload_has_its_own_page_and_nav_entry(authed):
-    page = authed.get("/upload").text
-    assert "Upload a development build" in page and 'action="/staged/upload"' in page
-    assert 'href="/upload" class="active" aria-current="page"' in page
-    assert 'href="/upload"' in authed.get("/staged").text
+def test_upload_lives_on_the_sources_page(authed):
+    page = authed.get("/sources").text
+    assert "Upload an APK" in page and 'action="/staged/upload"' in page
+    assert "Watch a GitHub repo" in page and 'action="/repos"' in page
+    assert 'href="/sources" class="active" aria-current="page"' in page
+    r = authed.get("/upload?error=x", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/sources?error=x"
 
 
-def test_upload_errors_return_to_the_upload_page(authed, verify):
+def test_upload_errors_return_to_the_sources_page(authed, verify):
     r = _upload(authed, b"not a zip")
-    assert r.headers["location"].startswith("/upload?error=")
+    assert r.headers["location"].startswith("/sources?error=")

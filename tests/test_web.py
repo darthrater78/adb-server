@@ -41,7 +41,7 @@ def test_foreign_origin_is_rejected(authed):
     assert r.status_code == 403
 
 
-@pytest.mark.parametrize("nxt,expected", [("/devices", "/devices"), ("https://evil.example", "/repos"), ("//evil.example", "/repos")])
+@pytest.mark.parametrize("nxt,expected", [("/devices", "/devices"), ("https://evil.example", "/status"), ("//evil.example", "/status")])
 def test_theme_redirect_is_allow_listed(authed, nxt, expected):
     r = authed.post("/theme", data={"csrf_token": CSRF, "theme": "dark", "next": nxt}, follow_redirects=False)
     assert r.headers["location"] == expected

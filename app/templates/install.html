@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Install — ADB Server{% endblock %}
+{% block content %}
+<h1>Install</h1>
+<p class="page-intro muted">Every verified APK, by app. Pick a device and push. The newest release picks the
+  right build for the device's CPU. Add more apps on <a href="/sources">Sources</a>.</p>
+
+{% if not devices %}
+<p class="flash flash-warn">No trusted devices yet. <a href="/devices">Pair and trust one</a> to push to it.</p>
+{% endif %}
+
+{% macro device_select() %}
+<select name="device_serial" required aria-label="Device">
+  {% for d in devices %}
+  <option value="{{ d.serial }}">{{ d.nickname or d.serial }}</option>
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% for g in groups %}
+{% set latest = g.releases[0] %}
+{% set first = latest.apks[0] %}
+<section class="panel app-card" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
+  <div class="app-card-head">
+    <div>
+      <h2>{{ g.label }}</h2>
+      <p class="mono small muted">{{ first.package_name }}</p>
+    </div>
+    <div class="app-card-meta">
+      {% if g.repo_id %}<span class="badge badge-muted">GitHub</span>{% else %}<span class="badge badge-muted">Upload</span>{% endif %}
+      {% if first.is_debug %}<span class="badge badge-warn" title="Signed with the default Android debug certificate">debug build</span>{% endif %}
+    </div>
+  </div>
+
+  <p class="app-card-latest">
+    <span class="tag-pill">{{ first.version_name or latest.tag }}</span>
+    {% if g.repo_id and first.version_name and first.version_name != latest.tag.lstrip('v') %}<span class="muted small">{{ latest.tag }}</span>{% endif %}
+    <span class="muted small">
+      {{ "staged" if g.repo_id else "uploaded" }} {{ first.downloaded_at | when }}
+      · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
+      ({{ latest.apks | map(attribute="abis") | map("default", "any", true) | join(", ") or "any CPU" }})
+    </span>
+  </p>
+
+  {% if devices %}
+  {% if g.repo_id %}
+  <form method="post" action="/push-latest" class="inline-form push-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
+    <input type="hidden" name="back" value="/install">
+    {{ device_select() }}
+    <button type="submit">Push {{ first.version_name or latest.tag }}</button>
+  </form>
+  {% else %}
+  <form method="post" action="/push" class="inline-form push-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="apk_id" value="{{ first.id }}">
+    {{ device_select() }}
+    <button type="submit">Push {{ first.version_name or "" }}</button>
+  </form>
+  {% endif %}
+  {% endif %}
+
+  {% for a in latest.apks if a.release_notes %}{% if loop.first %}
+  <details>
+    <summary>Release notes for {{ first.version_name or latest.tag }}</summary>
+    <pre class="release-notes">{{ a.release_notes }}</pre>
+  </details>
+  {% endif %}{% endfor %}
+
+  <details>
+    <summary>{% if g.releases | length > 1 %}All builds and older versions ({{ g.releases | length - 1 }} older){% else %}Builds and details{% endif %}</summary>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Version</th><th>File</th><th>CPU</th><th>Signer SHA-256</th><th>Staged</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for rel in g.releases %}{% for a in rel.apks %}
+        <tr id="apk-{{ a.id }}">
+          <td data-label="Version" class="nowrap">{{ a.version_name or "—" }} <span class="muted small">{{ rel.tag }}</span></td>
+          <td data-label="File"><span class="clip" title="{{ a.filename }}">{{ a.filename }}</span></td>
+          <td data-label="CPU" class="mono small">{{ a.abis or "any" }}</td>
+          <td data-label="Signer" class="mono small" title="{{ a.signer_sha256 }}">{{ a.signer_sha256[:16] }}…</td>
+          <td data-label="Staged" class="small">{{ a.downloaded_at | when }}</td>
+          <td><div class="actions">
+            {% if devices %}
+            <form method="post" action="/push" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="apk_id" value="{{ a.id }}">
+              {{ device_select() }}
+              <button type="submit" class="secondary">Push this</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/staged/{{ a.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="danger">Delete file</button>
+            </form>
+          </div></td>
+        </tr>
+        {% endfor %}{% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% for rel in g.releases[1:] %}{% for a in rel.apks if a.release_notes %}{% if loop.first %}
+    <details class="nested">
+      <summary>Release notes for {{ a.version_name or rel.tag }}</summary>
+      <pre class="release-notes">{{ a.release_notes }}</pre>
+    </details>
+    {% endif %}{% endfor %}{% endfor %}
+  </details>
+</section>
+{% else %}
+<p class="empty-state">Nothing staged yet. <a href="/sources">Add a source</a>: watch a GitHub repo, or upload an APK.
+  A new repo's latest release is fetched on the next poll, or straight away with
+  Check now.</p>
+{% endfor %}
+{% endblock %}

@@ -3,92 +3,150 @@
 {% block content %}
 <h1>Status</h1>
 
-<form method="post" action="/status/refresh" class="inline-form">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button type="submit">Refresh installed versions</button>
-  <span class="muted small">Asks each trusted device which version it has. Takes a few seconds per device.</span>
-</form>
-
-{% if not devices %}
-<p class="empty-state">No trusted devices yet — pair and trust one on the <a href="/devices">Devices</a> page.</p>
-{% elif not rows %}
-<p class="empty-state">Nothing staged yet — add a repo on the <a href="/repos">Repos</a> page.</p>
-{% else %}
-<div class="table-wrap">
-<table>
-  <thead>
-    <tr>
-      <th>App</th><th>Latest</th>
-      {% for d in devices %}<th>{{ d.nickname or d.serial }}</th>{% endfor %}
-    </tr>
-  </thead>
-  <tbody>
-    {% for row in rows %}
-    {% set latest = row.latest %}
-    <tr id="app-{{ row.repo_id }}">
-      <td data-label="App">{{ latest.owner }}/{{ latest.repo }} <span class="mono small muted">{{ latest.package_name }}</span></td>
-      <td data-label="Latest">
-        <span class="tag-pill">{{ latest.version_name or latest.tag }}</span>
-        {% if latest.release_notes %}<a href="/staged#apk-{{ latest.id }}" class="small">Release notes available</a>{% endif %}
-      </td>
-      {% for c in row.cells %}
-      <td class="status-cell" data-label="{{ c.device.nickname or c.device.serial }}">
-        {% if c.state == "current" %}
-          <span class="badge badge-ok">{{ c.installed.version_name or "up to date" }}</span>
-        {% elif c.state == "update" %}
-          <span class="badge badge-update">{{ c.installed.version_name or "?" }} → {{ latest.version_name or latest.tag }}</span>
-        {% elif c.state == "newer" %}
-          <span class="badge badge-muted" title="Installed version is newer than the latest staged release">{{ c.installed.version_name }} (newer)</span>
-        {% elif c.state == "missing" %}
-          <span class="badge badge-muted">not installed</span>
-        {% else %}
-          <span class="badge badge-muted" title="Use Refresh installed versions">unknown</span>
-        {% endif %}
-        {% if c.state != "current" and c.state != "newer" %}
-          {% if c.fits %}
-          {% set verb = "Install" if c.state == "missing" else "Update" %}
-          {% set dialog = "confirm-" ~ row.repo_id ~ "-" ~ loop.index %}
-          {# A CSS :target dialog — the CSP allows no JavaScript. The link opens
-             it; the push itself is still a CSRF-protected POST. #}
-          <a href="#{{ dialog }}" class="button-link">{{ verb }}</a>
-          <div id="{{ dialog }}" class="modal" role="dialog" aria-modal="true" aria-labelledby="{{ dialog }}-title">
-            <a href="#app-{{ row.repo_id }}" class="modal-backdrop" aria-label="Cancel" tabindex="-1"></a>
-            <div class="modal-card">
-              <h2 id="{{ dialog }}-title">{{ verb }} {{ latest.source_label }}?</h2>
-              <p>
-                {{ verb }} <strong>{{ latest.version_name or latest.tag }}</strong>
-                on <strong>{{ c.device.nickname or c.device.serial }}</strong>{% if c.state == "update" and c.installed and c.installed.version_name %},
-                replacing {{ c.installed.version_name }}{% endif %}.
-              </p>
-              <p class="muted small">The app keeps its data. The install runs in the background and you'll be taken to its progress page.</p>
-              <form method="post" action="/push-latest" class="modal-actions">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="repo_id" value="{{ row.repo_id }}">
-                <input type="hidden" name="device_serial" value="{{ c.device.serial }}">
-                <a href="#app-{{ row.repo_id }}" class="button-link secondary">Cancel</a>
-                <button type="submit">{{ verb }} now</button>
-              </form>
-            </div>
-          </div>
-          {% else %}
-          <span class="muted small">no APK for this CPU</span>
-          {% endif %}
-        {% endif %}
-        <form method="post" action="/follow">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="repo_id" value="{{ row.repo_id }}">
-          <input type="hidden" name="device_serial" value="{{ c.device.serial }}">
-          <input type="hidden" name="follow" value="{{ '0' if c.following else '1' }}">
-          <button type="submit" class="secondary small" title="Push each new release to this device automatically">
-            Auto-update: {{ "on" if c.following else "off" }}
-          </button>
-        </form>
-      </td>
-      {% endfor %}
-    </tr>
+{% if not setup_done %}
+<section class="panel setup">
+  <h2>Get set up</h2>
+  <ol class="checklist">
+    {% for s in steps %}
+    <li class="{{ 'done' if s.done else 'todo' }}">
+      <span class="check-mark" aria-hidden="true">{{ "✓" if s.done else loop.index }}</span>
+      <span>
+        {% if s.done %}<strong>{{ s.title }}</strong> <span class="muted small">done</span>
+        {% else %}<a href="{{ s.href }}"><strong>{{ s.title }}</strong></a>{% endif %}
+        <span class="muted small step-hint">{{ s.hint }}</span>
+      </span>
+    </li>
     {% endfor %}
-  </tbody>
-</table>
-</div>
+  </ol>
+</section>
 {% endif %}
+
+{% if cards %}
+<form method="post" action="/status/refresh" class="inline-form refresh-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="secondary">Refresh installed versions</button>
+  <span class="muted small">Asks each trusted device what it has. Takes a few seconds per device.</span>
+</form>
+{% endif %}
+
+{% for card in cards %}
+{% set d = card.device %}
+{% set dev_loop = loop %}
+<section class="panel device-card" id="device-{{ loop.index }}">
+  <div class="device-card-head">
+    <div>
+      <h2>{{ d.nickname or d.serial }}</h2>
+      <p class="muted small">
+        {% if d.nickname %}<span class="mono">{{ d.serial }}</span> · {% endif %}
+        {{ d.abis.split()[0] if d.abis else "CPU unknown" }} · last seen {{ d.last_seen_at | when("never") }}
+      </p>
+    </div>
+    {% if d.trusted %}<span class="badge badge-ok">Trusted</span>
+    {% else %}<span class="badge badge-warn">Not trusted</span>{% endif %}
+  </div>
+
+  {% if not d.trusted %}
+  <p class="muted">Nothing can be pushed to this device until you trust it on <a href="/devices">Devices</a>.</p>
+  {% else %}
+
+  {% if card.apps or card.others %}
+  <div class="table-wrap">
+  <table class="inventory">
+    <thead><tr><th>App</th><th>On device</th><th>Latest</th><th></th></tr></thead>
+    <tbody>
+      {% for app in card.apps %}
+      {% set latest = app.latest %}
+      <tr id="app-{{ app.repo_id }}-{{ dev_loop.index }}">
+        <td data-label="App">{{ latest.source_label }} <span class="mono small muted">{{ latest.package_name }}</span></td>
+        <td data-label="On device">
+          {% if app.state == "current" %}
+            <span class="badge badge-ok">{{ app.installed.version_name or "up to date" }}</span>
+          {% elif app.state == "update" %}
+            <span class="badge badge-update">{{ app.installed.version_name or "?" }} → {{ latest.version_name or latest.tag }}</span>
+          {% elif app.state == "newer" %}
+            <span class="badge badge-muted" title="Installed version is newer than the latest staged release">{{ app.installed.version_name }} (newer)</span>
+          {% elif app.state == "missing" %}
+            <span class="badge badge-muted">not installed</span>
+          {% else %}
+            <span class="badge badge-muted" title="Use Refresh installed versions">unknown</span>
+          {% endif %}
+        </td>
+        <td data-label="Latest">
+          <span class="tag-pill">{{ latest.version_name or latest.tag }}</span>
+          {% if latest.release_notes %}<a href="/install#app-{{ app.repo_id }}" class="small">notes</a>{% endif %}
+        </td>
+        <td class="actions">
+          {% if app.state != "current" and app.state != "newer" %}
+            {% if app.fits %}
+            {% set verb = "Install" if app.state == "missing" else "Update" %}
+            {% set dialog = "confirm-" ~ app.repo_id ~ "-" ~ dev_loop.index %}
+            {# A CSS :target dialog — the CSP allows no JavaScript. The link opens
+               it; the push itself is still a CSRF-protected POST. #}
+            <a href="#{{ dialog }}" class="button-link">{{ verb }}</a>
+            <div id="{{ dialog }}" class="modal" role="dialog" aria-modal="true" aria-labelledby="{{ dialog }}-title">
+              <a href="#app-{{ app.repo_id }}-{{ dev_loop.index }}" class="modal-backdrop" aria-label="Cancel" tabindex="-1"></a>
+              <div class="modal-card">
+                <h2 id="{{ dialog }}-title">{{ verb }} {{ latest.source_label }}?</h2>
+                <p>
+                  {{ verb }} <strong>{{ latest.version_name or latest.tag }}</strong>
+                  on <strong>{{ d.nickname or d.serial }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
+                  replacing {{ app.installed.version_name }}{% endif %}.
+                </p>
+                <p class="muted small">The app keeps its data. The install runs in the background and you'll be taken to its progress page.</p>
+                <form method="post" action="/push-latest" class="modal-actions">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="repo_id" value="{{ app.repo_id }}">
+                  <input type="hidden" name="device_serial" value="{{ d.serial }}">
+                  <a href="#app-{{ app.repo_id }}-{{ dev_loop.index }}" class="button-link secondary">Cancel</a>
+                  <button type="submit">{{ verb }} now</button>
+                </form>
+              </div>
+            </div>
+            {% else %}
+            <span class="muted small">no APK for this CPU</span>
+            {% endif %}
+          {% endif %}
+          <form method="post" action="/follow">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="repo_id" value="{{ app.repo_id }}">
+            <input type="hidden" name="device_serial" value="{{ d.serial }}">
+            <input type="hidden" name="follow" value="{{ '0' if app.following else '1' }}">
+            <button type="submit" class="secondary small" title="Push each new release to this device automatically">
+              Auto-update: {{ "on" if app.following else "off" }}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      {% for o in card.others %}
+      <tr>
+        <td data-label="App">{{ o.label or o.package }} <span class="mono small muted">{{ o.package if o.label else "" }}</span></td>
+        <td data-label="On device"><span class="badge badge-ok">{{ o.installed.version_name or "installed" }}</span></td>
+        <td data-label="Latest"><span class="muted small">uploaded</span></td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No apps yet. <a href="/install">Install one</a>.</p>
+  {% endif %}
+  {% endif %}
+
+  {% if card.recent %}
+  <h3>Recent installs</h3>
+  <ul class="recent-installs">
+    {% for i in card.recent %}
+    <li>
+      <span class="status-{{ i.status }}">{{ i.status }}</span>
+      {{ i.source_label }} {{ i.tag }}
+      <span class="muted small">{{ i.started_at | when }}</span>
+      <a href="/installs/{{ i.id }}" class="small">log</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endfor %}
 {% endblock %}

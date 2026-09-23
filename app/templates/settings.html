@@ -3,6 +3,11 @@
 {% block content %}
 <h1>Settings</h1>
 
+<p class="settings-jump">
+  <a href="#security">Security</a> · <a href="#notifications">Notifications</a> ·
+  <a href="#appearance">Appearance</a> · <a href="#activity">Activity</a>
+</p>
+
 <section id="security" class="settings-section">
   <h2>Security</h2>
   <h3>Two-factor sign-in</h3>
@@ -285,5 +290,13 @@
   </form>
   <p class="muted small">Tap a circle to choose a colour, then Apply — or name it and Save as preset to keep it
     in Saved. Saving an existing name updates it.</p>
+</section>
+<section id="activity" class="settings-section">
+  <h2>Activity</h2>
+  <p class="muted">Everything that happened, newest first.</p>
+  <ul class="link-list">
+    <li><a href="/installs">Install history</a>: every push, with its log.</li>
+    <li><a href="/audit">Audit log</a>: sign-ins, trust changes, pushes and settings changes.</li>
+  </ul>
 </section>
 {% endblock %}

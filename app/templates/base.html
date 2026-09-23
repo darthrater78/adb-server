@@ -22,10 +22,9 @@
       <a href="{{ repo_url }}" rel="noopener noreferrer" title="ADB Server on GitHub">GitHub</a>
     </span>
     <nav>
-      {% for href, label in [("/status", "Status"), ("/repos", "Repos"), ("/staged", "Staged"),
-                             ("/upload", "Upload"), ("/devices", "Devices"),
-                             ("/installs", "Installs"), ("/audit", "Audit"), ("/settings", "Settings")] %}
-      <a href="{{ href }}"{% if href == request.url.path %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+      {% for href, label in [("/status", "Status"), ("/sources", "Sources"), ("/devices", "Devices"),
+                             ("/install", "Install"), ("/settings", "Settings")] %}
+      <a href="{{ href }}"{% if href == nav_path %} class="active"{% if href == request.url.path %} aria-current="page"{% endif %}{% endif %}>{{ label }}</a>
       {% endfor %}
     </nav>
     <div class="theme-switcher" role="group" aria-label="Theme">
