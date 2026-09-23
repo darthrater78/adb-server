@@ -11,12 +11,11 @@
 - Local checkout is on `main`, in sync. Uncommitted, on purpose:
   `.claude/dev-skills-gates.md` (carries the v1.0.0 SHIP ✅ line; folds into
   the next release PR — never a bookkeeping-only PR).
-- Unreleased on `main` (CHANGELOG `## Unreleased`): **breaking** — data moved
+- 2.0.0 (release/v2.0.0, CHANGELOG `## 2.0.0`): **breaking** — data moved
   from named volumes to bind mounts under `/opt/docker/adb-server`
   (`adbkeys`, `appdata`, `mdns`), owned by uid 10001, `adbkeys`/`appdata`
   chmod 700. Compose comments now sit in a Notes block after the services.
-  The next release needs a version decision (breaking → major by the commit
-  signal; the user decides).
+  User chose 2.0.0 (major). README has an "Upgrading from 1.x" block.
 - 319 tests pass. No system pytest: make a venv, `pip install -r
   requirements-dev.txt` (now includes `mdns/requirements.txt`), then
   `bash scripts/test.sh`.
@@ -51,7 +50,7 @@ merged; RELEASE/SHIP ➖ N/A). 🔒 0 open. A new change starts a fresh track.
 **Waiting on the user:**
 1. Production (a different server, no access from here): pulling current
    `main` needs the data copied out of the named volumes first, or the adb key
-   (every pairing) and the DB are lost — commands in CHANGELOG `Unreleased`
+   (every pairing) and the DB are lost — commands in the README "Upgrading from 1.x" block
    and the PR #4 description. Then `docker compose up -d`.
 2. Test stack `adbtest` (port 18080, the user's phone is paired to it) is
    still running — ask before `docker compose -p adbtest down -v`.
