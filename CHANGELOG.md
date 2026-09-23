@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** data now lives in bind mounts under `/opt/docker/adb-server`
+  (`adbkeys`, `appdata`, `mdns`) instead of named volumes. Before recreating
+  the stack, create the directories and hand them to uid 10001 (see the README
+  quickstart), then copy the old volumes across, or the adb key (and with it
+  every phone pairing) and the database are lost:
+  `docker run --rm -v <project>_adbkeys:/src -v /opt/docker/adb-server/adbkeys:/dst alpine cp -a /src/. /dst/`,
+  and the same for `appdata`. `mdns` needs no copy.
+- Changed: the explanatory comments in `docker-compose.yml` moved to a Notes
+  block after the services, so the compose block itself is clean.
+
 ## 1.0.0 — 2026-09-23
 
 First stable release.
