@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Recovery codes — ADB Server{% endblock %}
+{% block content %}
+<h1>Recovery codes</h1>
+<p>Two-factor sign-in is on. If you lose your phone, each of these codes signs you in once, in place of the
+  6-digit code. <strong>They're shown only now</strong> — save them in a password manager or print them.</p>
+<ul class="recovery-codes mono">
+  {% for c in codes %}<li>{{ c }}</li>{% endfor %}
+</ul>
+<p class="muted small">Any recovery codes from before are no longer valid.</p>
+<p><a href="/settings#security" class="button-link">I've saved them</a></p>
+{% endblock %}

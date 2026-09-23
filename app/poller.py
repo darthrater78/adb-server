@@ -62,11 +62,18 @@ async def _download_and_verify(asset: dict, repo_dir: str) -> _Variant:
         # apksigner/aapt are blocking subprocesses (up to 60s each) — run them
         # in a worker thread so the single event loop keeps serving the UI.
         signer = await asyncio.to_thread(apk_verify.verify_signature, tmp_path)
+        # Nobody is watching when the poller runs, so a debug certificate
+        # (generated locally per machine, identifies nobody) is refused here.
+        # Manual uploads allow it with a warning — see main.upload_apk.
+        if signer.debug:
+            raise apk_verify.ApkVerifyError(
+                "APK is signed with the default Android debug certificate (CN=Android Debug)"
+            )
         info = await asyncio.to_thread(apk_verify.get_package_info, tmp_path)
     except apk_verify.ApkVerifyError as exc:
         staging.remove_file(tmp_path)
         raise _Rejected(f"APK verification failed for {asset['name']}: {exc}") from exc
-    return _Variant(asset, tmp_path, sha256, signer, info)
+    return _Variant(asset, tmp_path, sha256, signer.fingerprint, info)
 
 
 async def _check_pin(repo_row, tag: str, first: _Variant) -> None:

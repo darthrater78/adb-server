@@ -1,39 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Staged APKs — adb-server{% endblock %}
+{% block title %}Staged APKs — ADB Server{% endblock %}
 {% block content %}
 <h1>Staged APKs</h1>
 
 {% set trusted_devices = devices | selectattr("trusted") | list %}
 
+<p class="staged-intro">
+  <a href="/upload" class="button-link">Upload a development build</a>
+  <span class="muted small">for an APK that isn't a GitHub release</span>
+</p>
+
+<div class="table-wrap">
+
 <table>
   <thead>
     <tr>
-      <th>Repo</th><th>Tag</th><th>Version</th><th>File</th><th>CPU</th><th>Package</th><th>Signer SHA-256</th>
-      <th>Downloaded</th><th>Release notes</th><th>Push to</th>
+      <th>Source</th><th>Tag</th><th>Version</th><th>File</th><th>CPU</th><th>Package</th><th>Signer SHA-256</th>
+      <th>Downloaded</th><th>Push to</th>
     </tr>
   </thead>
   <tbody>
     {% for a in apks %}
-    <tr>
-      <td>{{ a.owner }}/{{ a.repo }}</td>
-      <td>{{ a.tag }}</td>
-      <td>{{ a.version_name or "—" }}</td>
-      <td>{{ a.filename }}</td>
-      <td class="mono small">{{ a.abis or "any" }}</td>
-      <td>{{ a.package_name }}</td>
-      <td class="mono small">{{ a.signer_sha256[:16] }}…</td>
-      <td>{{ a.downloaded_at }}</td>
-      <td>
-        {% if a.release_notes %}
-        <details>
-          <summary>Notes</summary>
-          <pre class="log release-notes">{{ a.release_notes }}</pre>
-        </details>
-        {% else %}
-        <span class="muted">—</span>
-        {% endif %}
+    <tr id="apk-{{ a.id }}"{% if a.release_notes %} class="has-notes"{% endif %}>
+      <td data-label="Source">
+        <span class="clip" title="{{ a.source_label }}">{{ a.source_label }}</span>
+        {% if a.is_debug %}<span class="badge badge-warn" title="Signed with the default Android debug certificate">debug build</span>{% endif %}
       </td>
-      <td>
+      <td data-label="Tag" class="nowrap">{{ a.tag }}</td>
+      <td data-label="Version" class="nowrap">{{ a.version_name or "—" }}</td>
+      <td data-label="File"><span class="clip" title="{{ a.filename }}">{{ a.filename }}</span></td>
+      <td data-label="CPU" class="mono small">{{ a.abis or "any" }}</td>
+      <td data-label="Package"><span class="clip" title="{{ a.package_name }}">{{ a.package_name }}</span></td>
+      <td data-label="Signer" class="mono small" title="{{ a.signer_sha256 }}">{{ a.signer_sha256[:16] }}…</td>
+      <td data-label="Downloaded">{{ a.downloaded_at | when }}</td>
+      <td data-label="Push to">
         {% if trusted_devices %}
         <form method="post" action="/push" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -54,9 +54,20 @@
         </form>
       </td>
     </tr>
+    {% if a.release_notes %}
+    <tr class="notes-row">
+      <td colspan="9">
+        <details>
+          <summary>Release notes for {{ a.version_name or a.tag }}</summary>
+          <pre class="release-notes">{{ a.release_notes }}</pre>
+        </details>
+      </td>
+    </tr>
+    {% endif %}
     {% else %}
-    <tr><td colspan="10">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
+    <tr><td colspan="9">Nothing staged yet — add a repo and wait for the next poll, use "Check now", or upload an APK above.</td></tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

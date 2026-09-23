@@ -53,7 +53,7 @@ def test_notify_sends_to_every_url(monkeypatch, fake_apprise):
     assert notify.send("staged", "o/r 1.0 ready", "body")
     ap = fake_apprise.instances[0]
     assert ap.urls == ["ntfy://ntfy.sh/topic", "json://host/hook"]
-    assert ap.sent == [("adb-server: o/r 1.0 ready", "body")]
+    assert ap.sent == [("ADB Server: o/r 1.0 ready", "body")]
 
 
 def test_notify_respects_event_filter(monkeypatch, fake_apprise):

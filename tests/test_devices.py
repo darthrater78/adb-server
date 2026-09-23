@@ -6,6 +6,7 @@ import adb_client
 import apk_verify
 import db
 import discovery
+import pushes
 import selection
 
 
@@ -42,24 +43,24 @@ DUMPSYS = """Packages:
 
 def test_installed_version(monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc(DUMPSYS))
-    assert adb_client.installed_version("SER", "com.example.app") == (41, "1.4.1")
+    assert adb_client.installed_version("192.168.1.50:37000", "com.example.app") == (41, "1.4.1")
 
 
 def test_installed_version_not_installed(monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc("Unable to find package: com.example.app\n"))
-    assert adb_client.installed_version("SER", "com.example.app") is None
+    assert adb_client.installed_version("192.168.1.50:37000", "com.example.app") is None
 
 
 @pytest.mark.parametrize("pkg", ["com.x;reboot", "com.x && rm -rf /", "$(id)", "nodots", "-flag.x", ""])
 def test_package_name_is_validated_before_reaching_the_device_shell(pkg, monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: pytest.fail("adb must not run"))
     with pytest.raises(adb_client.AdbError):
-        adb_client.installed_version("SER", pkg)
+        adb_client.installed_version("192.168.1.50:37000", pkg)
 
 
 def test_device_abis_filters_junk(monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc("arm64-v8a,armeabi-v7a,bad abi!\n"))
-    assert adb_client.device_abis("SER") == ["arm64-v8a", "armeabi-v7a"]
+    assert adb_client.device_abis("192.168.1.50:37000") == ["arm64-v8a", "armeabi-v7a"]
 
 
 # ---- variant selection ----
@@ -136,7 +137,7 @@ class FakeAdb:
 def test_ensure_connected_uses_stored_address(monkeypatch, device):
     FakeAdb(monkeypatch, "192.168.1.50:37000")
     monkeypatch.setattr(discovery, "find_device_port", lambda *a: pytest.fail("no scan needed"))
-    assert discovery.ensure_connected(device) == "192.168.1.50:37000"
+    assert discovery.ensure_connected(device) == ("SER", "192.168.1.50:37000")
 
 
 def test_ensure_connected_scans_when_port_is_stale(monkeypatch, device):
@@ -145,7 +146,7 @@ def test_ensure_connected_scans_when_port_is_stale(monkeypatch, device):
     async def open_ports(ip, ports):
         return [40000, 41999]
     monkeypatch.setattr(discovery, "_open_ports", open_ports)
-    assert discovery.ensure_connected(device) == "192.168.1.50:41999"
+    assert discovery.ensure_connected(device) == ("SER", "192.168.1.50:41999")
     assert db.get_device("SER")["last_connect_addr"] == "192.168.1.50:41999"
     assert "192.168.1.50:40000" in fake.connects  # tried, rejected, moved on
 
@@ -162,6 +163,62 @@ def test_ensure_connected_without_scan(monkeypatch, device):
     monkeypatch.setattr(discovery, "find_device_port", lambda *a: pytest.fail("scan disabled"))
     with pytest.raises(adb_client.AdbError, match="not reachable"):
         discovery.ensure_connected(device, allow_scan=False)
+
+
+def test_get_serialno_reads_the_hardware_serial(monkeypatch):
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(args)
+        return _proc("R5CT1234ABC\n")
+    monkeypatch.setattr(adb_client, "_run", run)
+    assert adb_client.get_serialno("192.168.1.50:37000") == "R5CT1234ABC"
+    assert calls == [("-s", "192.168.1.50:37000", "shell", "getprop", "ro.serialno")]
+
+
+def test_get_serialno_falls_back_to_boot_serial(monkeypatch):
+    out = iter(["\n", "BOOT123\n"])
+    monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc(next(out)))
+    assert adb_client.get_serialno("192.168.1.50:37000") == "BOOT123"
+
+
+@pytest.mark.parametrize("junk", ["", "unknown", "10.0.0.5:4444", "-flag", "a b"])
+def test_get_serialno_rejects_non_serials(monkeypatch, junk):
+    monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc(junk + "\n"))
+    with pytest.raises(adb_client.AdbError):
+        adb_client.get_serialno("192.168.1.50:37000")
+
+
+@pytest.fixture
+def legacy_device():
+    """Paired before 1.0: filed under its ip:port, with history attached."""
+    db.upsert_paired_device("192.168.1.50:37000", "192.168.1.50:37000")
+    db.set_device_trusted("192.168.1.50:37000", True)
+    db.set_device_nickname("192.168.1.50:37000", "Dad")
+    db.upsert_device_package("192.168.1.50:37000", "com.example", installed=True)
+    return db.get_device("192.168.1.50:37000")
+
+
+def test_legacy_device_is_rekeyed_when_found_on_a_new_port(monkeypatch, legacy_device):
+    FakeAdb(monkeypatch, "192.168.1.50:41999", serial="R5CT1234ABC")
+
+    async def open_ports(ip, ports):
+        return [41999]
+    monkeypatch.setattr(discovery, "_open_ports", open_ports)
+    assert discovery.ensure_connected(legacy_device) == ("R5CT1234ABC", "192.168.1.50:41999")
+    assert db.get_device("192.168.1.50:37000") is None
+    moved = db.get_device("R5CT1234ABC")
+    assert (moved["nickname"], moved["trusted"], moved["last_connect_addr"]) == ("Dad", 1, "192.168.1.50:41999")
+    assert ("R5CT1234ABC", "com.example") in db.device_packages_map()
+
+
+def test_legacy_device_on_another_ip_is_not_adopted(monkeypatch, legacy_device):
+    FakeAdb(monkeypatch, "192.168.1.51:41999", serial="R5CT1234ABC")
+    assert not discovery.is_same_device("192.168.1.50:37000", "192.168.1.51:41999", "R5CT1234ABC")
+
+
+def test_real_serial_never_matches_by_ip():
+    assert not discovery.is_same_device("SER", "192.168.1.50:37000", "OTHER")
 
 
 def test_find_device_port_refuses_public_ip(monkeypatch):
@@ -181,3 +238,62 @@ def test_port_range(raw, expected, monkeypatch):
         monkeypatch.setenv("ADB_SCAN_PORTS", raw)
     r = discovery._port_range()
     assert (r.start, r.stop - 1) == expected
+
+
+def test_connect_waits_until_the_device_is_ready(monkeypatch):
+    states = iter(["offline", "offline", "device"])
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(args)
+        if args[0] == "connect":
+            return _proc("connected to 192.168.1.50:37000\n")
+        state = next(states)
+        return _proc(state + "\n") if state == "device" else _proc("", 1, f"error: device {state}\n")
+    monkeypatch.setattr(adb_client, "_run", run)
+    monkeypatch.setattr(adb_client.time, "sleep", lambda s: None)
+    adb_client.connect("192.168.1.50:37000")
+    assert sum(1 for c in calls if "get-state" in c) == 3
+
+
+def test_connect_gives_up_if_never_ready(monkeypatch):
+    clock = iter(range(0, 1000, 5))
+    monkeypatch.setattr(adb_client.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(adb_client.time, "sleep", lambda s: None)
+    monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc("connected\n") if a[0] == "connect"
+                        else _proc("", 1, "error: device offline\n"))
+    with pytest.raises(adb_client.AdbError, match="never became ready"):
+        adb_client.connect("192.168.1.50:37000")
+
+
+def test_connect_reports_an_unauthorized_key(monkeypatch):
+    monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc("connected\n") if a[0] == "connect"
+                        else _proc("", 1, "error: device unauthorized.\n"))
+    with pytest.raises(adb_client.AdbError, match="pair it again"):
+        adb_client.connect("192.168.1.50:37000")
+
+
+def test_legacy_record_never_reaches_another_registered_phone(monkeypatch, legacy_device):
+    """The legacy IP answers as a phone that has its own (untrusted) record:
+    a push through the legacy record must not install on it."""
+    db.upsert_paired_device("OTHERPHONE", "192.168.1.50:41999")
+    FakeAdb(monkeypatch, "192.168.1.50:37000", serial="OTHERPHONE")
+    with pytest.raises(adb_client.AdbError, match="different serial"):
+        discovery.ensure_connected(legacy_device)
+    assert db.get_device("192.168.1.50:37000")["trusted"] == 1  # nothing merged
+    assert db.get_device("OTHERPHONE")["trusted"] == 0
+
+
+def test_push_rechecks_trust_when_it_runs(monkeypatch, device):
+    db.set_device_trusted("SER", True)
+    rid = db.create_repo("o", "r", "*.apk")
+    apk_id = db.insert_staged_apk(repo_id=rid, tag="v1", filename="a.apk", sha256="a" * 64,
+                                  package_name="com.example", signer_sha256="b" * 64, path="/nope.apk")
+    apk = db.get_staged_apk(apk_id)
+    install_id = pushes.create_install(db.get_device("SER"), apk)
+    db.set_device_trusted("SER", False)  # revoked while the push was queued
+    FakeAdb(monkeypatch, "192.168.1.50:37000")
+    monkeypatch.setattr(adb_client, "install", lambda *a: pytest.fail("must not install"))
+    pushes.run_push(install_id, dict(db.get_device("SER")), dict(apk))
+    install = db.get_install(install_id)
+    assert install["status"] == "failed" and "no longer trusted" in install["log"]

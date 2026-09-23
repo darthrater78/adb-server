@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Pair with QR code — ADB Server{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="2">{% endblock %}
+{% block content %}
+<h1>Pair with QR code</h1>
+
+<div class="qr-pairing">
+  <div class="qr-code" role="img" aria-label="Pairing QR code">{{ qr_svg | safe }}</div>
+  <div class="qr-steps">
+    <ol>
+      <li>On the phone: <strong>Settings → Developer options → Wireless debugging</strong>.</li>
+      <li>Tap <strong>Pair device with QR code</strong> and scan this code.</li>
+      <li>Keep this page open — it pairs and adds the phone by itself as soon as the phone answers.</li>
+    </ol>
+    <p class="flash flash-warn"><strong>A phone paired this way is trusted straight away</strong> — it can receive
+      pushes and auto-updates without another step. To review a phone before trusting it,
+      <a href="/devices">pair it with a code</a> instead.</p>
+    <p class="muted small">The phone must be on the same network as this server. The code works once, and expires
+      in {{ qr.seconds_left() }} seconds.</p>
+    {% if not listener %}
+    <p class="flash flash-error">The mdns container has stopped, so the phone's answer can't be heard.
+      Start it again with <code>docker compose up -d</code>.</p>
+    {% endif %}
+    <p><a href="/devices" class="button-link secondary">Cancel</a></p>
+  </div>
+</div>
+<p class="muted small">This page refreshes automatically every 2 seconds.</p>
+{% endblock %}

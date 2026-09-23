@@ -16,10 +16,10 @@ class PushRefused(Exception):
     pass
 
 
-def refresh_abis(serial: str) -> str:
+def refresh_abis(serial: str, addr: str) -> str:
     """Best effort: a device that can't be queried keeps its last known ABIs."""
     try:
-        abis = adb_client.device_abis(serial)
+        abis = adb_client.device_abis(addr)
     except adb_client.AdbError:
         device = db.get_device(serial)
         return device["abis"] if device else ""
@@ -27,9 +27,9 @@ def refresh_abis(serial: str) -> str:
     return " ".join(abis)
 
 
-def refresh_installed(serial: str, package: str) -> None:
+def refresh_installed(serial: str, addr: str, package: str) -> None:
     try:
-        version = adb_client.installed_version(serial, package)
+        version = adb_client.installed_version(addr, package)
     except adb_client.AdbError:
         return
     if version is None:
@@ -65,16 +65,21 @@ def run_push(install_id: int, device: dict, apk: dict) -> None:
         # Wireless ADB ports drift. Re-resolve and re-confirm identity
         # immediately before installing (scanning the device's IP if its
         # stored port went stale) rather than trusting the last pairing.
-        discovery.ensure_connected(device)
-        device_abis = refresh_abis(device["serial"])
+        serial, addr = discovery.ensure_connected(device)
+        # Trust again, as it stands now, for whichever record answered: it
+        # may have been revoked since the push was queued.
+        current = db.get_device(serial)
+        if current is None or not current["trusted"]:
+            raise adb_client.AdbError("Device is no longer trusted — not installed")
+        device_abis = refresh_abis(serial, addr)
         if not selection.compatible(apk["abis"], device_abis):
             raise adb_client.AdbError(
                 f"{apk['filename']} is built for {apk['abis']}, but this device supports {device_abis}"
             )
-        result = adb_client.install(device["serial"], apk["path"])
+        result = adb_client.install(addr, apk["path"])
         log = ((result.stdout or "") + (result.stderr or "")).strip()[:8000]
         status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
-        refresh_installed(device["serial"], apk["package_name"])
+        refresh_installed(serial, addr, apk["package_name"])
     except adb_client.AdbError as exc:
         log = str(exc)
     except Exception:
@@ -84,7 +89,7 @@ def run_push(install_id: int, device: dict, apk: dict) -> None:
         logger.exception("push job %s crashed", install_id)
         log = "Internal error during push — check server logs"
     db.finish_install(install_id, status, log)
-    what = f"{apk['owner']}/{apk['repo']} {apk.get('version_name') or apk['tag']}"
+    what = f"{apk['source_label']} {apk.get('version_name') or apk['tag']}"
     if status == "success":
         notify.send("install_success", f"Installed {what}", f"on {_device_label(device)}")
     else:

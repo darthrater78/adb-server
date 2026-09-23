@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ADB Server">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a4f48"/>
+      <stop offset="1" stop-color="#12a594"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#tile)"/>
+  <!-- the package: an isometric box -->
+  <path d="M25 26 L38 33.5 L38 48.5 L25 56 L12 48.5 L12 33.5 Z"
+        fill="#ffffff" fill-opacity="0.16" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M12 33.5 L25 41 L38 33.5 M25 41 V56"
+        fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- the push: an arrow launching out of it -->
+  <path d="M33 24 C36 16 42 11.5 51 11" fill="none" stroke="#c6f35e" stroke-width="4" stroke-linecap="round"/>
+  <path d="M45 6.5 L52 11 L46.5 17" fill="none" stroke="#c6f35e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

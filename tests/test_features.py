@@ -2,6 +2,7 @@ import asyncio
 import os
 import socket
 import sqlite3
+from urllib.parse import unquote
 
 import pytest
 
@@ -68,7 +69,7 @@ def test_status_page_shows_update_available(authed, trusted_device):
 def test_status_refresh_records_versions(authed, trusted_device, monkeypatch):
     rid = db.create_repo("o", "r", "*.apk")
     db.update_repo_check(rid, expected_package="com.example", signer_sha256="a" * 64)
-    monkeypatch.setattr(discovery, "ensure_connected", lambda d, allow_scan=True: d["last_connect_addr"])
+    monkeypatch.setattr(discovery, "ensure_connected", lambda d, allow_scan=True: (d["serial"], d["last_connect_addr"]))
     monkeypatch.setattr(adb_client, "device_abis", lambda s: ["arm64-v8a"])
     monkeypatch.setattr(adb_client, "installed_version", lambda s, p: (7, "0.7"))
     authed.post("/status/refresh", data={"csrf_token": CSRF})
@@ -143,3 +144,47 @@ def test_migration_from_0_2_0_keeps_install_history(tmp_path, monkeypatch):
     with sqlite3.connect(path) as conn:
         fk = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'installs'").fetchone()[0]
     assert "REFERENCES staged_apks(id)" in fk
+
+
+def test_status_update_asks_for_confirmation(authed, trusted_device):
+    rid = db.create_repo("o", "r", "*.apk")
+    _stage(rid, "v2", "app.apk", version_name="2.0")
+    page = authed.get("/status").text
+    # The visible control only opens the dialog; the POST lives inside it.
+    assert 'href="#confirm-' in page and 'class="modal"' in page
+    dialog = page[page.index('class="modal"'):]
+    assert 'action="/push-latest"' in dialog and 'name="csrf_token"' in dialog
+    assert "Cancel" in dialog and "2.0" in dialog
+
+
+def test_repairing_a_legacy_device_keeps_its_record(authed, monkeypatch):
+    db.upsert_paired_device("192.168.1.50:37000", "192.168.1.50:37000")
+    db.set_device_trusted("192.168.1.50:37000", True)
+    db.set_device_nickname("192.168.1.50:37000", "Dad")
+    monkeypatch.setattr(adb_client, "pair", lambda a, c: "Successfully paired")
+    monkeypatch.setattr(adb_client, "connect", lambda a: "connected")
+    monkeypatch.setattr(adb_client, "get_serialno", lambda a: "R5CT1234ABC")
+    monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
+    r = authed.post("/devices/pair", data={
+        "csrf_token": CSRF, "pairing_addr": "192.168.1.50:40001",
+        "pairing_code": "123456", "connect_addr": "192.168.1.50:41999",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    assert [d["serial"] for d in db.list_devices()] == ["R5CT1234ABC"]
+    device = db.get_device("R5CT1234ABC")
+    # Same IP isn't proof of the same phone: history kept, trust given again by hand.
+    assert (device["nickname"], device["trusted"], device["last_connect_addr"]) == ("Dad", 0, "192.168.1.50:41999")
+    assert "trust it again" in unquote(r.headers["location"])
+    assert "trust cleared" in db.list_audit()[0]["detail"]
+
+
+def test_code_pairing_still_starts_untrusted(authed, monkeypatch):
+    monkeypatch.setattr(adb_client, "pair", lambda a, c: "Successfully paired")
+    monkeypatch.setattr(adb_client, "connect", lambda a: "connected")
+    monkeypatch.setattr(adb_client, "get_serialno", lambda a: "NEWPHONE1")
+    monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
+    authed.post("/devices/pair", data={
+        "csrf_token": CSRF, "pairing_addr": "192.168.1.60:40001",
+        "pairing_code": "123456", "connect_addr": "192.168.1.60:41999",
+    })
+    assert db.get_device("NEWPHONE1")["trusted"] == 0

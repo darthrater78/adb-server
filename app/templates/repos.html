@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Repos — adb-server{% endblock %}
+{% block title %}Repos — ADB Server{% endblock %}
 {% block content %}
 <h1>Watched repos</h1>
 
@@ -48,6 +48,8 @@
 </p>
 {% endif %}
 
+<div class="table-wrap">
+
 <table>
   <thead>
     <tr>
@@ -58,15 +60,15 @@
   <tbody>
     {% for r in repos %}
     <tr>
-      <td><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a></td>
-      <td class="mono small">{{ r.asset_glob }}</td>
-      <td class="mono small">{{ r.expected_package or "—" }}</td>
-      <td>
+      <td data-label="Repo"><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a></td>
+      <td data-label="Asset glob" class="mono small">{{ r.asset_glob }}</td>
+      <td data-label="Pinned package" class="mono small">{{ r.expected_package or "—" }}</td>
+      <td data-label="Last tag">
         {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}
         {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
       </td>
-      <td class="muted small">{{ r.last_checked_at or "never" }}</td>
-      <td>
+      <td data-label="Last checked" class="small">{{ r.last_checked_at | when }}</td>
+      <td data-label="Status">
         {% if r.last_error %}
         <span class="badge badge-error" title="{{ r.last_error }}">Error</span>
         {% else %}
@@ -76,12 +78,12 @@
       <td class="actions">
         <form method="post" action="/repos/{{ r.id }}/check-now">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit">Check now</button>
+          <button type="submit" class="secondary">Check now</button>
         </form>
         <form method="post" action="/repos/{{ r.id }}/prereleases">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="include" value="{{ '0' if r.include_prereleases else '1' }}">
-          <button type="submit">{{ "Stable only" if r.include_prereleases else "Include pre-releases" }}</button>
+          <button type="submit" class="secondary">{{ "Stable only" if r.include_prereleases else "Include pre-releases" }}</button>
         </form>
         <form method="post" action="/repos/{{ r.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -94,4 +96,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

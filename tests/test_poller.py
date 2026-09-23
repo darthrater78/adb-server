@@ -21,6 +21,7 @@ class FakeUpstream:
     def __init__(self, monkeypatch):
         self.tag = "v1"
         self.signer = SIGNER_A
+        self.debug = False
         self.package = "com.example.app"
         self.assets = {"app.apk": ()}  # asset name -> ABIs its APK reports
         self.lineage: list[str] = []
@@ -29,7 +30,8 @@ class FakeUpstream:
         self._abis_by_path: dict[str, tuple] = {}
         monkeypatch.setattr(github_client, "get_latest_release", self._release)
         monkeypatch.setattr(github_client, "download_asset", self._download)
-        monkeypatch.setattr(apk_verify, "verify_signature", lambda path: self.signer)
+        monkeypatch.setattr(apk_verify, "verify_signature",
+                            lambda path: apk_verify.SignerInfo(self.signer, self.debug))
         monkeypatch.setattr(apk_verify, "get_package_info", self._info)
         monkeypatch.setattr(apk_verify, "signing_lineage", lambda path: self.lineage)
 
@@ -159,7 +161,8 @@ def test_all_abi_variants_of_a_release_are_staged(upstream):
 def test_variants_with_different_signers_reject_the_release(upstream, monkeypatch):
     upstream.assets = {"a.apk": (), "b.apk": ()}
     signers = iter([SIGNER_A, SIGNER_B])
-    monkeypatch.setattr(apk_verify, "verify_signature", lambda path: next(signers))
+    monkeypatch.setattr(apk_verify, "verify_signature",
+                        lambda path: apk_verify.SignerInfo(next(signers), False))
     rid = db.create_repo("o", "r", "*.apk")
     _poll(rid)
     assert db.list_staged_apks() == []
@@ -215,3 +218,13 @@ def test_accepting_pending_signer_repins(upstream):
     repo = db.get_repo(rid)
     assert repo["signer_sha256"] == SIGNER_B and repo["last_tag"] == "v2" and repo["last_error"] is None
     assert not db.accept_pending_signer(rid)  # nothing pending any more
+
+
+def test_debug_signed_release_is_refused_and_not_pinned(upstream):
+    upstream.debug = True
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    repo = db.get_repo(rid)
+    assert db.list_staged_apks() == []
+    assert "debug certificate" in repo["last_error"]
+    assert repo["signer_sha256"] is None

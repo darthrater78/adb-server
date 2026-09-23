@@ -55,26 +55,91 @@ async def _open_ports(ip: str, ports: range) -> list[int]:
     return [p for p in results if p is not None]
 
 
-def find_device_port(ip: str, serial: str) -> str | None:
-    """Returns the ip:port where `serial` now answers, or None. Blocking —
-    call from a worker thread, never from the event loop."""
-    adb_client._validate_addr(f"{ip}:5555")  # private-IP check on the host part
+def is_legacy_serial(serial: str) -> bool:
+    """Devices paired before 1.0 were recorded under adb's transport name —
+    their ip:port at pairing time — instead of their hardware serial."""
+    try:
+        adb_client._validate_addr(serial)
+    except adb_client.AdbError:
+        return False
+    return True
+
+
+def is_same_device(stored: str, addr: str, confirmed: str) -> bool:
+    if confirmed == stored:
+        return True
+    # A legacy record has no real serial to compare, so the best available
+    # proof is the one it was already relying on: the device is on the IP it
+    # was paired on, and it completed the TLS handshake — which a phone only
+    # does for a host key it has paired with. Never when the serial that
+    # answered already has its own record: that's a different phone that took
+    # over the IP, and it keeps its own trust (a push must not reach it
+    # through the legacy record's).
+    return is_legacy_serial(stored) and db.get_device(confirmed) is None and (
+        adb_client.split_host_port(stored)[0] == adb_client.split_host_port(addr)[0]
+    )
+
+
+def record(stored: str, confirmed: str, addr: str) -> str:
+    """Stores the working address, upgrading a legacy record to its real
+    serial. Returns the serial the device is now filed under."""
+    if confirmed != stored:
+        if db.rename_device(stored, confirmed):
+            logger.info("%s: re-keyed to its hardware serial %s", stored, confirmed)
+        else:
+            logger.warning("%s: %s is already paired separately; using that record", stored, confirmed)
+    db.touch_device(confirmed, addr)
+    return confirmed
+
+
+def find_device_port(ip: str, serial: str) -> tuple[str, str] | None:
+    """Returns (confirmed serial, ip:port) where `serial` now answers, or
+    None. Blocking — call from a worker thread, never from the event loop."""
+    adb_client._validate_addr(adb_client.join_host_port(ip, 5555))  # private-IP check on the host part
     open_ports = asyncio.run(_open_ports(ip, _port_range()))
     for port in open_ports[:MAX_CANDIDATES]:
-        addr = f"{ip}:{port}"
+        addr = adb_client.join_host_port(ip, port)
         try:
             adb_client.connect(addr)
-            if adb_client.get_serialno(addr) == serial:
-                return addr
+            confirmed = adb_client.get_serialno(addr)
         except adb_client.AdbError:
             continue
+        if is_same_device(serial, addr, confirmed):
+            return confirmed, addr
     return None
 
 
-def ensure_connected(device, allow_scan: bool = True) -> str:
-    """Connects to `device` and confirms its identity, returning the working
-    address. Falls back to a port scan of its last IP when the stored port has
-    gone stale, and records the new address when that finds it."""
+def first_device_on(ip: str, candidates: list[str] = ()) -> tuple[str, str] | None:
+    """(serial, ip:port) of the first address on `ip` that connects and
+    reports a serial: the `candidates` first, then a scan of the port range.
+    For a phone that has only just been paired, so has no serial to match
+    yet. Blocking — call from a worker thread."""
+    adb_client._validate_addr(adb_client.join_host_port(ip, 5555))  # private-IP check on the host part
+    tried = set()
+
+    def attempt(addr: str) -> tuple[str, str] | None:
+        tried.add(addr)
+        try:
+            adb_client.connect(addr)
+            return adb_client.get_serialno(addr), addr
+        except adb_client.AdbError:
+            return None
+
+    for addr in candidates:  # repeats allowed: a caller can ask for a retry
+        if (found := attempt(addr)):
+            return found
+    for port in asyncio.run(_open_ports(ip, _port_range()))[:MAX_CANDIDATES]:
+        addr = adb_client.join_host_port(ip, port)
+        if addr not in tried and (found := attempt(addr)):
+            return found
+    return None
+
+
+def ensure_connected(device, allow_scan: bool = True) -> tuple[str, str]:
+    """Connects to `device` and confirms its identity, returning (serial,
+    working address). The serial differs from device["serial"] only when a
+    legacy record was just upgraded. Falls back to a port scan of its last
+    IP when the stored port has gone stale, and records the new address."""
     serial, addr = device["serial"], device["last_connect_addr"]
     if not addr:
         raise adb_client.AdbError("No known address for this device — reconnect it on the Devices page")
@@ -83,21 +148,20 @@ def ensure_connected(device, allow_scan: bool = True) -> str:
         confirmed = adb_client.get_serialno(addr)
     except adb_client.AdbError:
         confirmed = None
-    if confirmed == serial:
-        db.touch_device(serial, addr)
-        return addr
     if confirmed is not None:
+        if is_same_device(serial, addr, confirmed):
+            return record(serial, confirmed, addr), addr
         # Something answered, but it's a different device: never scan past
         # an identity mismatch, surface it.
         raise adb_client.AdbError("Device address now answers as a different serial")
     if not allow_scan:
         raise adb_client.AdbError(f"Device not reachable at {addr}")
-    ip = addr.rpartition(":")[0]
+    ip = adb_client.split_host_port(addr)[0]
     logger.info("%s: stale address %s, scanning %s", serial, addr, ip)
     found = find_device_port(ip, serial)
     if found is None:
         raise adb_client.AdbError(
             f"Device not found on {ip} — is wireless debugging on, and is it still at that IP?"
         )
-    db.touch_device(serial, found)
-    return found
+    confirmed, found_addr = found
+    return record(serial, confirmed, found_addr), found_addr

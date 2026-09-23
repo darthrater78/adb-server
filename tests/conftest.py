@@ -44,5 +44,5 @@ CSRF = "test-csrf-token"
 
 @pytest.fixture
 def authed(client):
-    client.cookies.set(auth.COOKIE_NAME, auth._serializer.dumps({"authenticated": True, "csrf": CSRF}))
+    client.cookies.set(auth.COOKIE_NAME, auth._serializer.dumps({"authenticated": True, "csrf": CSRF, "epoch": db.get_session_epoch()}))
     return client

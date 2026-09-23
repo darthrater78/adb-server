@@ -1,6 +1,10 @@
 services:
   adb-server:
     build: ./adb-server
+    # adb labels its key "<LOGNAME>@<hostname>" when it pairs, and that label
+    # is the name phones list this server under. Without this it's Docker's
+    # random container ID, which changes on every recreate.
+    hostname: adbserver
     networks: [internal]
     volumes:
       - adbkeys:/home/adb/.android
@@ -21,6 +25,26 @@ services:
     # interfaces inside its own container (needed so `app` can reach it), and
     # host networking would put that unauthenticated port directly on your LAN.
 
+  mdns:
+    build: ./mdns
+    # Host networking, because mDNS multicast doesn't cross Docker's bridge:
+    # it's how a phone that scanned a pairing QR code announces its port.
+    # Safe here, unlike on adb-server: this container only listens for
+    # announcements, opens no port of its own besides mDNS, and holds no
+    # keys. It reaches the app only through the mdns volume, read-only there.
+    network_mode: host
+    volumes:
+      - mdns:/mdns
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.stat('/mdns/services.json')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
   app:
     build:
       context: .
@@ -31,6 +55,7 @@ services:
       - "8080:8080"
     volumes:
       - appdata:/data
+      - mdns:/mdns:ro
     env_file: .env
     restart: unless-stopped
     healthcheck:
@@ -41,6 +66,15 @@ services:
       start_period: 20s
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # Everything the app writes lives on /data. /tmp is still needed: apksigner
+    # runs under a JVM, which writes there. Sized, because tmpfs is memory —
+    # uploads are spooled to /data instead (tempfile.tempdir in main.py).
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+      # The `adb` client aborts if it can't create ~/.android. It holds no keys
+      # here (the adb-server container does), so a tiny tmpfs is enough.
+      - /home/appuser/.android:size=1m,uid=10001,gid=10001,mode=0700
     # Bound to all interfaces — reachable from your LAN over plain HTTP. This
     # is a deliberate, deferred trade-off, not an oversight: the login
     # password and session cookie travel in cleartext to anyone else on the
@@ -54,3 +88,4 @@ networks:
 volumes:
   adbkeys:
   appdata:
+  mdns:

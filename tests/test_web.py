@@ -105,3 +105,13 @@ def test_rate_limit_forgets_expired_clients(client, monkeypatch):
         client = type("C", (), {"host": "10.9.9.9"})()
     auth.check_rate_limit(Req())
     assert "10.9.9.9" not in auth._failed_attempts
+
+
+def test_header_links_to_the_repo_and_this_versions_release_notes(authed):
+    import main
+
+    page = authed.get("/status").text
+    header = page[page.index("<header"):page.index("</header>")]
+    assert 'href="https://github.com/darthrater78/adb-server"' in header
+    assert f'href="https://github.com/darthrater78/adb-server/releases/tag/v{main.APP_VERSION}"' in header
+    assert main.APP_VERSION != "unknown"
