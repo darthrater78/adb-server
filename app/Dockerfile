@@ -63,10 +63,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ .
 COPY VERSION .
-# /mdns: the mdns listener's announcements, mounted read-only (see
-# docker-compose.yml). Created here too, owned like the listener's, in case
-# this container starts first and creates the shared volume.
-RUN mkdir -p /data/staging /mdns && chown -R appuser:appuser /data /app /mdns
+RUN mkdir -p /data/staging && chown -R appuser:appuser /data /app
 
 USER appuser
 EXPOSE 8080

@@ -109,32 +109,6 @@ def find_device_port(ip: str, serial: str) -> tuple[str, str] | None:
     return None
 
 
-def first_device_on(ip: str, candidates: list[str] = ()) -> tuple[str, str] | None:
-    """(serial, ip:port) of the first address on `ip` that connects and
-    reports a serial: the `candidates` first, then a scan of the port range.
-    For a phone that has only just been paired, so has no serial to match
-    yet. Blocking — call from a worker thread."""
-    adb_client._validate_addr(adb_client.join_host_port(ip, 5555))  # private-IP check on the host part
-    tried = set()
-
-    def attempt(addr: str) -> tuple[str, str] | None:
-        tried.add(addr)
-        try:
-            adb_client.connect(addr)
-            return adb_client.get_serialno(addr), addr
-        except adb_client.AdbError:
-            return None
-
-    for addr in candidates:  # repeats allowed: a caller can ask for a retry
-        if (found := attempt(addr)):
-            return found
-    for port in asyncio.run(_open_ports(ip, _port_range()))[:MAX_CANDIDATES]:
-        addr = adb_client.join_host_port(ip, port)
-        if addr not in tried and (found := attempt(addr)):
-            return found
-    return None
-
-
 def ensure_connected(device, allow_scan: bool = True) -> tuple[str, str]:
     """Connects to `device` and confirms its identity, returning (serial,
     working address). The serial differs from device["serial"] only when a

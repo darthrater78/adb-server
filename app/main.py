@@ -28,7 +28,6 @@ import mfa
 import notify
 import poller
 import pushes
-import qr_pairing
 import selection
 import staging
 
@@ -630,10 +629,8 @@ def pair_device(
     return _register_paired(request, serial, addr)
 
 
-def _register_paired(request: Request, serial: str, addr: str, trust: bool = False) -> RedirectResponse:
-    """Records a just-paired, connected device. `trust` for a QR pairing:
-    only the phone that scanned our code can complete one, which is as much
-    proof of having it in hand as trusting it by hand would add."""
+def _register_paired(request: Request, serial: str, addr: str) -> RedirectResponse:
+    """Records a just-paired, connected device."""
     adopted = None
     if db.get_device(serial) is None:
         # Re-pairing a phone recorded before 1.0 under its old ip:port: carry
@@ -649,51 +646,14 @@ def _register_paired(request: Request, serial: str, addr: str, trust: bool = Fal
                 break
     db.upsert_paired_device(serial, addr)
     pushes.refresh_abis(serial, addr)
-    _audit(request, "device_pair", f"{serial} at {addr}" + (" (QR code)" if trust else "")
+    _audit(request, "device_pair", f"{serial} at {addr}"
            + (f", took over the record of {adopted}; trust cleared" if adopted else ""))
-    if trust and not db.get_device(serial)["trusted"]:
-        db.set_device_trusted(serial, True)
-        _audit(request, "device_trust", f"{serial} trusted automatically: paired by QR code")
-        return _redirect("/devices", ok="Paired by QR code and trusted — it can receive pushes now")
     if db.get_device(serial)["trusted"]:
         return _redirect("/devices", ok="Paired")
     if adopted:
         return _redirect("/devices", ok="Paired. It took over the older record for that IP (nickname and history "
                                         "kept) — trust it again below if it's the same phone")
     return _redirect("/devices", ok="Paired. Trust the device below before it can receive pushes")
-
-
-@app.post("/devices/qr")
-def start_qr_pairing(request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
-    _check_csrf(request, session, csrf_token)
-    if not qr_pairing.listener_running():
-        return _redirect("/devices", error="QR pairing needs the mdns container running — "
-                                           "start it with docker compose up -d, or pair with a code")
-    return _redirect(f"/devices/qr/{qr_pairing.start().token}")
-
-
-@app.get("/devices/qr/{token}", response_class=HTMLResponse)
-def qr_pairing_page(token: str, request: Request, session: dict = Depends(auth.require_auth)):
-    """Shows the QR code and refreshes itself (no JavaScript allowed) until
-    the phone that scanned it is heard on the network, then pairs it. A sync
-    route, so the pairing and port scan run in the threadpool. A GET that
-    acts, but only on the session this signed-in user started, and only
-    once: the token is unguessable and single-use."""
-    qr = qr_pairing.get(token)
-    if qr is None:
-        return _redirect("/devices", error="That QR code has expired — start again")
-    pairing = qr_pairing.pairing_addr(qr)
-    if pairing is None:
-        return templates.TemplateResponse(request, "devices_qr.html", _tctx(
-            request, session, qr=qr, qr_svg=qr_pairing.svg(qr), listener=qr_pairing.listener_running(),
-        ))
-    if qr_pairing.take(token) is None:
-        return _redirect("/devices")  # another refresh of this page is already pairing
-    try:
-        serial, addr = qr_pairing.complete(qr, pairing)
-    except adb_client.AdbError as exc:
-        return _redirect("/devices", error=str(exc))
-    return _register_paired(request, serial, addr, trust=True)
 
 
 @app.post("/devices/{serial}/connect")

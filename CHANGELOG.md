@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.0.0 — 2026-09-23
+
+- **Breaking:** removed QR-code pairing and the `mdns` container it needed.
+  That container ran on the host network (mDNS multicast can't cross Docker's
+  bridge), and no container in this stack may. Nothing runs on host
+  networking any more. Pair with a pairing code instead. Finding a phone again
+  after its port changes still works, by scanning its last known IP.
+  To upgrade: pull the new compose file, run
+  `docker compose up -d --build --remove-orphans`, then
+  `sudo rm -rf /opt/docker/adb-server/mdns`. Paired phones and the database
+  are untouched.
+- Removed: automatic trust for QR-paired phones. Every newly paired device
+  now starts untrusted, until you trust it on the Devices page.
+- Removed: the `ghcr.io/darthrater78/adb-server/mdns` image is no longer
+  built or published.
+- Docs: the README now links to the repo and this version's release notes at
+  the top.
+
 ## 2.0.0 — 2026-09-23
 
 - **Breaking:** data now lives in bind mounts under `/opt/docker/adb-server`

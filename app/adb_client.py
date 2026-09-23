@@ -8,9 +8,6 @@ ADB_HOST = os.environ.get("ADB_HOST", "adb-server")
 ADB_PORT = os.environ.get("ADB_PORT", "5037")
 
 PAIRING_CODE_RE = re.compile(r"^\d{6}$")
-# The password inside a pairing QR code. We generate it (qr_pairing.py), so
-# it's always plain alphanumerics, which the QR's WIFI: format needs unescaped.
-QR_PASSWORD_RE = re.compile(r"^[A-Za-z0-9]{12,32}$")
 
 
 class AdbError(Exception):
@@ -76,15 +73,10 @@ def _run(*args: str, timeout: int) -> subprocess.CompletedProcess:
         raise AdbError(f"could not run adb: {exc}") from exc
 
 
-def pair(pairing_addr: str, code: str, qr: bool = False) -> str:
-    """`code` is the 6-digit code the phone shows, or with `qr` the password
-    from the QR code the phone scanned."""
+def pair(pairing_addr: str, code: str) -> str:
+    """`code` is the 6-digit code the phone shows."""
     pairing_addr = _validate_addr(pairing_addr)
-    if qr:
-        if not QR_PASSWORD_RE.match(code or ""):
-            raise AdbError("Invalid QR pairing password")
-    else:
-        code = _validate_pairing_code(code)
+    code = _validate_pairing_code(code)
     result = _run("pair", pairing_addr, code, timeout=15)
     if result.returncode != 0 or "successfully paired" not in result.stdout.lower():
         raise AdbError(result.stderr.strip() or result.stdout.strip() or "Pairing failed")
