@@ -27,6 +27,19 @@
 - New: signing-key rotation review — a pin mismatch shows both certificates
   and whether the new APK proves the rotation (APK Signature Scheme v3
   lineage); the new certificate can be accepted as the pin.
+- New: notifications through Apprise (`APPRISE_URLS`) for staged releases,
+  rejected releases and push results.
+- New: per-device auto-update — a device following an app gets each new
+  release pushed to it automatically.
+- New: per-repo "Include pre-releases" option.
+- New: audit log page recording logins, trust changes, re-pins, repo and
+  device changes and pushes.
+- New: `/healthz` and Docker health checks for both containers.
+- Changed: "Check now" and accepting a new signer run in the background
+  instead of holding the page open during the download; a repo is never
+  checked twice at once.
+- Changed: GitHub polls use conditional requests (ETags), so unchanged repos
+  don't count against the API rate limit.
 - New: automated test suite (`pytest`, run with `scripts/test.sh`).
 - New: CI builds both images and runs the tests on every push and PR;
   actionlint checks workflow edits; Dependabot watches pip, Docker base images

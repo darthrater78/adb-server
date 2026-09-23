@@ -7,6 +7,7 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>Repo URL <input type="text" name="repo_url" required placeholder="https://github.com/octocat/hello-world" size="40"></label>
   <label>Asset glob <input type="text" name="asset_glob" value="*.apk"></label>
+  <label><input type="checkbox" name="include_prereleases" value="1"> Include pre-releases</label>
   <button type="submit">Add repo</button>
 </form>
 
@@ -60,7 +61,10 @@
       <td><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a></td>
       <td class="mono small">{{ r.asset_glob }}</td>
       <td class="mono small">{{ r.expected_package or "—" }}</td>
-      <td>{% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>
+        {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}
+        {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
+      </td>
       <td class="muted small">{{ r.last_checked_at or "never" }}</td>
       <td>
         {% if r.last_error %}
@@ -73,6 +77,11 @@
         <form method="post" action="/repos/{{ r.id }}/check-now">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit">Check now</button>
+        </form>
+        <form method="post" action="/repos/{{ r.id }}/prereleases">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="include" value="{{ '0' if r.include_prereleases else '1' }}">
+          <button type="submit">{{ "Stable only" if r.include_prereleases else "Include pre-releases" }}</button>
         </form>
         <form method="post" action="/repos/{{ r.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

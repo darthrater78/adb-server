@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import zipfile
+from collections import OrderedDict
 
 import httpx
 
@@ -51,20 +52,51 @@ def parse_repo_reference(text: str) -> tuple[str, str]:
     return owner, repo
 
 
-async def get_latest_release(owner: str, repo: str, token: str | None) -> dict:
-    validate_owner_repo(owner, repo)
+# url -> (etag, parsed JSON). GitHub doesn't count a 304 Not Modified reply
+# against the rate limit, so re-polling an unchanged repo is free. One entry
+# per watched repo; bounded anyway so it can't grow without limit.
+_etag_cache: "OrderedDict[str, tuple[str, object]]" = OrderedDict()
+ETAG_CACHE_MAX = 512
+
+
+async def _get_json(url: str, token: str | None):
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    url = f"{GITHUB_API}/repos/{owner}/{repo}/releases/latest"
+    cached = _etag_cache.get(url)
+    if cached:
+        headers["If-None-Match"] = cached[0]
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(url, headers=headers)
+    if resp.status_code == 304 and cached:
+        _etag_cache.move_to_end(url)
+        return cached[1]
     if resp.status_code == 404:
         raise GithubError("Repo or release not found (private repo needs GITHUB_TOKEN)")
     if resp.status_code == 403:
         raise GithubError("GitHub API rate-limited or forbidden — check GITHUB_TOKEN")
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    etag = resp.headers.get("etag")
+    if etag:
+        _etag_cache[url] = (etag, data)
+        _etag_cache.move_to_end(url)
+        while len(_etag_cache) > ETAG_CACHE_MAX:
+            _etag_cache.popitem(last=False)
+    return data
+
+
+async def get_latest_release(owner: str, repo: str, token: str | None, include_prereleases: bool = False) -> dict:
+    """The newest release. /releases/latest skips pre-releases by design, so
+    when they're wanted, take the newest non-draft entry of /releases."""
+    validate_owner_repo(owner, repo)
+    if not include_prereleases:
+        return await _get_json(f"{GITHUB_API}/repos/{owner}/{repo}/releases/latest", token)
+    releases = await _get_json(f"{GITHUB_API}/repos/{owner}/{repo}/releases?per_page=10", token)
+    for release in releases:
+        if not release.get("draft"):
+            return release
+    raise GithubError("Repo has no published releases")
 
 
 def find_matching_assets(release: dict, glob_pattern: str) -> list[dict]:

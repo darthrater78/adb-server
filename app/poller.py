@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import apk_verify
 import db
 import github_client
+import notify
+import pushes
 import staging
 
 logger = logging.getLogger("poller")
@@ -16,6 +18,14 @@ MAX_RELEASE_NOTES_CHARS = 20_000
 # A release with per-ABI builds usually has 2-5 APKs. Cap it so one release
 # can't make the poller download dozens of files.
 MAX_VARIANTS_PER_RELEASE = 6
+
+
+# One check per repo at a time: "Check now" (a background task) and the
+# scheduled poll share the single event loop, so an asyncio.Lock is enough.
+_repo_locks: dict[int, asyncio.Lock] = {}
+# Strong references to fire-and-forget auto-update tasks, so they aren't
+# garbage-collected mid-run.
+_background: set[asyncio.Task] = set()
 
 
 class _Rejected(Exception):
@@ -98,11 +108,40 @@ def _stage(repo_row, tag: str, release: dict, variants: list[_Variant], repo_dir
 
 
 async def check_repo(repo_row) -> None:
+    lock = _repo_locks.setdefault(repo_row["id"], asyncio.Lock())
+    if lock.locked():
+        return  # a check of this repo is already running
+    async with lock:
+        # Re-read: the row passed in may be stale by the time the lock is held.
+        fresh = db.get_repo(repo_row["id"])
+        if fresh is not None:
+            await _check_repo(fresh)
+
+
+async def _notify(event: str, title: str, body: str) -> None:
+    await asyncio.to_thread(notify.send, event, title, body)
+
+
+async def _auto_update(repo_id: int) -> None:
+    for install_id, device, apk in pushes.auto_push_targets(repo_id):
+        logger.info("auto-update: %s %s -> %s", apk["repo"], apk["tag"], device["serial"])
+        await asyncio.to_thread(pushes.run_push, install_id, device, apk)
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def _check_repo(repo_row) -> None:
     owner, repo, glob_pattern = repo_row["owner"], repo_row["repo"], repo_row["asset_glob"]
     label = f"{owner}/{repo}"
 
     try:
-        release = await github_client.get_latest_release(owner, repo, GITHUB_TOKEN)
+        release = await github_client.get_latest_release(
+            owner, repo, GITHUB_TOKEN, include_prereleases=bool(repo_row["include_prereleases"]),
+        )
     except github_client.GithubError as exc:
         logger.warning("%s: %s", label, exc)
         db.update_repo_check(repo_row["id"], last_error=str(exc))
@@ -148,6 +187,7 @@ async def check_repo(repo_row) -> None:
             return
         pkg, signer, lineage_ok = exc.pending or (None, None, None)
         db.set_rejected_tag(repo_row["id"], tag, str(exc), pkg, signer, lineage_ok)
+        await _notify("rejected", f"{label} {tag} rejected", str(exc))
         return
 
     if repo_row["expected_package"] is None:
@@ -165,6 +205,10 @@ async def check_repo(repo_row) -> None:
     pruned = staging.prune_repo(repo_row["id"])
     if pruned:
         logger.info("%s: pruned %d old staged file(s)", label, pruned)
+    if staged:
+        version = first.info.version_name or tag
+        await _notify("staged", f"{label} {version} ready", f"{staged} APK(s) verified and staged.")
+        _spawn(_auto_update(repo_row["id"]))
 
 
 async def poll_all_repos() -> None:

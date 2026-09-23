@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS repos (
     pending_package   TEXT,
     pending_signer    TEXT,
     pending_lineage_ok INTEGER,
+    include_prereleases INTEGER NOT NULL DEFAULT 0,
     UNIQUE(owner, repo)
 );
 
@@ -59,6 +60,20 @@ CREATE TABLE IF NOT EXISTS device_packages (
     version_name  TEXT,
     checked_at    TEXT NOT NULL,
     PRIMARY KEY (device_serial, package_name)
+);
+
+CREATE TABLE IF NOT EXISTS device_follows (
+    device_serial TEXT NOT NULL REFERENCES devices(serial) ON DELETE CASCADE,
+    repo_id       INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    PRIMARY KEY (device_serial, repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    at      TEXT NOT NULL,
+    action  TEXT NOT NULL,
+    detail  TEXT NOT NULL,
+    client  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS installs (
@@ -145,6 +160,7 @@ _ADDED_COLUMNS = [
     ("repos", "pending_signer", "TEXT"),
     ("repos", "pending_lineage_ok", "INTEGER"),
     ("devices", "abis", "TEXT NOT NULL DEFAULT ''"),
+    ("repos", "include_prereleases", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -169,13 +185,18 @@ def get_repo(repo_id: int) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM repos WHERE id = ?", (repo_id,)).fetchone()
 
 
-def create_repo(owner: str, repo: str, asset_glob: str) -> int:
+def create_repo(owner: str, repo: str, asset_glob: str, include_prereleases: bool = False) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO repos (owner, repo, asset_glob) VALUES (?, ?, ?)",
-            (owner, repo, asset_glob),
+            "INSERT INTO repos (owner, repo, asset_glob, include_prereleases) VALUES (?, ?, ?, ?)",
+            (owner, repo, asset_glob, int(include_prereleases)),
         )
         return cur.lastrowid
+
+
+def set_include_prereleases(repo_id: int, include: bool) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE repos SET include_prereleases = ? WHERE id = ?", (int(include), repo_id))
 
 
 def delete_repo(repo_id: int) -> None:
@@ -457,3 +478,57 @@ def list_installs(limit: int = 100) -> list[sqlite3.Row]:
         return conn.execute(
             _INSTALL_SELECT + " ORDER BY installs.started_at DESC LIMIT ?", (limit,),
         ).fetchall()
+
+
+# ---- auto-update follows ----
+
+def set_follow(serial: str, repo_id: int, follow: bool) -> None:
+    with get_conn() as conn:
+        if follow:
+            conn.execute(
+                "INSERT OR IGNORE INTO device_follows (device_serial, repo_id) VALUES (?, ?)", (serial, repo_id),
+            )
+        else:
+            conn.execute("DELETE FROM device_follows WHERE device_serial = ? AND repo_id = ?", (serial, repo_id))
+
+
+def follows_set() -> set[tuple[str, int]]:
+    with get_conn() as conn:
+        return {(r["device_serial"], r["repo_id"]) for r in conn.execute("SELECT * FROM device_follows")}
+
+
+def list_followers(repo_id: int) -> list[sqlite3.Row]:
+    """Trusted devices following a repo. Untrusted followers are excluded
+    here and refused again at push time."""
+    with get_conn() as conn:
+        return conn.execute(
+            """SELECT devices.* FROM devices
+               JOIN device_follows ON device_follows.device_serial = devices.serial
+               WHERE device_follows.repo_id = ? AND devices.trusted = 1""",
+            (repo_id,),
+        ).fetchall()
+
+
+# ---- audit log ----
+
+AUDIT_KEEP = 5000
+
+
+def insert_audit(action: str, detail: str, client: str | None) -> None:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO audit_log (at, action, detail, client) VALUES (?, ?, ?, ?)",
+            (now(), action, detail, client),
+        )
+        if cur.lastrowid % 100 == 0:  # trim occasionally, not on every write
+            conn.execute("DELETE FROM audit_log WHERE id <= ?", (cur.lastrowid - AUDIT_KEEP,))
+
+
+def list_audit(limit: int = 200) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def ping() -> None:
+    with get_conn() as conn:
+        conn.execute("SELECT 1").fetchone()

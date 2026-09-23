@@ -10,6 +10,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      # Talks to the local adb server over its own port; fails if it's down.
+      test: ["CMD", "adb", "-P", "5037", "devices"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
     # No ports published — reachable only from `app`, over the internal compose
     # network. Never add `network_mode: host` here: the adb server binds all
     # interfaces inside its own container (needed so `app` can reach it), and
@@ -27,6 +33,12 @@ services:
       - appdata:/data
     env_file: .env
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     # Bound to all interfaces — reachable from your LAN over plain HTTP. This

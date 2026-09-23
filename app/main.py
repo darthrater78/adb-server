@@ -6,17 +6,19 @@ from urllib.parse import quote
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import adb_client
+import audit
 import auth
 import db
 import discovery
 import github_client
 import poller
+import pushes
 import selection
 import staging
 
@@ -24,6 +26,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("adb_server")
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+# The container's own healthcheck calls http://127.0.0.1:8080/healthz. A
+# literal loopback IP can't be used for DNS rebinding (that needs an
+# attacker-controlled hostname), so allowing it keeps the protection intact.
+if "127.0.0.1" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("127.0.0.1")
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "10"))
 
 
@@ -77,7 +84,7 @@ VALID_THEMES = {"flashbang", "dark", "oled"}
 # Exact allow-list, not a prefix/startswith check — the "next" field on the
 # theme form is client-supplied, and an open redirect is exactly what a
 # permissive check here would hand an attacker.
-KNOWN_NAV_PATHS = {"/status", "/repos", "/staged", "/devices", "/installs"}
+KNOWN_NAV_PATHS = {"/status", "/repos", "/staged", "/devices", "/installs", "/audit"}
 
 
 def _get_theme(request: Request) -> str:
@@ -101,6 +108,14 @@ def _check_csrf(request: Request, session: dict, csrf_token: str | None) -> None
     auth.require_csrf(request, session, csrf_token)
 
 
+def _client(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def _audit(request: Request, action: str, detail: str = "") -> None:
+    audit.record(action, detail, _client(request))
+
+
 def _redirect(path: str, status_code: int = 303, **params) -> RedirectResponse:
     if params:
         qs = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v is not None)
@@ -113,7 +128,7 @@ def _redirect(path: str, status_code: int = 303, **params) -> RedirectResponse:
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     if auth.read_session(request):
-        return RedirectResponse("/repos", status_code=303)
+        return RedirectResponse("/status", status_code=303)
     return templates.TemplateResponse(request, "login.html", _tctx(request))
 
 
@@ -126,17 +141,20 @@ def login_submit(
     auth.check_rate_limit(request)
     if not auth.verify_credentials(username, password):
         auth.record_failed_attempt(request)
+        _audit(request, "login_failed")
         return templates.TemplateResponse(
             request, "login.html", _tctx(request, error="Invalid username or password"), status_code=401,
         )
-    response = RedirectResponse("/repos", status_code=303)
+    response = RedirectResponse("/status", status_code=303)
     auth.create_session(response)
+    _audit(request, "login")
     return response
 
 
 @app.post("/logout")
 def logout(request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
     _check_csrf(request, session, csrf_token)
+    _audit(request, "logout")
     response = RedirectResponse("/login", status_code=303)
     auth.clear_session(response)
     return response
@@ -145,6 +163,16 @@ def logout(request: Request, session: dict = Depends(auth.require_auth), csrf_to
 @app.get("/")
 def index():
     return RedirectResponse("/status", status_code=303)
+
+
+@app.get("/healthz")
+def healthz():
+    """Unauthenticated liveness check for Docker. Reveals nothing but ok/not."""
+    try:
+        db.ping()
+    except sqlite3.Error:
+        return JSONResponse({"status": "error"}, status_code=503)
+    return {"status": "ok"}
 
 
 # ---- theme ----
@@ -187,6 +215,7 @@ def create_repo(
     csrf_token: str = Form(...),
     repo_url: str = Form(...),
     asset_glob: str = Form("*.apk"),
+    include_prereleases: str = Form(""),
 ):
     _check_csrf(request, session, csrf_token)
     asset_glob = asset_glob.strip() or "*.apk"
@@ -195,44 +224,73 @@ def create_repo(
     except github_client.GithubError as exc:
         return _redirect("/repos", error=str(exc))
     try:
-        db.create_repo(owner, repo, asset_glob)
+        db.create_repo(owner, repo, asset_glob, include_prereleases == "1")
     except sqlite3.IntegrityError:
         return _redirect("/repos", error="That repo is already registered")
+    _audit(request, "repo_add", f"{owner}/{repo} glob={asset_glob}")
     return _redirect("/repos", ok="Repo added")
 
 
 @app.post("/repos/{repo_id}/delete")
 def delete_repo(repo_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
     _check_csrf(request, session, csrf_token)
+    repo_row = db.get_repo(repo_id)
     db.delete_repo(repo_id)
     staging.remove_repo_dir(repo_id)
+    if repo_row is not None:
+        _audit(request, "repo_remove", f"{repo_row['owner']}/{repo_row['repo']}")
     return _redirect("/repos", ok="Repo removed")
 
 
 @app.post("/repos/{repo_id}/check-now")
-async def check_repo_now(repo_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+def check_repo_now(
+    repo_id: int, request: Request, background_tasks: BackgroundTasks,
+    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+):
+    """Runs the check after responding: a new release can mean downloading
+    hundreds of MB, which shouldn't hold the browser's request open."""
     _check_csrf(request, session, csrf_token)
     repo_row = db.get_repo(repo_id)
     if repo_row is None:
         raise HTTPException(status_code=404)
-    await poller.check_repo(repo_row)
-    return _redirect("/repos", ok="Checked")
+    background_tasks.add_task(poller.check_repo, repo_row)
+    return _redirect("/repos", ok="Check started — reload this page in a moment to see the result")
+
+
+@app.post("/repos/{repo_id}/prereleases")
+def toggle_prereleases(
+    repo_id: int, request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), include: str = Form(...),
+):
+    _check_csrf(request, session, csrf_token)
+    repo_row = db.get_repo(repo_id)
+    if repo_row is None:
+        raise HTTPException(status_code=404)
+    db.set_include_prereleases(repo_id, include == "1")
+    _audit(request, "repo_prereleases", f"{repo_row['owner']}/{repo_row['repo']} include={include == '1'}")
+    return _redirect("/repos", ok="Updated")
 
 
 @app.post("/repos/{repo_id}/accept-signer")
-async def accept_signer(
-    repo_id: int, request: Request, session: dict = Depends(auth.require_auth),
+def accept_signer(
+    repo_id: int, request: Request, background_tasks: BackgroundTasks,
+    session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...), confirm: str = Form(""),
 ):
     _check_csrf(request, session, csrf_token)
     if confirm != "yes":
         return _redirect("/repos", error="Tick the confirmation box to accept a new signer")
-    if not db.accept_pending_signer(repo_id):
+    before = db.get_repo(repo_id)
+    if before is None or not db.accept_pending_signer(repo_id):
         return _redirect("/repos", error="No pending signer change for that repo")
     logger.warning("repo %s: operator accepted a new signing certificate", repo_id)
-    repo_row = db.get_repo(repo_id)
-    await poller.check_repo(repo_row)
-    return _redirect("/repos", ok="New signer pinned and release re-checked")
+    _audit(
+        request, "signer_accepted",
+        f"{before['owner']}/{before['repo']} {before['signer_sha256']} -> {before['pending_signer']} "
+        f"package={before['pending_package']} lineage_proven={bool(before['pending_lineage_ok'])}",
+    )
+    background_tasks.add_task(poller.check_repo, db.get_repo(repo_id))
+    return _redirect("/repos", ok="New signer pinned — re-checking the release now")
 
 
 # ---- staged apks ----
@@ -253,6 +311,7 @@ def delete_staged(apk_id: int, request: Request, session: dict = Depends(auth.re
         raise HTTPException(status_code=404)
     staging.remove_file(apk["path"])
     db.mark_apk_pruned(apk_id)
+    _audit(request, "staged_delete", f"{apk['owner']}/{apk['repo']} {apk['tag']} {apk['filename']}")
     return _redirect("/staged", ok="Staged file deleted")
 
 
@@ -282,7 +341,8 @@ def pair_device(
     except adb_client.AdbError as exc:
         return _redirect("/devices", error=str(exc))
     db.upsert_paired_device(serial, connect_addr.strip())
-    _refresh_abis(serial)
+    pushes.refresh_abis(serial)
+    _audit(request, "device_pair", f"{serial} at {connect_addr.strip()}")
     return _redirect("/devices", ok="Paired. Trust the device below before it can receive pushes")
 
 
@@ -303,7 +363,7 @@ def reconnect_device(
     if confirmed_serial != serial:
         return _redirect("/devices", error="That address now answers as a different device - not updated")
     db.touch_device(serial, connect_addr.strip())
-    _refresh_abis(serial)
+    pushes.refresh_abis(serial)
     return _redirect("/devices", ok="Reconnected")
 
 
@@ -319,7 +379,7 @@ def find_device(serial: str, request: Request, session: dict = Depends(auth.requ
         addr = discovery.ensure_connected(device)
     except adb_client.AdbError as exc:
         return _redirect("/devices", error=str(exc))
-    _refresh_abis(serial)
+    pushes.refresh_abis(serial)
     return _redirect("/devices", ok=f"Found at {addr}")
 
 
@@ -332,6 +392,7 @@ def trust_device(
     if db.get_device(serial) is None:
         raise HTTPException(status_code=404)
     db.set_device_trusted(serial, trusted == "1")
+    _audit(request, "device_trust" if trusted == "1" else "device_untrust", serial)
     return _redirect("/devices", ok="Updated")
 
 
@@ -351,76 +412,19 @@ def nickname_device(
 def delete_device(serial: str, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
     _check_csrf(request, session, csrf_token)
     db.delete_device(serial)
+    _audit(request, "device_forget", serial)
     return _redirect("/devices", ok="Device forgotten")
 
 
 # ---- push ----
 
-def _refresh_abis(serial: str) -> str:
-    """Best effort: a device that can't be queried keeps its last known ABIs."""
+def _queue_push(request: Request, background_tasks: BackgroundTasks, device, apk, back: str) -> RedirectResponse:
     try:
-        abis = adb_client.device_abis(serial)
-    except adb_client.AdbError:
-        device = db.get_device(serial)
-        return device["abis"] if device else ""
-    db.set_device_abis(serial, abis)
-    return " ".join(abis)
-
-
-def _refresh_installed(serial: str, package: str) -> None:
-    try:
-        version = adb_client.installed_version(serial, package)
-    except adb_client.AdbError:
-        return
-    if version is None:
-        db.upsert_device_package(serial, package, installed=False)
-    else:
-        db.upsert_device_package(serial, package, installed=True, version_code=version[0], version_name=version[1])
-
-
-def _run_push(install_id: int, device: dict, apk: dict) -> None:
-    """Runs off the request thread (via BackgroundTasks, which Starlette
-    executes in a threadpool for a sync callable) so a slow adb install
-    doesn't block the single-worker event loop the poller also runs on."""
-    db.set_install_status(install_id, "installing")
-    try:
-        # Wireless ADB ports drift. Re-resolve and re-confirm identity
-        # immediately before installing (scanning the device's IP if its
-        # stored port went stale) rather than trusting the last pairing.
-        discovery.ensure_connected(device)
-        device_abis = _refresh_abis(device["serial"])
-        if not selection.compatible(apk["abis"], device_abis):
-            raise adb_client.AdbError(
-                f"{apk['filename']} is built for {apk['abis']}, but this device supports {device_abis}"
-            )
-        result = adb_client.install(device["serial"], apk["path"])
-        log = (result.stdout or "") + (result.stderr or "")
-        status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
-        db.finish_install(install_id, status, log.strip()[:8000])
-        _refresh_installed(device["serial"], apk["package_name"])
-    except adb_client.AdbError as exc:
-        db.finish_install(install_id, "failed", str(exc))
-    except Exception:
-        # Anything unexpected here (DB hiccup, etc.) must still resolve the
-        # install row — otherwise it's stuck "installing" forever and the
-        # status page polls indefinitely with nothing to show for it.
-        logger.exception("push job %s crashed", install_id)
-        db.finish_install(install_id, "failed", "Internal error during push — check server logs")
-
-
-def _queue_push(background_tasks: BackgroundTasks, device, apk, back: str) -> RedirectResponse:
-    """Every push goes through here, so the checks can't be skipped by
-    reaching a different route."""
-    if apk["pruned_at"]:
-        return _redirect(back, error="That release's file was pruned — it can no longer be pushed")
-    # The actual security boundary: enforced here, server-side, not just by
-    # hiding the button in the UI.
-    if not device["trusted"]:
-        return _redirect(back, error="Device is not trusted")
-    if not selection.compatible(apk["abis"], device["abis"]):
-        return _redirect(back, error=f"{apk['filename']} doesn't support this device's CPU ({device['abis']})")
-    install_id = db.insert_install(device["serial"], apk["id"], status="pending")
-    background_tasks.add_task(_run_push, install_id, dict(device), dict(apk))
+        install_id = pushes.create_install(device, apk)
+    except pushes.PushRefused as exc:
+        return _redirect(back, error=str(exc))
+    _audit(request, "push", f"{apk['owner']}/{apk['repo']} {apk['tag']} ({apk['filename']}) → {device['nickname'] or device['serial']}")
+    background_tasks.add_task(pushes.run_push, install_id, dict(device), dict(apk))
     return RedirectResponse(f"/installs/{install_id}", status_code=303)
 
 
@@ -438,7 +442,7 @@ def push(
     apk = db.get_staged_apk(apk_id)
     if device is None or apk is None:
         raise HTTPException(status_code=404)
-    return _queue_push(background_tasks, device, apk, "/staged")
+    return _queue_push(request, background_tasks, device, apk, "/staged")
 
 
 @app.post("/push-latest")
@@ -462,13 +466,14 @@ def push_latest(
     apk = selection.pick_variant(variants, device["abis"])
     if apk is None:
         return _redirect("/status", error="No APK in the latest release supports this device's CPU")
-    return _queue_push(background_tasks, device, apk, "/status")
+    return _queue_push(request, background_tasks, device, apk, "/status")
 
 
 # ---- status ----
 
 def _status_rows(devices) -> list[dict]:
     installed = db.device_packages_map()
+    follows = db.follows_set()
     rows = []
     variants_by_repo: dict[int, list] = {}
     for v in db.list_latest_variants():
@@ -482,6 +487,7 @@ def _status_rows(devices) -> list[dict]:
                 "device": d, "installed": have,
                 "state": selection.update_state(have, latest),
                 "fits": selection.pick_variant(variants, d["abis"]) is not None,
+                "following": (d["serial"], repo_id) in follows,
             })
         rows.append({"repo_id": repo_id, "latest": latest, "cells": cells})
     return rows
@@ -512,12 +518,39 @@ def refresh_status(request: Request, session: dict = Depends(auth.require_auth),
         except adb_client.AdbError:
             unreachable.append(device["nickname"] or device["serial"])
             continue
-        _refresh_abis(device["serial"])
+        pushes.refresh_abis(device["serial"])
         for package in packages:
-            _refresh_installed(device["serial"], package)
+            pushes.refresh_installed(device["serial"], package)
     if unreachable:
         return _redirect("/status", error="Not reachable (try Find on the Devices page): " + ", ".join(unreachable))
     return _redirect("/status", ok="Installed versions refreshed")
+
+
+@app.post("/follow")
+def set_follow(
+    request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+    device_serial: str = Form(...), repo_id: int = Form(...), follow: str = Form(...),
+):
+    """Auto-update: a following device gets each newly staged release pushed
+    to it. Only trusted devices can follow, and trust is re-checked at push."""
+    _check_csrf(request, session, csrf_token)
+    device, repo_row = db.get_device(device_serial), db.get_repo(repo_id)
+    if device is None or repo_row is None:
+        raise HTTPException(status_code=404)
+    on = follow == "1"
+    if on and not device["trusted"]:
+        return _redirect("/status", error="Only trusted devices can auto-update")
+    db.set_follow(device_serial, repo_id, on)
+    _audit(request, "auto_update_on" if on else "auto_update_off",
+           f"{repo_row['owner']}/{repo_row['repo']} → {device['nickname'] or device_serial}")
+    return _redirect("/status", ok="Auto-update " + ("on" if on else "off"))
+
+
+# ---- audit ----
+
+@app.get("/audit", response_class=HTMLResponse)
+def audit_page(request: Request, session: dict = Depends(auth.require_auth)):
+    return templates.TemplateResponse(request, "audit.html", _tctx(request, session, entries=db.list_audit()))
 
 
 # ---- installs ----

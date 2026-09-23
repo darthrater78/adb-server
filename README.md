@@ -33,9 +33,15 @@ front (Tailscale serve, Caddy, etc.) and rebind this to `127.0.0.1:8080`.
    button that picks the right APK for that device's CPU. "Refresh installed
    versions" asks each device what it currently has; versions also refresh
    after every push.
+   **Auto-update** per app and device: when on, each newly staged release is
+   pushed to that device automatically (trusted devices only; skipped if the
+   device already has that version or newer).
 1. **Repos** — add a GitHub `owner/repo` to watch and an asset glob (default
    `*.apk`). It's polled every `POLL_INTERVAL_MINUTES` (default 10), or check
-   immediately with "Check now".
+   immediately with "Check now" (runs in the background). Pre-releases are
+   ignored unless you tick "Include pre-releases" for that repo. Polls use
+   conditional requests, so an unchanged repo doesn't use up GitHub's rate
+   limit.
 2. **Devices** — on the phone: Settings → Developer options → Wireless
    debugging → "Pair device with pairing code" gives a pairing address + code.
    The main Wireless debugging screen separately shows a connect address.
@@ -58,6 +64,25 @@ front (Tailscale serve, Caddy, etc.) and rebind this to `127.0.0.1:8080`.
 4. **Installs** — history and logs of every push attempt. A push runs in the
    background; submitting one takes you to a live status page that updates
    until the install finishes.
+5. **Audit** — logins (including failed ones), trust changes, signer
+   re-pins, repo and device changes, auto-update toggles and pushes, with the
+   client IP. The newest 5000 entries are kept.
+
+## Notifications
+
+Set `APPRISE_URLS` in `.env` to one or more [Apprise](https://github.com/caronc/apprise/wiki)
+URLs — ntfy, Gotify, Home Assistant, Discord, email, a plain JSON webhook and
+many more. You'll be told when a release is staged, when one is rejected
+(pin mismatch or failed verification), and when a push succeeds or fails.
+`NOTIFY_EVENTS` narrows that list. The URLs contain credentials: keep them in
+`.env` only.
+
+## Health checks
+
+Both containers have Docker health checks: `app` checks `/healthz`
+(unauthenticated; returns only ok/error), `adb-server` checks that the adb
+server answers. `127.0.0.1` is always accepted as a host so the check works
+whatever `ALLOWED_HOSTS` is set to.
 
 Pick a color theme (Flashbang / Dark / OLED) from the header — it's saved as
 a cookie and otherwise follows your OS's light/dark preference.

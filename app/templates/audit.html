@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Audit log — adb-server{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<p class="muted">Security-relevant actions, newest first (last 200 shown, 5000 kept).</p>
+<table>
+  <thead><tr><th>When (UTC)</th><th>Action</th><th>Detail</th><th>From</th></tr></thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td class="small">{{ e.at }}</td>
+      <td><span class="badge {{ 'badge-error' if e.action in ('login_failed', 'signer_accepted', 'device_trust') else 'badge-muted' }}">{{ e.action }}</span></td>
+      <td class="small">{{ e.detail }}</td>
+      <td class="mono small">{{ e.client or "—" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="empty-state">Nothing recorded yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

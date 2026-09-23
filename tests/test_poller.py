@@ -33,7 +33,7 @@ class FakeUpstream:
         monkeypatch.setattr(apk_verify, "get_package_info", self._info)
         monkeypatch.setattr(apk_verify, "signing_lineage", lambda path: self.lineage)
 
-    async def _release(self, owner, repo, token):
+    async def _release(self, owner, repo, token, include_prereleases=False):
         return {"tag_name": self.tag, "body": f"notes for {self.tag}",
                 "assets": [{"name": n, "url": f"https://api.github.com/{n}"} for n in self.assets]}
 
@@ -136,7 +136,7 @@ def test_one_crashing_repo_does_not_stop_the_others(upstream, monkeypatch):
     good = db.create_repo("z", "good", "*.apk")
     real = upstream._release
 
-    async def flaky(owner, repo, token):
+    async def flaky(owner, repo, token, include_prereleases=False):
         if repo == "bad":
             raise RuntimeError("boom")
         return await real(owner, repo, token)

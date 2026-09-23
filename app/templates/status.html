@@ -52,6 +52,15 @@
           <div class="muted small">no APK for this CPU</div>
           {% endif %}
         {% endif %}
+        <form method="post" action="/follow">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="repo_id" value="{{ row.repo_id }}">
+          <input type="hidden" name="device_serial" value="{{ c.device.serial }}">
+          <input type="hidden" name="follow" value="{{ '0' if c.following else '1' }}">
+          <button type="submit" class="small" title="Push each new release to this device automatically">
+            Auto-update: {{ "on" if c.following else "off" }}
+          </button>
+        </form>
       </td>
       {% endfor %}
     </tr>

@@ -9,6 +9,7 @@ import adb_client
 import db
 import discovery
 import main
+import pushes
 import staging
 from conftest import CSRF
 
@@ -33,7 +34,7 @@ def trusted_device():
 @pytest.fixture
 def no_background(monkeypatch):
     queued = []
-    monkeypatch.setattr(main, "_run_push", lambda *a: queued.append(a))
+    monkeypatch.setattr(pushes, "run_push", lambda *a: queued.append(a))
     return queued
 
 
