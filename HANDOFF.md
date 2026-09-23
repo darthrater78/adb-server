@@ -49,8 +49,6 @@ session must ask again.
 **Open questions (not blocking):**
 - Encrypt the TOTP secret / notification URLs at rest (key from `SECRET_KEY`,
   would add `cryptography`)?
-- Use mDNS connect announcements in `discovery.ensure_connected` before
-  port-scanning (faster Find)?
 - CI step running `adb` inside the app image (catches the read-only
   `~/.android` regression)?
 
@@ -66,7 +64,8 @@ session must ask again.
 - The app container is `read_only`; `adb` needs the tmpfs `~/.android`.
 - `request_body_guard` in `main.py` caps every POST before parsing — keep it.
 - `adb connect` returning "connected" ≠ ready; wait for `get-state`.
-- mDNS needs host networking; the adb server must never have it.
+- **No container ever runs on host networking** (user rule). mDNS/QR pairing
+  was removed in 3.0.0 for that reason; don't bring back anything that needs it.
 - In tests, `client` and `authed` are the same TestClient.
 - Test zips must use a fixed `ZipInfo.date_time`, or hashes change per tick.
 - `gh pr merge` can fail with a transient GraphQL error: check the PR state
@@ -74,8 +73,8 @@ session must ask again.
 - Compose merges `volumes`/`ports`/`env_file` in overrides by appending; use
   `!override` in a throwaway override file to swap them for tests.
 
-**Decisions made:** no client-side JS (CSP `script-src 'none'`); code-paired
-devices start untrusted, QR-paired are trusted; re-pairing a legacy record
+**Decisions made:** no client-side JS (CSP `script-src 'none'`); paired
+devices start untrusted; re-pairing a legacy record
 clears trust; debug-signed APKs refused from the poller, allowed and flagged
 on upload; MFA lockout is global; plain HTTP on LAN is an accepted, documented
 default.

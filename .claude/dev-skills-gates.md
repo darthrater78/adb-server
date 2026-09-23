@@ -1,34 +1,26 @@
 # Dev Skills gate state
-Track: release sequence → v2.0.0 on main (branch release/v2.0.0)
-Mode: semi-autonomous (approved 2026-09-23, session 3) — commits and the tag still require the user's approval
-Model: Opus 5.5 approved by user for this session's tasks (above Sonnet ceiling)
+Track: release sequence → v3.0.0 (remove host networking: mdns sidecar + QR pairing)
+Mode: manual (chosen 2026-09-23, session 5)
+Model: Opus 5.5 approved by user for this task (above Sonnet ceiling)
 Origin: darthrater78/adb-server (not a fork)
-Version: 2.0.0
-Updated: 2026-09-23 (session 3)
+Standards: at-rest documented (README Data at rest) · TOTP ✅ · rescue ✅ · Apprise ✅ · compose ✅ bind mounts
+Version: 3.0.0
+Updated: 2026-09-23 (session 5)
 
-🔢 VERSION    ✅ 2.0.0 — MAJOR chosen by user (954a7b5 chore(compose)! breaking: named volumes → bind mounts)
-              VERSION is the only version source; UI reads it (header shows v2.0.0 + releases/tag/v2.0.0 link)
-              prior tag v1.0.0 on origin → 8cc08ec
-🔨 BUILD      ✅ compose stack rel200 from the release tree (VERSION 2.0.0), bind mounts on scratch dirs owned 10001:
-              3/3 healthy; adbkey, app.db, services.json written; adb via adb-server OK; apksigner 0.9, aapt OK;
-              sign-in → status/devices/repos/staged/settings/audit all 200; 319 pytest passed (py3.13, tree unchanged
-              during run); handoff offered
-              test artifact: local compose images (rel200, 127.0.0.1:18081) 27d1852828e1 2be62838d7d2 61add17f1795 @ release tree
-              test creds: generated per run, shown to user
+🔢 VERSION    ✅ 3.0.0 — MAJOR (feature + published mdns image removed); user said "continue" to 3.0.0
+              VERSION is the only version source (UI reads it); README top now links repo + releases/tag/v3.0.0
+              prior tag v2.0.0 on origin
+🔨 BUILD      ✅ compose stack rel300 from the working tree; handoff offered
+              app healthy, adb-server answers; both on rel300_internal, no host networking
+              sign-in → status/devices/repos/staged/settings/audit/installs 200; /devices/qr/* 404; UI shows v3.0.0
+              304 pytest passed (py3.13); tree unchanged during the run
+  test artifact: local compose images rel300-app d1f1ac05fc36, rel300-adb-server 4cd259d92519 @ working tree on 9982db1
+  test creds: generated per run, shown to user
 🔒 SECURITY   ✅ 0 open — 0 Critical, 0 High
-              Diff since v1.0.0: compose (bind mounts, comments moved), README, CHANGELOG, HANDOFF, one test helper.
-              No app code changed. Container hardening unchanged (uid 10001, cap_drop ALL, no-new-privileges,
-              read_only, adb-server unpublished, mdns :ro in app); key/DB dirs chmod 700 in docs.
-              deps: pip-audit --strict clean (app + mdns + dev); Dependabot alerts: 0 open.
-              ✅ fixed L (PR #5): flaky duplicate-upload test — wall-clock zip timestamp → fixed ZipInfo.date_time
-              Note: Dependabot PRs #2/#3 (python 3.13 → 3.14 base images) open; version bumps, no advisory.
-📄 DOCS       ✅ CHANGELOG 2.0.0 — 2026-09-23 (breaking + migration, comments move, test fix);
-              README quickstart bind-mount setup + "Upgrading from 1.x" block; data-at-rest/backup paths;
-              HANDOFF updated. Release-notes awk from release.yml extracts the 2.0.0 section.
-📦 RELEASE    ⏳ awaiting the single commit approval (version + notes)
-🚀 SHIP       ⏳ plan: PR → CI green → merge (no --delete-branch) → CI green on merge commit → version guard →
-              user pushes tag v2.0.0 → watch release.yml → verify release page + ghcr 2.0.0 images
-
-Carried (v1.0.0 SHIP, folded in here): PR #1 merged 8cc08ec; tag v1.0.0^{}=8cc08ec; release run 35869574512
-  success; ghcr app/adb-server/mdns:1.0.0 pullable.
-Session 3 work commits: PR #4 (bind mounts), #5 (flaky test), #6 (handoff) merged → main 90fbe82.
+              Diff is removal-only (mdns sidecar, QR pairing, auto-trust); no new logic
+              deps: pip-audit --strict clean (requirements-dev.txt); Dependabot alerts: 0 open
+              withdrawn: bandit B608 ×6 in db.py (unchanged since v2.0.0) — constant fragments / schema column names
+📄 DOCS       ✅ CHANGELOG 3.0.0 (breaking + upgrade steps); README: QR/mdns removed, 2-container
+              architecture, "Upgrading from 2.x" block, security notes; HANDOFF: no-host-networking rule
+📦 RELEASE    ⏳ awaiting commit approval
+🚀 SHIP       ⬜

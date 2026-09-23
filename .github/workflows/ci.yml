@@ -56,7 +56,7 @@ jobs:
           # A venv: the runner's system python is externally managed (PEP 668).
           python3 -m venv /tmp/audit
           /tmp/audit/bin/pip install --quiet --disable-pip-version-check pip-audit==2.10.1
-          # requirements-dev.txt includes app/ and mdns/requirements.txt.
+          # requirements-dev.txt includes app/requirements.txt.
           /tmp/audit/bin/pip-audit --requirement requirements-dev.txt --strict
 
   test:
@@ -73,7 +73,6 @@ jobs:
           cache: pip
           cache-dependency-path: |
             app/requirements.txt
-            mdns/requirements.txt
             requirements-dev.txt
 
       - name: Install dependencies
@@ -95,9 +94,6 @@ jobs:
           - name: adb-server
             context: adb-server
             file: adb-server/Dockerfile
-          - name: mdns
-            context: mdns
-            file: mdns/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

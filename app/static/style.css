@@ -565,7 +565,6 @@ section { margin-bottom: 24px; }
 .status-cell form { margin-top: 4px; }
 
 /* QR pairing */
-.qr-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 4px; }
 .qr-pairing { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
 .qr-code { flex: none; padding: 8px; border-radius: 12px; background: #fff; border: 1px solid var(--border); }
 .qr-code svg { display: block; max-width: 100%; height: auto; }

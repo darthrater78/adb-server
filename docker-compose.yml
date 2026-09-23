@@ -17,21 +17,6 @@ services:
       timeout: 10s
       retries: 3
 
-  mdns:
-    build: ./mdns
-    network_mode: host
-    volumes:
-      - /opt/docker/adb-server/mdns:/mdns
-    restart: unless-stopped
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    read_only: true
-    healthcheck:
-      test: ["CMD", "python", "-c", "import os; os.stat('/mdns/services.json')"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-
   app:
     build:
       context: .
@@ -42,7 +27,6 @@ services:
       - "8080:8080"
     volumes:
       - /opt/docker/adb-server/appdata:/data
-      - /opt/docker/adb-server/mdns:/mdns:ro
     env_file: .env
     restart: unless-stopped
     healthcheck:
@@ -72,7 +56,7 @@ networks:
 #   them to that uid before the first `docker compose up`. Otherwise Docker
 #   creates them owned by root and the containers can't write to them:
 #
-#     sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,mdns}
+#     sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata}
 #     sudo chown -R 10001:10001 /opt/docker/adb-server
 #     sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
 #
@@ -90,14 +74,6 @@ networks:
 #     binds all interfaces inside its own container (needed so `app` can
 #     reach it), and host networking would put that unauthenticated port
 #     directly on your LAN.
-#
-# mdns
-#   network_mode: host, because mDNS multicast doesn't cross Docker's bridge.
-#     It's how a phone that scanned a pairing QR code announces its port.
-#     Safe here, unlike on adb-server: this container only listens for
-#     announcements, opens no port of its own besides mDNS, and holds no
-#     keys. It reaches the app only through the mdns directory, which the
-#     app mounts read-only.
 #
 # app
 #   read_only / tmpfs: everything the app writes lives on /data. /tmp is

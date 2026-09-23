@@ -1,5 +1,7 @@
 # ADB Server
 
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.0.0](https://github.com/darthrater78/adb-server/releases/tag/v3.0.0)
+
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
 Android devices you've explicitly trusted.
@@ -14,7 +16,7 @@ Android devices you've explicitly trusted.
 - **Pushes to your phones** with one click, or automatically for apps a device
   follows. It re-confirms the device's identity and trust right before every
   install.
-- **Pairs phones by QR code or pairing code**, and finds them again when
+- **Pairs phones by pairing code**, and finds them again when
   wireless debugging moves to a new port.
 - **Has a security posture made for a home server:** two-factor sign-in, an
   audit log, no client-side JavaScript, hardened containers, and an ADB port
@@ -37,18 +39,15 @@ up.*
 
 ## How it fits together
 
-Three containers, defined in `docker-compose.yml`:
+Two containers, defined in `docker-compose.yml`, neither on the host network:
 
 | Container | What it does | Network |
 |---|---|---|
 | **app** | FastAPI + SQLite. Polls GitHub, verifies and stages releases, serves the web UI, and drives `adb` to pair, connect and install. | Private compose network. Publishes port 8080. |
 | **adb-server** | Runs the `adb` server and holds its private key, the identity every paired phone trusts. | Private compose network only. **No published port.** |
-| **mdns** | Listens for the mDNS announcement a phone makes after scanning a pairing QR code, and writes what it hears to a file the app reads (read-only). | Host network (multicast can't cross Docker's bridge). Listens only. Holds no keys. |
 
 ```
  browser ──HTTP(S)──▶ app ──adb protocol──▶ adb-server ──TLS (wireless ADB)──▶ phones
-                       ▲                                                        │
-                       └──── read-only file ◀── mdns ◀── mDNS announcements ────┘
  GitHub API ◀──HTTPS── app (release polling, asset downloads)
 ```
 
@@ -62,7 +61,7 @@ chmod 600 .env                 # it holds the session key and your password
 
 # Data is bind-mounted from /opt/docker/adb-server (edit docker-compose.yml to
 # change it). The containers run as uid 10001, so the directories must be theirs.
-sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,mdns}
+sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata}
 sudo chown -R 10001:10001 /opt/docker/adb-server
 sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
 
@@ -77,7 +76,7 @@ docker compose up -d --build
 >
 > ```bash
 > docker compose down
-> sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,mdns}
+> sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata}
 > docker run --rm -v <project>_adbkeys:/src -v /opt/docker/adb-server/adbkeys:/dst alpine cp -a /src/. /dst/
 > docker run --rm -v <project>_appdata:/src -v /opt/docker/adb-server/appdata:/dst alpine cp -a /src/. /dst/
 > sudo chown -R 10001:10001 /opt/docker/adb-server
@@ -87,11 +86,21 @@ docker compose up -d --build
 >
 > Remove the old volumes only once the phones still show up as paired.
 
+> **Upgrading from 2.x?** 3.0 drops the `mdns` container and QR pairing, so
+> nothing runs on the host network any more. Pull the new compose file, then
+> remove the orphaned container and its directory. Paired phones and the
+> database are untouched:
+>
+> ```bash
+> docker compose up -d --build --remove-orphans
+> sudo rm -rf /opt/docker/adb-server/mdns
+> ```
+
 Then open `http://<server>:8080`, sign in, and:
 
 1. **Settings → Security**: turn on two-factor sign-in.
 2. **Repos**: add the GitHub repos you want to follow.
-3. **Devices**: pair your phone (the QR code is quickest), and trust it.
+3. **Devices**: pair your phone with its pairing code, and trust it.
 
 > **Plain HTTP or TLS?** Out of the box the UI is served over plain HTTP on
 > all interfaces. That's a deliberate trade-off for a trusted home network
@@ -167,15 +176,8 @@ already staged is refused.
 
 ### Devices
 
-**Pair with QR code**: on the phone, open Settings → Developer options →
-Wireless debugging → *Pair device with QR code* and scan the code on screen.
-The page refreshes every 2 seconds and pairs as soon as the phone announces
-itself. A phone paired this way is **trusted straight away**: only the phone
-that scanned the single-use code can complete the pairing. The page says so,
-and the audit log records it. Each code works once and expires after 3
-minutes. QR pairing needs the `mdns` container running.
-
-**Pair with a code**: enter the pairing address and 6-digit code the phone
+**Pair**: on the phone, open Settings → Developer options → Wireless
+debugging → *Pair device with pairing code*, then enter the pairing address and 6-digit code the phone
 shows, plus its connect address. A device paired this way starts **untrusted**.
 Trust it explicitly before it can receive pushes.
 
@@ -189,7 +191,6 @@ are all on this page. Phones list this server as `@adbserver`.
 
 <p>
   <img src="docs/screenshots/devices.png" alt="Devices page" width="640">
-  <img src="docs/screenshots/devices-qr.png" alt="Pairing a phone by QR code" width="640">
 </p>
 
 ### Installs
@@ -283,7 +284,7 @@ repository.
 
 Every container has a Docker health check. `app` checks `/healthz`, which is
 unauthenticated and returns only ok or error. `adb-server` checks that the adb
-server answers, and `mdns` checks that its file exists. `127.0.0.1` is always
+server answers. `127.0.0.1` is always
 an accepted host, so the check works whatever `ALLOWED_HOSTS` says. If the UI
 answers a bare "Invalid host header", the name you browsed to isn't in
 `ALLOWED_HOSTS`. The app logs the accepted list at startup.
@@ -405,13 +406,9 @@ below).
 
 ### Devices and pushes
 
-- **Untrusted by default.** A device paired with a pairing code can't receive
+- **Untrusted by default.** A newly paired device can't receive
   anything until you trust it. Trust is enforced on the server, at queue time
   *and again at install time*, not by hiding a button.
-- **QR-paired devices are trusted automatically**, because only the phone that
-  scanned the one-time code, which carries a 16-character random password,
-  can complete the pairing. The QR page says so, and the audit log records
-  it. Pair with a code instead if you want to review a phone first.
 - **Identity is the hardware serial** (`ro.serialno`), not the address. Before
   every push the app reconnects and confirms the serial. It never pushes to
   whatever happens to answer on an old address.
@@ -427,12 +424,6 @@ below).
 - **Safe installs.** Always `adb install -r`, never `-g` (grant all
   permissions), `-d` (allow downgrade) or `-t` (test APKs). Android's own
   signature check still refuses an update signed by a different key.
-- **The mDNS data isn't trusted.** Announcements arrive unauthenticated from
-  the LAN, so the app treats them as hints: the pairing itself (a PAKE
-  handshake, which needs the password) is the proof. Only private IPv4
-  addresses are accepted, and the listener's table is bounded. When it's
-  full, the oldest entry is dropped, so a flood of fake announcements can't
-  block a real phone.
 
 ### Manual uploads
 
@@ -460,13 +451,12 @@ below).
 - **The adb server is never on the LAN.** Its port 5037 is unauthenticated by
   design, so it is published nowhere and reachable only from `app` over the
   private compose network. Never put `adb-server` on `network_mode: host`.
-- **Least privilege everywhere.** All three containers run as a non-root user
+- **No host networking.** Every container is on the private compose network;
+  only `app`'s port 8080 is published.
+- **Least privilege everywhere.** Both containers run as a non-root user
   (uid 10001) with `cap_drop: [ALL]`, `no-new-privileges`, and a **read-only
   root filesystem**. Writable paths are only the data bind mounts and small
   tmpfs mounts.
-- **The `mdns` sidecar** is the only container on host networking. It only
-  listens, holds no keys, opens no port of its own besides mDNS, and reaches
-  the app only through a file the app mounts read-only.
 - **Verified tooling.** `adb`, `apksigner` and `aapt` come from Google's
   official releases, with pinned URLs and SHA-256 checksums verified at build
   time. They're never taken from third-party images.
@@ -488,7 +478,7 @@ this server. Back those up, and protect the backups the same way.
 ### Supply chain and CI
 
 - Every Python dependency is pinned to an exact, current version and audited
-  with `pip-audit` in CI (`--strict`, covering `app` and `mdns`).
+  with `pip-audit` in CI (`--strict`).
 - Dependabot watches pip, the digest-pinned Docker base images and GitHub
   Actions weekly.
 - Actions are pinned by commit SHA, with least-privilege `permissions:`.
@@ -507,8 +497,6 @@ this server. Back those up, and protect the backups the same way.
 - [ ] Turn on **two-factor sign-in**, and store the recovery codes offline.
 - [ ] `chmod 600 .env`.
 - [ ] Use a fine-grained, read-only `GITHUB_TOKEN`, or none for public repos.
-- [ ] Pair with a code (not QR) when you want to review a device before
-      trusting it.
 - [ ] Back up the `appdata` and `adbkeys` directories, and protect the backups.
 - [ ] Review the **Audit** page from time to time, and the Repos page whenever
       a signing change is flagged.
@@ -526,7 +514,6 @@ this server. Back those up, and protect the backups the same way.
   get you back in.
 - **No encryption at rest** for the TOTP secret or notification URLs (see
   above).
-- **QR pairing auto-trusts** the paired phone (see above).
 
 ### Reporting a vulnerability
 
@@ -539,9 +526,9 @@ maintainer directly.
 The whole codebase was reviewed from top to bottom for 1.0.0 (2026-09-23):
 routes, authentication and two-factor, sessions and CSRF, uploads, APK
 verification, GitHub access, device identity and pushes, QR pairing and the
-mDNS sidecar, containers, CI and dependencies. `bandit` reports only reviewed
-false positives (constant SQL fragments, and `subprocess` with argument lists
-and validated input). `pip-audit` is clean, every pin is the latest release,
+mDNS sidecar (both removed in 3.0.0), containers, CI and dependencies.
+`bandit` reports only reviewed false positives (constant SQL fragments, and
+`subprocess` with argument lists and validated input). `pip-audit` is clean, every pin is the latest release,
 and Dependabot has no open alerts. Everything the review found was fixed
 before release, with a regression test that fails without the fix. See
 `CHANGELOG.md`.
@@ -579,9 +566,9 @@ Android tooling and no device.
 
 CI (`.github/workflows/ci.yml`) runs on every push and PR. It runs the same
 test script, checks that `VERSION` matches `CHANGELOG.md`, validates the
-compose file, audits the dependencies and builds all three images. Pushing a
+compose file, audits the dependencies and builds both images. Pushing a
 `v*` tag on the default branch runs `release.yml`, which publishes the images
-to `ghcr.io/darthrater78/adb-server/{app,adb-server,mdns}` and creates the
+to `ghcr.io/darthrater78/adb-server/{app,adb-server}` and creates the
 GitHub release, but only for a commit CI already passed.
 
 ## Non-goals (v1)

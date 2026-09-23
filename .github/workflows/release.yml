@@ -114,9 +114,6 @@ jobs:
           - image: app
             context: .
             dockerfile: ./app/Dockerfile
-          - image: mdns
-            context: ./mdns
-            dockerfile: ./mdns/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -226,7 +223,6 @@ jobs:
             printf '### Container images\n\n'
             printf -- '- `ghcr.io/%s/adb-server:%s`\n' "$REPO" "$version"
             printf -- '- `ghcr.io/%s/app:%s`\n' "$REPO" "$version"
-            printf -- '- `ghcr.io/%s/mdns:%s`\n' "$REPO" "$version"
           } > release-notes.md
 
       - name: Create GitHub release
