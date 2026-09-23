@@ -18,12 +18,17 @@ updates:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "pip"
+    directory: "/mdns"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
     directory: "/"  # requirements-dev.txt
     schedule:
       interval: "weekly"
 
-  # Base image digests in both Dockerfiles.
+  # Base image digests in every Dockerfile.
   - package-ecosystem: "docker"
-    directories: ["/app", "/adb-server"]
+    directories: ["/app", "/adb-server", "/mdns"]
     schedule:
       interval: "weekly"

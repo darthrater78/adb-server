@@ -1,11 +1,14 @@
 name: CI
 
-# Every branch push and every PR while there's no main branch (dev phase).
-# Narrow to the default branch once main exists.
+# Every branch push, so feature branches are tested before they reach a PR,
+# and every PR.
 on:
   push:
     branches: ['**']
   pull_request:
+  # release.yml refuses to publish a commit CI never passed on; this is the
+  # escape hatch that gate points at.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,6 +18,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: VERSION and CHANGELOG agree
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          # First real version heading — an "## Unreleased" section is a
+          # normal in-progress state, not a mismatch.
+          heading="$(grep '^## ' CHANGELOG.md | grep -viE '^## \[?unreleased\]?' | head -1)"
+          case "$heading" in
+            "## $version"*|"## [$version]"*)
+              echo "VERSION $version matches newest changelog heading: $heading" ;;
+            *)
+              echo "::error::VERSION says $version but the newest CHANGELOG.md heading is '$heading'."
+              exit 1 ;;
+          esac
+
+      - name: Validate compose file
+        run: |
+          set -euo pipefail
+          # `env_file: .env` is resolved when compose parses the file, even for
+          # a config-only run, so the file has to exist.
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Audit Python dependencies
+        run: |
+          set -euo pipefail
+          # A venv: the runner's system python is externally managed (PEP 668).
+          python3 -m venv /tmp/audit
+          /tmp/audit/bin/pip install --quiet --disable-pip-version-check pip-audit==2.10.1
+          # requirements-dev.txt includes app/ and mdns/requirements.txt.
+          /tmp/audit/bin/pip-audit --requirement requirements-dev.txt --strict
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -29,6 +73,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             app/requirements.txt
+            mdns/requirements.txt
             requirements-dev.txt
 
       - name: Install dependencies
@@ -50,6 +95,9 @@ jobs:
           - name: adb-server
             context: adb-server
             file: adb-server/Dockerfile
+          - name: mdns
+            context: mdns
+            file: mdns/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
