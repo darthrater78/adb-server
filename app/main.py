@@ -16,6 +16,7 @@ import auth
 import db
 import github_client
 import poller
+import staging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("adb_server")
@@ -202,6 +203,7 @@ def create_repo(
 def delete_repo(repo_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
     _check_csrf(request, session, csrf_token)
     db.delete_repo(repo_id)
+    staging.remove_repo_dir(repo_id)
     return _redirect("/repos", ok="Repo removed")
 
 
@@ -218,10 +220,22 @@ async def check_repo_now(repo_id: int, request: Request, session: dict = Depends
 # ---- staged apks ----
 
 @app.get("/staged", response_class=HTMLResponse)
-def staged_page(request: Request, session: dict = Depends(auth.require_auth)):
+def staged_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
     return templates.TemplateResponse(
-        request, "staged.html", _tctx(request, session, apks=db.list_staged_apks(), devices=db.list_devices()),
+        request, "staged.html",
+        _tctx(request, session, apks=db.list_staged_apks(), devices=db.list_devices(), error=error, ok=ok),
     )
+
+
+@app.post("/staged/{apk_id}/delete")
+def delete_staged(apk_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    apk = db.get_staged_apk(apk_id)
+    if apk is None:
+        raise HTTPException(status_code=404)
+    staging.remove_file(apk["path"])
+    db.mark_apk_pruned(apk_id)
+    return _redirect("/staged", ok="Staged file deleted")
 
 
 # ---- devices ----
@@ -352,6 +366,8 @@ def push(
     apk = db.get_staged_apk(apk_id)
     if device is None or apk is None:
         raise HTTPException(status_code=404)
+    if apk["pruned_at"]:
+        return _redirect("/staged", error="That release's file was pruned — it can no longer be pushed")
 
     # The actual security boundary: enforced here, server-side, not just by
     # hiding the button in the UI.

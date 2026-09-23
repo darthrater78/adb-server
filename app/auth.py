@@ -40,7 +40,11 @@ def check_rate_limit(request: Request) -> None:
     now = time.time()
     key = _client_key(request)
     attempts = [t for t in _failed_attempts.get(key, []) if now - t < WINDOW_SECONDS]
-    _failed_attempts[key] = attempts
+    if attempts:
+        _failed_attempts[key] = attempts
+    else:
+        # Drop expired clients entirely so the dict can't grow without bound.
+        _failed_attempts.pop(key, None)
     if len(attempts) >= MAX_ATTEMPTS:
         raise HTTPException(status_code=429, detail="Too many failed login attempts. Try again later.")
 

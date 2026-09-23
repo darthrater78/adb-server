@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS repos (
     last_tag          TEXT,
     last_checked_at   TEXT,
     last_error        TEXT,
+    rejected_tag      TEXT,
     UNIQUE(owner, repo)
 );
 
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS staged_apks (
     path          TEXT NOT NULL,
     downloaded_at TEXT NOT NULL,
     release_notes TEXT,
+    pruned_at     TEXT,
     UNIQUE(repo_id, tag)
 );
 
@@ -78,12 +80,22 @@ def init_db() -> None:
         _migrate(conn)
 
 
+# (table, column, type) — every column added after 0.1.0. Table and column
+# names here are constants, never user input, so the f-string ALTER is safe.
+_ADDED_COLUMNS = [
+    ("staged_apks", "release_notes", "TEXT"),
+    ("staged_apks", "pruned_at", "TEXT"),
+    ("repos", "rejected_tag", "TEXT"),
+]
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """CREATE TABLE IF NOT EXISTS never adds columns to a table that already
     exists, so a DB created before a schema change needs an explicit ALTER."""
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(staged_apks)")}
-    if "release_notes" not in cols:
-        conn.execute("ALTER TABLE staged_apks ADD COLUMN release_notes TEXT")
+    for table, column, col_type in _ADDED_COLUMNS:
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
 
 # ---- repos ----
@@ -135,6 +147,23 @@ def update_repo_check(
         )
 
 
+def mark_repo_checked(repo_id: int) -> None:
+    """Records a check without touching last_error — used when a poll sees a
+    release it already rejected, so the rejection stays visible."""
+    with get_conn() as conn:
+        conn.execute("UPDATE repos SET last_checked_at = ? WHERE id = ?", (now(), repo_id))
+
+
+def set_rejected_tag(repo_id: int, tag: str | None, error: str | None) -> None:
+    """A tag that failed verification or the pin check. The poller skips it
+    until a newer release appears, instead of re-downloading it every poll."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET rejected_tag = ?, last_error = ?, last_checked_at = ? WHERE id = ?",
+            (tag, error, now(), repo_id),
+        )
+
+
 # ---- staged apks ----
 
 def insert_staged_apk(
@@ -162,14 +191,33 @@ def list_staged_apks(repo_id: int | None = None) -> list[sqlite3.Row]:
             return conn.execute(
                 """SELECT staged_apks.*, repos.owner, repos.repo
                    FROM staged_apks JOIN repos ON repos.id = staged_apks.repo_id
-                   WHERE repo_id = ? ORDER BY downloaded_at DESC""",
+                   WHERE repo_id = ? AND pruned_at IS NULL ORDER BY downloaded_at DESC""",
                 (repo_id,),
             ).fetchall()
         return conn.execute(
             """SELECT staged_apks.*, repos.owner, repos.repo
                FROM staged_apks JOIN repos ON repos.id = staged_apks.repo_id
+               WHERE pruned_at IS NULL
                ORDER BY downloaded_at DESC"""
         ).fetchall()
+
+
+def list_prunable_apks(repo_id: int, keep: int) -> list[sqlite3.Row]:
+    """Unpruned staged APKs for a repo beyond the newest `keep`."""
+    with get_conn() as conn:
+        return conn.execute(
+            """SELECT * FROM staged_apks
+               WHERE repo_id = ? AND pruned_at IS NULL
+               ORDER BY downloaded_at DESC, id DESC
+               LIMIT -1 OFFSET ?""",
+            (repo_id, keep),
+        ).fetchall()
+
+
+def mark_apk_pruned(apk_id: int) -> None:
+    # The row stays so install history keeps pointing at it; only the file goes.
+    with get_conn() as conn:
+        conn.execute("UPDATE staged_apks SET pruned_at = ? WHERE id = ?", (now(), apk_id))
 
 
 def get_staged_apk(apk_id: int) -> sqlite3.Row | None:

@@ -1,13 +1,15 @@
+import asyncio
 import logging
 import os
+import secrets
 
 import apk_verify
 import db
 import github_client
+import staging
 
 logger = logging.getLogger("poller")
 
-STAGING_ROOT = os.environ.get("STAGING_ROOT", "/data/staging")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN") or None
 MAX_RELEASE_NOTES_CHARS = 20_000
 
@@ -27,6 +29,11 @@ async def check_repo(repo_row) -> None:
     if not tag or tag == repo_row["last_tag"]:
         db.update_repo_check(repo_row["id"], last_error=None)
         return
+    if tag == repo_row["rejected_tag"]:
+        # Already downloaded, verified and rejected. Re-downloading it every
+        # poll would burn bandwidth and change nothing; keep the error visible.
+        db.mark_repo_checked(repo_row["id"])
+        return
 
     asset = github_client.find_matching_asset(release, glob_pattern)
     if asset is None:
@@ -35,9 +42,11 @@ async def check_repo(repo_row) -> None:
         db.update_repo_check(repo_row["id"], last_error=msg)
         return
 
-    repo_dir = os.path.join(STAGING_ROOT, str(repo_row["id"]))
+    repo_dir = staging.repo_dir(repo_row["id"])
     os.makedirs(repo_dir, exist_ok=True)
-    tmp_dest = os.path.join(repo_dir, f"_download_{tag}")
+    # Never build a path from the tag: it's upstream-controlled and may
+    # contain "/" (e.g. "release/1.2").
+    tmp_dest = os.path.join(repo_dir, f"_download_{secrets.token_hex(8)}")
 
     try:
         sha256, _size = await github_client.download_asset(asset, tmp_dest, GITHUB_TOKEN)
@@ -49,12 +58,14 @@ async def check_repo(repo_row) -> None:
     final_path = os.path.join(repo_dir, f"{sha256}.apk")
 
     try:
-        signer_sha256 = apk_verify.verify_signature(tmp_dest)
-        package_name = apk_verify.get_package_name(tmp_dest)
+        # apksigner/aapt are blocking subprocesses (up to 60s each) — run them
+        # in a worker thread so the single event loop keeps serving the UI.
+        signer_sha256 = await asyncio.to_thread(apk_verify.verify_signature, tmp_dest)
+        package_name = await asyncio.to_thread(apk_verify.get_package_name, tmp_dest)
     except apk_verify.ApkVerifyError as exc:
         os.remove(tmp_dest)
         logger.warning("%s: verification failed: %s", label, exc)
-        db.update_repo_check(repo_row["id"], last_error=f"APK verification failed: {exc}")
+        db.set_rejected_tag(repo_row["id"], tag, f"APK verification failed in {tag}: {exc}")
         return
 
     expected_package = repo_row["expected_package"]
@@ -71,12 +82,12 @@ async def check_repo(repo_row) -> None:
     elif package_name != expected_package or signer_sha256 != expected_signer:
         os.remove(tmp_dest)
         msg = (
-            f"Pin mismatch: expected package '{expected_package}' signed by "
+            f"Pin mismatch in {tag}: expected package '{expected_package}' signed by "
             f"{expected_signer}, got '{package_name}' signed by {signer_sha256}. "
             "Not staged — verify this release is genuinely from this repo before trusting it."
         )
         logger.error("%s: %s", label, msg)
-        db.update_repo_check(repo_row["id"], last_error=msg)
+        db.set_rejected_tag(repo_row["id"], tag, msg)
         return
     else:
         db.update_repo_check(repo_row["id"], last_tag=tag)
@@ -99,8 +110,17 @@ async def check_repo(repo_row) -> None:
         return
 
     logger.info("%s: staged %s (%s)", label, tag, asset["name"])
+    pruned = staging.prune_repo(repo_row["id"])
+    if pruned:
+        logger.info("%s: pruned %d old staged release(s)", label, pruned)
 
 
 async def poll_all_repos() -> None:
     for repo_row in db.list_repos():
-        await check_repo(repo_row)
+        try:
+            await check_repo(repo_row)
+        except Exception:
+            # One repo failing in an unexpected way must not stop every repo
+            # after it from being polled.
+            logger.exception("%s/%s: poll crashed", repo_row["owner"], repo_row["repo"])
+            db.update_repo_check(repo_row["id"], last_error="Internal error while checking — see server logs")

@@ -37,7 +37,10 @@ front (Tailscale serve, Caddy, etc.) and rebind this to `127.0.0.1:8080`.
    Enter both on the Devices page to pair. A newly paired device is **not
    trusted** by default — trust it explicitly before it can receive pushes.
 3. **Staged** — every verified release lands here, with the release notes
-   GitHub reports for it (if any). Push it to any trusted device.
+   GitHub reports for it (if any). Push it to any trusted device. Only the
+   newest `KEEP_RELEASES_PER_REPO` (default 3) files per repo are kept on
+   disk; older ones are deleted automatically, and you can delete any file by
+   hand. Install history is kept either way.
 4. **Installs** — history and logs of every push attempt. A push runs in the
    background; submitting one takes you to a live status page that updates
    until the install finishes.
@@ -56,6 +59,9 @@ reaching your devices unnoticed.
 
 Debug-signed and unsigned APKs are always rejected, pin or no pin.
 
+A rejected release is downloaded and checked once. The poller skips that tag
+afterwards (the error stays visible) until a newer release appears.
+
 ## Security notes
 
 - Single-operator app: one username/password, no multi-user accounts.
@@ -69,6 +75,17 @@ Debug-signed and unsigned APKs are always rejected, pin or no pin.
   from a third-party pre-built image.
 - No signature verification bypass, no `install -g/-d/-t` flags — installs
   are always `install -r` only.
+
+## Development
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests stub out GitHub, `adb`, `apksigner` and `aapt`, so they need none of
+the Android tooling or a device.
 
 ## Non-goals (v1)
 

@@ -46,6 +46,10 @@
         {% else %}
         <span class="muted">No trusted devices</span>
         {% endif %}
+        <form method="post" action="/staged/{{ a.id }}/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Delete file</button>
+        </form>
       </td>
     </tr>
     {% else %}

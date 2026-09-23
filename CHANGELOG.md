@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: a release that failed signature verification or the pin check was
+  re-downloaded (up to 500 MB) on every poll. It is now checked once and
+  skipped until a newer release appears; the error stays visible.
+- Fixed: APK verification (`apksigner`/`aapt`) no longer blocks the web UI
+  while it runs.
+- Fixed: a release tag containing `/` crashed its repo's check, and any
+  unexpected error in one repo stopped every repo after it from being polled.
+- Fixed: removing a repo now deletes its staged APK files from disk.
+- Fixed: error messages sent to the Staged page (e.g. "Device is not
+  trusted") were never displayed.
+- New: staged APK retention — only the newest `KEEP_RELEASES_PER_REPO`
+  (default 3) files per repo are kept; install history is preserved. Staged
+  files can also be deleted by hand.
+- New: automated test suite (`pytest`).
+
 ## 0.2.0 — 2026-09-16
 
 - Push is now a background job: submitting a push redirects immediately to a
