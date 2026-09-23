@@ -1,13 +1,10 @@
 services:
   adb-server:
     build: ./adb-server
-    # adb labels its key "<LOGNAME>@<hostname>" when it pairs, and that label
-    # is the name phones list this server under. Without this it's Docker's
-    # random container ID, which changes on every recreate.
     hostname: adbserver
     networks: [internal]
     volumes:
-      - adbkeys:/home/adb/.android
+      - /opt/docker/adb-server/adbkeys:/home/adb/.android
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -15,26 +12,16 @@ services:
     tmpfs:
       - /tmp
     healthcheck:
-      # Talks to the local adb server over its own port; fails if it's down.
       test: ["CMD", "adb", "-P", "5037", "devices"]
       interval: 60s
       timeout: 10s
       retries: 3
-    # No ports published — reachable only from `app`, over the internal compose
-    # network. Never add `network_mode: host` here: the adb server binds all
-    # interfaces inside its own container (needed so `app` can reach it), and
-    # host networking would put that unauthenticated port directly on your LAN.
 
   mdns:
     build: ./mdns
-    # Host networking, because mDNS multicast doesn't cross Docker's bridge:
-    # it's how a phone that scanned a pairing QR code announces its port.
-    # Safe here, unlike on adb-server: this container only listens for
-    # announcements, opens no port of its own besides mDNS, and holds no
-    # keys. It reaches the app only through the mdns volume, read-only there.
     network_mode: host
     volumes:
-      - mdns:/mdns
+      - /opt/docker/adb-server/mdns:/mdns
     restart: unless-stopped
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -54,8 +41,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - appdata:/data
-      - mdns:/mdns:ro
+      - /opt/docker/adb-server/appdata:/data
+      - /opt/docker/adb-server/mdns:/mdns:ro
     env_file: .env
     restart: unless-stopped
     healthcheck:
@@ -66,26 +53,62 @@ services:
       start_period: 20s
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    # Everything the app writes lives on /data. /tmp is still needed: apksigner
-    # runs under a JVM, which writes there. Sized, because tmpfs is memory —
-    # uploads are spooled to /data instead (tempfile.tempdir in main.py).
     read_only: true
     tmpfs:
       - /tmp:size=64m
-      # The `adb` client aborts if it can't create ~/.android. It holds no keys
-      # here (the adb-server container does), so a tiny tmpfs is enough.
       - /home/appuser/.android:size=1m,uid=10001,gid=10001,mode=0700
-    # Bound to all interfaces — reachable from your LAN over plain HTTP. This
-    # is a deliberate, deferred trade-off, not an oversight: the login
-    # password and session cookie travel in cleartext to anyone else on the
-    # same network. If this stops being a "trusted home LAN" situation, put a
-    # reverse proxy (Caddy, Tailscale serve) with TLS in front instead, and
-    # go back to binding this to "127.0.0.1:8080:8080".
 
 networks:
   internal:
 
-volumes:
-  adbkeys:
-  appdata:
-  mdns:
+# ---------------------------------------------------------------------------
+# Notes
+# ---------------------------------------------------------------------------
+#
+# Storage
+#   All data lives in bind mounts under /opt/docker/adb-server. Change the
+#   host side of each mount if you keep your containers somewhere else.
+#   Every container runs as uid 10001, so create the directories and hand
+#   them to that uid before the first `docker compose up`. Otherwise Docker
+#   creates them owned by root and the containers can't write to them:
+#
+#     sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,mdns}
+#     sudo chown -R 10001:10001 /opt/docker/adb-server
+#     sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
+#
+#   adbkeys holds the adb private key every paired phone trusts; appdata holds
+#   the database. Back both up, and protect the backups the same way.
+#
+# adb-server
+#   hostname: adb labels its key "<LOGNAME>@<hostname>" when it pairs, and
+#     that label is the name phones list this server under. Without it, it's
+#     Docker's random container ID, which changes on every recreate.
+#   healthcheck: talks to the local adb server over its own port; fails if
+#     it's down.
+#   No ports published: it's reachable only from `app`, over the internal
+#     compose network. Never add `network_mode: host` here. The adb server
+#     binds all interfaces inside its own container (needed so `app` can
+#     reach it), and host networking would put that unauthenticated port
+#     directly on your LAN.
+#
+# mdns
+#   network_mode: host, because mDNS multicast doesn't cross Docker's bridge.
+#     It's how a phone that scanned a pairing QR code announces its port.
+#     Safe here, unlike on adb-server: this container only listens for
+#     announcements, opens no port of its own besides mDNS, and holds no
+#     keys. It reaches the app only through the mdns directory, which the
+#     app mounts read-only.
+#
+# app
+#   read_only / tmpfs: everything the app writes lives on /data. /tmp is
+#     still needed: apksigner runs under a JVM, which writes there. It's
+#     sized, because tmpfs is memory; uploads are spooled to /data instead
+#     (tempfile.tempdir in main.py). The `adb` client aborts if it can't
+#     create ~/.android. It holds no keys here (the adb-server container
+#     does), so a tiny tmpfs is enough.
+#   ports: bound to all interfaces, so it's reachable from your LAN over
+#     plain HTTP. This is a deliberate, deferred trade-off, not an oversight:
+#     the login password and session cookie travel in cleartext to anyone
+#     else on the same network. If this stops being a "trusted home LAN"
+#     situation, put a reverse proxy (Caddy, Tailscale serve) with TLS in
+#     front instead, and go back to binding this to "127.0.0.1:8080:8080".
