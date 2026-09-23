@@ -15,7 +15,10 @@
 - New: staged APK retention — only the newest `KEEP_RELEASES_PER_REPO`
   (default 3) files per repo are kept; install history is preserved. Staged
   files can also be deleted by hand.
-- New: automated test suite (`pytest`).
+- New: automated test suite (`pytest`, run with `scripts/test.sh`).
+- New: CI builds both images and runs the tests on every push and PR;
+  actionlint checks workflow edits; Dependabot watches pip, Docker base images
+  and Actions. Base images are now pinned by digest.
 
 ## 0.2.0 — 2026-09-16
 

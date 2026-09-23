@@ -81,8 +81,12 @@ afterwards (the error stays visible) until a newer release appears.
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
-pytest
+bash scripts/test.sh
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same script and builds both images
+on every push and PR. Dependabot keeps pip packages, GitHub Actions and the
+digest-pinned base images current.
 
 The tests stub out GitHub, `adb`, `apksigner` and `aapt`, so they need none of
 the Android tooling or a device.

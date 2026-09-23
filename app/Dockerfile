@@ -10,7 +10,7 @@
 # is also needed here: adb_client.py shells out to a local `adb` binary acting
 # as a TCP client against the adb-server container — the protocol has no
 # pure-Python client, the `adb` executable *is* the client.
-FROM debian:bookworm-slim AS android-tools
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS android-tools
 
 ARG BUILD_TOOLS_URL=https://dl.google.com/android/repository/build-tools_r37_linux.zip
 ARG BUILD_TOOLS_SHA1=70954e99f4c3d9d46ee70fa32624672fe7cd6ebe
@@ -42,7 +42,7 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
     && rm -rf /tmp/platform-tools.zip /opt/platform-tools
 
 # ---- stage 2: runtime image ----
-FROM python:3.13-slim
+FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
 
 # apksigner is a JAR run under `java`; aapt is a standalone native binary and
 # needs no JRE.
