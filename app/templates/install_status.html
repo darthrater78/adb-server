@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Push status — adb-server{% endblock %}
+{% block title %}Push status — ADB Server{% endblock %}
 {% block head %}
 {% if install.status in ["pending", "installing"] %}
 <meta http-equiv="refresh" content="2">
@@ -9,7 +9,7 @@
 <h1>Push status</h1>
 
 <p>
-  <strong>{{ install.owner }}/{{ install.repo }}</strong> {{ install.tag }} ({{ install.filename }})
+  <strong>{{ install.source_label }}</strong> {{ install.tag }} ({{ install.filename }})
   → {{ install.nickname or install.device_serial }}
 </p>
 
@@ -28,7 +28,7 @@
 {% if install.status in ["pending", "installing"] %}
 <p class="muted small">This page refreshes automatically every 2 seconds.</p>
 {% else %}
-<p class="muted">Finished {{ install.finished_at }}</p>
+<p class="muted">Finished {{ install.finished_at | when }}</p>
 {% if install.log %}<pre class="log">{{ install.log }}</pre>{% endif %}
 <p><a href="/staged">Back to staged APKs</a> · <a href="/installs">Install history</a></p>
 {% endif %}

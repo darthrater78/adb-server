@@ -4,9 +4,14 @@
   --fg: #1a1a1a;
   --muted: #666;
   --border: #ddd;
-  --accent: #2563eb;
+  --accent: #0f766e;
+  --on-accent: #ffffff;
+  --surface: #f3f7f6;
+  --accent-2: #0369a1;
+  --on-accent-2: #ffffff;
   --danger: #b91c1c;
   --ok: #15803d;
+  --warn: #b45309;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -15,9 +20,14 @@
     --fg: #e6e6e6;
     --muted: #9aa0a6;
     --border: #333740;
-    --accent: #6ea8fe;
+    --accent: #2dd4bf;
+    --on-accent: #042f2a;
+    --surface: #1a1f23;
+    --accent-2: #38bdf8;
+    --on-accent-2: #0b1412;
     --danger: #f87171;
     --ok: #4ade80;
+    --warn: #fbbf24;
   }
 }
 
@@ -31,27 +41,42 @@
   --fg: #1a1a1a;
   --muted: #666;
   --border: #ddd;
-  --accent: #2563eb;
+  --accent: #0f766e;
+  --on-accent: #ffffff;
+  --surface: #f3f7f6;
+  --accent-2: #0369a1;
+  --on-accent-2: #ffffff;
   --danger: #b91c1c;
   --ok: #15803d;
+  --warn: #b45309;
 }
 :root[data-theme="dark"] {
   --bg: #14161a;
   --fg: #e6e6e6;
   --muted: #9aa0a6;
   --border: #333740;
-  --accent: #6ea8fe;
+  --accent: #2dd4bf;
+  --on-accent: #042f2a;
+  --surface: #1a1f23;
+  --accent-2: #38bdf8;
+  --on-accent-2: #0b1412;
   --danger: #f87171;
   --ok: #4ade80;
+  --warn: #fbbf24;
 }
 :root[data-theme="oled"] {
   --bg: #000000;
   --fg: #e6e6e6;
   --muted: #86898f;
   --border: #1c1c1c;
-  --accent: #6ea8fe;
+  --accent: #2dd4bf;
+  --on-accent: #042f2a;
+  --surface: #0b0e0f;
+  --accent-2: #38bdf8;
+  --on-accent-2: #0b1412;
   --danger: #f87171;
   --ok: #4ade80;
+  --warn: #fbbf24;
 }
 
 * { box-sizing: border-box; }
@@ -66,30 +91,60 @@ body {
 
 header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12px 20px;
   border-bottom: 1px solid var(--border);
   padding: 12px 0;
   margin-bottom: 24px;
 }
 
+a { color: var(--accent-2); }
+a:hover { text-decoration-thickness: 2px; }
+
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: 18px; height: 18px; }
+input[type="file"] { color: var(--muted); max-width: 100%; }
+input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-2);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  text-decoration: none;
+}
+.brand img { display: block; border-radius: 7px; }
+.brand-name { font-weight: 800; letter-spacing: -0.02em; font-size: 1.05rem; }
+
+nav { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; flex: 1; }
 nav a {
-  margin-right: 16px;
   color: var(--fg);
   text-decoration: none;
   font-weight: 600;
 }
-nav a:hover { color: var(--accent); }
+nav a:hover { color: var(--accent-2); }
+nav a.active { color: var(--accent); }
 
 .version-badge {
-  margin-left: 8px;
   color: var(--muted);
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   font-size: 0.75rem;
   font-weight: 400;
 }
+/* The running version (linked to its release notes) and the source repo. */
+.header-links { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.header-links a { color: var(--muted); font-size: 0.75rem; text-decoration: none; }
+.header-links a:hover { color: var(--accent-2); text-decoration: underline; }
 
-.header-right { display: flex; align-items: center; gap: 12px; }
 
 .theme-switcher { display: flex; gap: 4px; }
 .theme-form { display: inline; }
@@ -105,12 +160,26 @@ nav a:hover { color: var(--accent); }
 .theme-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 main { max-width: 1000px; margin: 0 auto; }
 
 h1 { font-size: 1.4rem; }
+/* The two-tone signature: a short primary-to-secondary bar under each page title. */
+main > h1::after {
+  content: "";
+  display: block;
+  width: 44px;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
 h2 { font-size: 1.1rem; }
 
 table {
@@ -126,9 +195,20 @@ th, td {
   vertical-align: middle;
 }
 th { color: var(--muted); font-weight: 600; }
+/* Long filenames, package names and tags wrap instead of widening the page. */
+td { overflow-wrap: anywhere; }
+th { overflow-wrap: normal; }
+td.nowrap, .tag-pill { white-space: nowrap; overflow-wrap: normal; }
 
 .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* No button, badge, chip or nav item ever wraps its own text; when space
+   runs out, whole buttons move to the next line instead. */
+button, .badge, .tag-pill, .preset, nav a, .theme-btn, .button-link { white-space: nowrap; }
+td form + form, td form + .button-link, td .button-link + form { margin-top: 8px; }
+td .inline-form { flex-wrap: wrap; }
+.actions form + form { margin-top: 0; }
+.staged-intro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 8px; }
 
 form label {
   display: flex;
@@ -151,16 +231,22 @@ button {
   border: 1px solid var(--accent);
   border-radius: 4px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
+  font-weight: 600;
   cursor: pointer;
   font-size: 0.85rem;
 }
-button.danger { background: var(--danger); border-color: var(--danger); }
+/* Secondary and destructive actions are outlined, so the one primary action
+   on a row is the only solid button. */
+button.secondary { background: transparent; border-color: var(--accent-2); color: var(--accent-2); }
+button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+button.small { padding: 4px 10px; font-size: 0.8rem; }
 button:hover { opacity: 0.85; }
 
 .flash { padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; }
 .flash-ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
 .flash-error { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.flash-warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
 
 .muted { color: var(--muted); font-size: 0.85rem; }
 .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
@@ -185,15 +271,16 @@ button:hover { opacity: 0.85; }
   display: inline-block;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   font-size: 0.8rem;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-2) 14%, transparent);
+  color: var(--accent-2);
   padding: 2px 9px;
   border-radius: 999px;
 }
 
 .panel {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  background: color-mix(in srgb, var(--accent-2) 6%, transparent);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-2);
   border-radius: 8px;
   padding: 14px;
 }
@@ -202,11 +289,30 @@ button:hover { opacity: 0.85; }
 
 details summary {
   cursor: pointer;
-  color: var(--accent);
+  color: var(--accent-2);
   font-size: 0.85rem;
   font-weight: 600;
 }
-.release-notes { max-width: 320px; margin-top: 6px; }
+/* Release notes get a full-width row under their APK, not a cell in an
+   8-column table: long notes were unreadable in a 320x100 box. */
+tr.has-notes td { border-bottom: none; }
+.notes-row td { padding-top: 0; }
+.release-notes {
+  max-width: none;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.upload-panel { margin-bottom: 24px; }
+.upload-panel h2 { margin: 0 0 4px; }
+.upload-panel p { margin: 0 0 12px; }
+.upload-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 .progress-track {
   width: 100%;
@@ -242,13 +348,429 @@ details summary {
   margin: 0;
 }
 
-.login-box {
-  max-width: 320px;
-  margin: 80px auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+/* Links styled as buttons (the dialog triggers, "Upload a development build"). */
+.button-link {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  white-space: nowrap;
 }
-.login-box form { display: flex; flex-direction: column; gap: 12px; }
+.button-link:hover { opacity: 0.85; }
+.button-link.secondary { background: transparent; border-color: var(--accent-2); color: var(--accent-2); }
+
+/* Confirmation dialog: opened by linking to its id (:target), closed by
+   linking anywhere else. No JavaScript, which the CSP forbids. */
+.modal { display: none; position: fixed; inset: 0; z-index: 50; align-items: center; justify-content: center; padding: 16px; }
+.modal:target { display: flex; }
+.modal-backdrop { position: absolute; inset: 0; background: rgb(0 0 0 / 0.55); }
+.modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  padding: 22px 22px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.45);
+  text-align: left;
+  font-weight: 400;
+}
+.modal-card h2 { margin: 0 0 10px; font-size: 1.15rem; }
+.modal-card p { margin: 0 0 10px; }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+/* ---- Settings ---- */
+.settings-section { margin-bottom: 36px; }
+.settings-section h2 { font-size: 1.15rem; margin-bottom: 4px; }
+.settings-section h3 { font-size: 0.95rem; margin: 22px 0 6px; }
+.add-service { margin-top: 14px; }
+.events-form { display: flex; flex-direction: column; gap: 8px; }
+.events-form button { align-self: flex-start; }
+label.check { flex-direction: row; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 0.95rem; color: var(--fg); }
+label.check input { margin-top: 3px; }
+.apprise-guide { margin-top: 22px; }
+.apprise-guide ul { padding-left: 18px; line-height: 1.5; }
+code { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 0.85em; }
+
+/* Appearance */
+.colour-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 14px 16px;
+  margin: 12px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.preview-btn {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.preview-btn.outline { background: transparent; border-color: var(--accent-2); color: var(--accent-2); }
+
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 600;
+}
+.preset:hover { opacity: 1; border-color: var(--accent-2); }
+.preset.current { border: 2px solid var(--fg); padding: 5px 13px 5px 5px; }
+.preset-dot { width: 26px; height: 26px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12); }
+/* A saved pair: the pill, with its delete button tucked against its end. */
+.saved-pair { display: inline-flex; align-items: center; }
+.saved-pair .preset { border-radius: 999px 0 0 999px; }
+.preset-delete {
+  align-self: stretch;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.preset-delete:hover { opacity: 1; color: var(--danger); border-color: var(--danger); }
+.save-pair { display: inline-flex; align-items: center; gap: 8px; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.custom-pair { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding-left: 5px; }
+.custom-pair label.colour-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.colour-field span { display: flex; flex-direction: column; line-height: 1.3; }
+.colour-field code { color: var(--muted); }
+/* The native colour input, without the browser's grey frame: just a circle. */
+input[type="color"].colour-dot {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--border);
+}
+input[type="color"].colour-dot::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"].colour-dot::-webkit-color-swatch { border: none; border-radius: 50%; }
+input[type="color"].colour-dot::-moz-color-swatch { border: none; border-radius: 50%; }
+input[type="color"].colour-dot:hover { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent-2); }
+
+/* Split swatches: primary top-left, secondary bottom-right. */
+.swatch-teal-ocean { background: linear-gradient(135deg, #0f766e 50%, #0369a1 50%); }
+.swatch-graphite-blue { background: linear-gradient(135deg, #3f3f46 50%, #2563eb 50%); }
+.swatch-navy-teal { background: linear-gradient(135deg, #1e3a8a 50%, #0d9488 50%); }
+.swatch-indigo-cyan { background: linear-gradient(135deg, #4338ca 50%, #0e7490 50%); }
+.swatch-forest-ochre { background: linear-gradient(135deg, #166534 50%, #a16207 50%); }
+.swatch-plum-slate { background: linear-gradient(135deg, #6b21a8 50%, #64748b 50%); }
+.swatch-terracotta-stone { background: linear-gradient(135deg, #9a3412 50%, #78716c 50%); }
+
+/* ---- Login ---- */
+body.login-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(48rem 28rem at 50% -8%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 70%),
+    radial-gradient(30rem 20rem at 100% 110%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 70%),
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--fg) 11%, transparent) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--bg);
+}
+body.login-page main { width: 100%; max-width: 400px; }
+.login-card {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 32px 28px 22px;
+  box-shadow: 0 24px 60px -24px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.login-brand { text-align: center; margin-bottom: 22px; }
+.login-brand img {
+  display: block;
+  margin: 0 auto 14px;
+  border-radius: 15px;
+  box-shadow: 0 10px 28px -8px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.login-brand h1 { margin: 0; font-size: 1.75rem; font-weight: 800; letter-spacing: -0.03em; }
+.login-subtitle {
+  margin: 4px 0 0;
+  color: var(--accent-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.login-tagline { margin: 10px 0 0; color: var(--muted); }
+.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.login-form input { font-size: 16px; padding: 11px 12px; border-radius: 8px; }
+.login-form input:focus { outline: 2px solid var(--accent-2); outline-offset: 1px; border-color: var(--accent-2); }
+.login-form button { margin-top: 6px; padding: 12px; font-size: 1rem; border-radius: 8px; }
+.login-foot {
+  margin: 20px 0 0;
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
 
 section { margin-bottom: 24px; }
+
+.badge-update { background: color-mix(in srgb, var(--accent-2) 16%, transparent); color: var(--accent-2); }
+.badge-warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.badge-muted { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
+
+.panel-warn {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  margin-bottom: 16px;
+}
+.panel-warn dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+.panel-warn dt { color: var(--muted); }
+.panel-warn dd { margin: 0; overflow-wrap: anywhere; }
+
+.status-cell form { margin-top: 4px; }
+
+/* QR pairing */
+.qr-start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0 4px; }
+.qr-pairing { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
+.qr-code { flex: none; padding: 8px; border-radius: 12px; background: #fff; border: 1px solid var(--border); }
+.qr-code svg { display: block; max-width: 100%; height: auto; }
+.qr-steps { flex: 1 1 280px; }
+.qr-steps ol { margin: 0 0 12px; padding-left: 20px; line-height: 1.6; }
+
+/* Two-factor sign-in */
+.login-form label.login-check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+.login-help { margin: 18px 0 0; line-height: 1.5; }
+.login-help code { overflow-wrap: anywhere; }
+.secret-key { display: inline-block; margin-top: 4px; font-size: 1rem; letter-spacing: 0.04em; user-select: all; }
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 8px 24px;
+  max-width: 40rem;
+  padding: 16px 20px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 1.05rem;
+  user-select: all;
+}
+
+/* ---- Desktop: one line per row ----
+   Cells never wrap, and a cell's forms and buttons sit side by side; a
+   stacked, two-line layout is for phones only (below). A table too wide
+   for the window scrolls sideways inside its .table-wrap instead. */
+@media (min-width: 961px) {
+  main { max-width: 1480px; }
+  .table-wrap { overflow-x: auto; }
+  /* Columns fit their contents; no stretching a table to the page width
+     and spreading the slack between columns as dead space. */
+  .table-wrap > table { width: auto; margin: 16px 0; }
+  th, td { padding: 8px 10px; }
+  th:first-child, td:first-child { padding-left: 4px; }
+  th, td { white-space: nowrap; overflow-wrap: normal; }
+  td > * { vertical-align: middle; }
+  td.actions { display: table-cell; }
+  td input[type="text"] { width: 11rem; }
+  /* A confirm dialog lives inside its row's cell, but is ordinary prose. */
+  .modal-card { white-space: normal; }
+  td form, td .inline-form { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 8px; vertical-align: middle; }
+  td form + form, td form + .button-link, td .button-link + form { margin: 0 0 0 8px; }
+  td .actions { flex-wrap: nowrap; }
+  /* Page-level forms (Pair, Add repo, Add service) stay on one line too:
+     their text boxes share the width and shrink before anything wraps. */
+  main > form.inline-form, section > form.inline-form { flex-wrap: nowrap; }
+  main > form.inline-form:has(label), section > form.inline-form:has(label) { align-items: flex-end; }
+  main > form.inline-form > label, section > form.inline-form > label { flex: 0 1 auto; min-width: 0; }
+  main > form.inline-form > label > input[type="text"],
+  section > form.inline-form > label > input[type="text"] { width: 100%; }
+  main > form.inline-form > label:has(input[type="checkbox"]),
+  section > form.inline-form > label:has(input[type="checkbox"]) {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 6px;
+  }
+  form.inline-form > button, form.inline-form > .button-link { flex: none; }
+  /* Long names are cut with an ellipsis; hovering shows the full value. */
+  .clip {
+    display: inline-block;
+    max-width: clamp(7rem, 12vw, 16rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+  }
+  .status-cell form { margin-top: 0; }
+  /* Free text is cut to one line; the full log is on the install's page. */
+  td .log {
+    max-width: clamp(160px, 20vw, 360px);
+    max-height: none;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  /* Full-width rows (release notes, empty states) wrap as normal text. */
+  tr.notes-row td, td[colspan] { white-space: normal; }
+}
+
+/* Mid widths (small laptops, landscape tablets): tighten the header so the
+   eight nav links stay on one line. */
+@media (min-width: 961px) and (max-width: 1180px) {
+  header { gap: 10px 14px; }
+  nav { gap: 4px 12px; }
+  nav a { font-size: 0.92rem; }
+  .brand-name { font-size: 0.98rem; }
+  .theme-btn { padding: 4px 7px; }
+  /* The version stays, still linked to its release notes (see its tooltip). */
+  .header-links .link-word { display: none; }
+  /* Rows stay on one line here too; they just pack tighter. */
+  th, td { padding: 7px 6px; }
+  table { font-size: 0.85rem; }
+  td button, td .button-link { padding: 5px 9px; font-size: 0.8rem; }
+  td input[type="text"] { width: 8rem; }
+  td .log { max-width: 140px; }
+}
+
+/* ---- Phones and narrow windows ----
+   No JavaScript is allowed (CSP script-src 'none'), so this is CSS only:
+   a compact header, and every table turned into a stack of cards whose
+   cells are labelled from their data-label. */
+@media (max-width: 960px) {
+  body { padding: 0 12px 32px; }
+  h1 { font-size: 1.3rem; margin: 4px 0 12px; }
+
+  header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand logout" "nav nav" "links themes";
+    gap: 10px;
+    padding: 10px 0 12px;
+    margin-bottom: 16px;
+  }
+  .brand { grid-area: brand; }
+  .logout-form { grid-area: logout; }
+  .theme-switcher { grid-area: themes; justify-content: flex-end; }
+  .header-links { grid-area: links; align-self: center; }
+  .header-links a { font-size: 0.85rem; }
+  .header-links .link-word-long { display: none; }  /* "v1.0.0 notes" */
+  nav {
+    grid-area: nav;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+  }
+  nav a {
+    text-align: center;
+    padding: 9px 2px;
+    border-radius: 7px;
+    font-size: 0.9rem;
+  }
+  nav a.active { background: var(--accent); color: var(--on-accent); }
+  .theme-btn { padding: 5px 10px; min-height: 0; }
+  .logout-form button { min-height: 36px; padding: 6px 12px; }
+
+  /* 16px stops iOS zooming into a focused field. */
+  input, select, button { font-size: 16px; }
+  button { min-height: 40px; }
+  button.small { min-height: 36px; font-size: 0.9rem; }
+  .inline-form label { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+  .inline-form input[type="text"], .inline-form select, .upload-form input { width: 100%; }
+  .inline-form label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
+  .inline-form label input[type="checkbox"] { width: auto; }
+  
+  table, thead, tbody, tr, td { display: block; width: 100%; }
+  table { font-size: 0.95rem; margin: 12px 0; }
+  thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  tbody tr {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+  }
+  td { border: none; padding: 5px 0; overflow-wrap: anywhere; }
+  td[data-label]:empty { display: none; }
+  td[data-label] {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr;
+    column-gap: 10px;
+    row-gap: 6px;
+    align-items: baseline;
+  }
+  /* Every child goes in the value column, at its natural width. */
+  td[data-label] > * { grid-column: 2; justify-self: start; max-width: 100%; }
+  td[data-label] > br { display: none; }
+  td[data-label]::before {
+    content: attr(data-label);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  /* A row's lead cell reads as the card's title. */
+  tbody td:first-child[data-label] { font-weight: 700; font-size: 1rem; }
+  td form + form { margin-top: 4px; }
+  .actions, td:not([data-label]):not([colspan]) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 10px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+  }
+  .actions form + form { margin-top: 0; }
+  .status-cell form { margin-top: 0; }
+  .status-cell { row-gap: 8px; }
+
+  /* A card with release notes and its notes row read as one card. */
+  tr.has-notes { border-bottom: none; border-radius: 12px 12px 0 0; margin-bottom: 0; padding-bottom: 4px; }
+  tr.notes-row { border-top: none; border-radius: 0 0 12px 12px; padding-top: 0; }
+  tr.notes-row td { border-top: 1px dashed var(--border); padding-top: 10px; }
+
+  .log, .release-notes { max-width: none; }
+  .release-notes { max-height: 50vh; }
+  .panel { padding: 14px 14px 16px; }
+}
+#security details { margin-top: 16px; }

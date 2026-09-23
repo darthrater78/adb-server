@@ -1,14 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Devices — adb-server{% endblock %}
+{% block title %}Devices — ADB Server{% endblock %}
 {% block content %}
 <h1>Devices</h1>
 
 <section>
   <h2>Pair a new device</h2>
+  <form method="post" action="/devices/qr" class="qr-start">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Pair with QR code</button>
+    <span class="muted small">Quickest: scan a code with the phone. Or pair with a code below.</span>
+  </form>
   <p class="muted">
     On the phone: Settings → Developer options → Wireless debugging → "Pair device with
     pairing code" gives you a pairing address + 6-digit code. The main Wireless debugging
     screen separately shows a connect address (ip:port) — enter both below.
+  </p>
+  <p class="muted">
+    The connect port changes whenever wireless debugging restarts. Pushes find the new port
+    automatically by scanning the device's last known IP; "Find" does the same on demand.
   </p>
   <form method="post" action="/devices/pair" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -19,56 +28,64 @@
   </form>
 </section>
 
+<div class="table-wrap">
+
 <table>
   <thead>
     <tr>
-      <th>Device</th><th>Serial</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
+      <th>Device</th><th>Serial</th><th>CPU</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
     </tr>
   </thead>
   <tbody>
     {% for d in devices %}
     <tr>
-      <td>
-        <form method="post" action="/devices/{{ d.serial }}/nickname" class="inline-form">
+      <td data-label="Device">
+        <form method="post" action="/devices/{{ d.serial | urlencode }}/nickname" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="text" name="nickname" value="{{ d.nickname or '' }}" placeholder="nickname">
-          <button type="submit">Save</button>
+          <button type="submit" class="secondary">Save</button>
         </form>
       </td>
-      <td class="mono small">{{ d.serial }}</td>
-      <td>
+      <td data-label="Serial" class="mono small">{{ d.serial }}</td>
+      <td data-label="CPU" class="mono small">{{ d.abis.split()[0] if d.abis else "—" }}</td>
+      <td data-label="Trusted">
         {% if d.trusted %}
-        <form method="post" action="/devices/{{ d.serial }}/trust" class="inline-form">
+        <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="trusted" value="0">
-          <button type="submit">Trusted — revoke</button>
+          <button type="submit" class="secondary">Trusted — revoke</button>
         </form>
         {% else %}
-        <form method="post" action="/devices/{{ d.serial }}/trust" class="inline-form">
+        <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="trusted" value="1">
           <button type="submit" class="danger">Not trusted — trust</button>
         </form>
         {% endif %}
       </td>
-      <td>
-        <form method="post" action="/devices/{{ d.serial }}/connect" class="inline-form">
+      <td data-label="Address">
+        <form method="post" action="/devices/{{ d.serial | urlencode }}/connect" class="inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="text" name="connect_addr" value="{{ d.last_connect_addr or '' }}" placeholder="ip:port">
-          <button type="submit">Reconnect</button>
+          <button type="submit" class="secondary">Reconnect</button>
+        </form>
+        <form method="post" action="/devices/{{ d.serial | urlencode }}/find" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="secondary" title="Scan this device's IP for its new wireless debugging port">Find</button>
         </form>
       </td>
-      <td>{{ d.last_seen_at or "never" }}</td>
+      <td data-label="Last seen">{{ d.last_seen_at | when }}</td>
       <td>
-        <form method="post" action="/devices/{{ d.serial }}/delete">
+        <form method="post" action="/devices/{{ d.serial | urlencode }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit" class="danger">Forget</button>
         </form>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6">No devices paired yet.</td></tr>
+    <tr><td colspan="7">No devices paired yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

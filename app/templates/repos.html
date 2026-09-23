@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Repos — adb-server{% endblock %}
+{% block title %}Repos — ADB Server{% endblock %}
 {% block content %}
 <h1>Watched repos</h1>
 
@@ -7,8 +7,38 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>Repo URL <input type="text" name="repo_url" required placeholder="https://github.com/octocat/hello-world" size="40"></label>
   <label>Asset glob <input type="text" name="asset_glob" value="*.apk"></label>
+  <label><input type="checkbox" name="include_prereleases" value="1"> Include pre-releases</label>
   <button type="submit">Add repo</button>
 </form>
+
+{% for r in repos if r.pending_signer %}
+<section class="panel panel-warn">
+  <h2>Signing change: {{ r.owner }}/{{ r.repo }} {{ r.rejected_tag }}</h2>
+  <p>
+    This release is signed differently from the one this repo was pinned to, so it was <strong>not staged</strong>.
+    Accept it only if you're sure the change is genuine (for example, the developer announced a key rotation).
+  </p>
+  <dl>
+    <dt>Pinned package</dt><dd class="mono small">{{ r.expected_package }}</dd>
+    <dt>New package</dt><dd class="mono small">{{ r.pending_package }}{% if r.pending_package != r.expected_package %} <span class="badge badge-error">different app</span>{% endif %}</dd>
+    <dt>Pinned signer</dt><dd class="mono small">{{ r.signer_sha256 }}</dd>
+    <dt>New signer</dt><dd class="mono small">{{ r.pending_signer }}</dd>
+    <dt>Rotation proof</dt>
+    <dd>
+      {% if r.pending_lineage_ok %}
+      <span class="badge badge-ok">Proven</span> The new APK's signing lineage includes the pinned certificate (APK Signature Scheme v3 key rotation).
+      {% else %}
+      <span class="badge badge-error">None</span> Nothing in the APK links the new certificate to the pinned one. Check with the developer before accepting.
+      {% endif %}
+    </dd>
+  </dl>
+  <form method="post" action="/repos/{{ r.id }}/accept-signer" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label><input type="checkbox" name="confirm" value="yes" required> I've verified this new certificate is genuine</label>
+    <button type="submit" class="danger">Accept new signer and stage</button>
+  </form>
+</section>
+{% endfor %}
 
 {% if repos %}
 {% set error_count = repos | selectattr("last_error") | list | length %}
@@ -17,6 +47,8 @@
   {% if error_count %}· <span class="badge badge-error">{{ error_count }} with errors</span>{% endif %}
 </p>
 {% endif %}
+
+<div class="table-wrap">
 
 <table>
   <thead>
@@ -28,12 +60,15 @@
   <tbody>
     {% for r in repos %}
     <tr>
-      <td><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a></td>
-      <td class="mono small">{{ r.asset_glob }}</td>
-      <td class="mono small">{{ r.expected_package or "—" }}</td>
-      <td>{% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-      <td class="muted small">{{ r.last_checked_at or "never" }}</td>
-      <td>
+      <td data-label="Repo"><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a></td>
+      <td data-label="Asset glob" class="mono small">{{ r.asset_glob }}</td>
+      <td data-label="Pinned package" class="mono small">{{ r.expected_package or "—" }}</td>
+      <td data-label="Last tag">
+        {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}
+        {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
+      </td>
+      <td data-label="Last checked" class="small">{{ r.last_checked_at | when }}</td>
+      <td data-label="Status">
         {% if r.last_error %}
         <span class="badge badge-error" title="{{ r.last_error }}">Error</span>
         {% else %}
@@ -43,7 +78,12 @@
       <td class="actions">
         <form method="post" action="/repos/{{ r.id }}/check-now">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit">Check now</button>
+          <button type="submit" class="secondary">Check now</button>
+        </form>
+        <form method="post" action="/repos/{{ r.id }}/prereleases">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="include" value="{{ '0' if r.include_prereleases else '1' }}">
+          <button type="submit" class="secondary">{{ "Stable only" if r.include_prereleases else "Include pre-releases" }}</button>
         </form>
         <form method="post" action="/repos/{{ r.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -56,4 +96,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

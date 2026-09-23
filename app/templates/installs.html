@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Install history — adb-server{% endblock %}
+{% block title %}Install history — ADB Server{% endblock %}
 {% block content %}
 <h1>Install history</h1>
+
+<div class="table-wrap">
 
 <table>
   <thead>
@@ -12,12 +14,12 @@
   <tbody>
     {% for i in installs %}
     <tr>
-      <td>{{ i.started_at }}</td>
-      <td>{{ i.nickname or i.device_serial }}</td>
-      <td>{{ i.owner }}/{{ i.repo }} {{ i.tag }} ({{ i.filename }})</td>
-      <td class="status-{{ i.status }}">{{ i.status }}</td>
-      <td>{{ i.finished_at or "—" }}</td>
-      <td><pre class="log">{{ i.log or "" }}</pre></td>
+      <td data-label="Started">{{ i.started_at | when }}</td>
+      <td data-label="Device">{{ i.nickname or i.device_serial }}</td>
+      <td data-label="APK"><span class="clip" title="{{ i.source_label }} {{ i.tag }} ({{ i.filename }})">{{ i.source_label }} {{ i.tag }} ({{ i.filename }})</span></td>
+      <td data-label="Status" class="status-{{ i.status }}">{{ i.status }}</td>
+      <td data-label="Finished">{{ i.finished_at | when("—") }}</td>
+      <td data-label="Log"><pre class="log">{{ i.log or "" }}</pre></td>
       <td><a href="/installs/{{ i.id }}">View</a></td>
     </tr>
     {% else %}
@@ -25,4 +27,5 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}

@@ -1,0 +1,3 @@
+-r app/requirements.txt
+-r mdns/requirements.txt
+pytest==9.1.1

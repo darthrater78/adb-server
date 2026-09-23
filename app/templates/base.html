@@ -3,22 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}adb-server{% endblock %}</title>
+  <title>{% block title %}ADB Server{% endblock %}</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/accent.css?v={{ accent_version }}">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   {% if csrf_token is defined %}
   <header>
+    <a class="brand" href="/status">
+      <img src="/static/logo.svg" width="28" height="28" alt="">
+      <span class="brand-name">ADB Server</span>
+    </a>
+    <span class="header-links">
+      <a class="version-badge" href="{{ release_notes_url }}" rel="noopener noreferrer"
+         title="Release notes for v{{ app_version }}">v{{ app_version }}<span class="link-word"><span class="link-word-long"> release</span> notes</span></a>
+      <a href="{{ repo_url }}" rel="noopener noreferrer" title="ADB Server on GitHub">GitHub</a>
+    </span>
     <nav>
-      <a href="/repos">Repos</a>
-      <a href="/staged">Staged</a>
-      <a href="/devices">Devices</a>
-      <a href="/installs">Installs</a>
-      <span class="version-badge" title="adb-server version">v{{ app_version }}</span>
+      {% for href, label in [("/status", "Status"), ("/repos", "Repos"), ("/staged", "Staged"),
+                             ("/upload", "Upload"), ("/devices", "Devices"),
+                             ("/installs", "Installs"), ("/audit", "Audit"), ("/settings", "Settings")] %}
+      <a href="{{ href }}"{% if href == request.url.path %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
     </nav>
-    <div class="header-right">
-      <div class="theme-switcher" role="group" aria-label="Theme">
+    <div class="theme-switcher" role="group" aria-label="Theme">
         {% for t, label in [("flashbang", "Flashbang"), ("dark", "Dark"), ("oled", "OLED")] %}
         <form method="post" action="/theme" class="theme-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -27,18 +37,20 @@
           <button type="submit" class="theme-btn{{ ' active' if theme == t else '' }}">{{ label }}</button>
         </form>
         {% endfor %}
-      </div>
-      <form method="post" action="/logout" class="logout-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit">Log out</button>
-      </form>
     </div>
+    <form method="post" action="/logout" class="logout-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary">Log out</button>
+    </form>
   </header>
   {% endif %}
 
   <main>
+    {% block flashes %}
     {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
     {% if ok %}<p class="flash flash-ok">{{ ok }}</p>{% endif %}
+    {% if warn %}<p class="flash flash-warn">{{ warn }}</p>{% endif %}
+    {% endblock %}
     {% block content %}{% endblock %}
   </main>
 </body>
