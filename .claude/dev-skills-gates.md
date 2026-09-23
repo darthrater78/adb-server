@@ -7,7 +7,7 @@ Updated: 2026-09-23
 
 🔢 VERSION    ⬜ not owed (work commit)
 🔨 BUILD      ⬜ not owed (work commit)
-  docker info: daemon unreachable in this container; pytest 49 passed; actionlint clean
+  docker info: daemon unreachable in this container; pytest 101 passed; actionlint clean; CI run 35813565727 green (tests + both image builds)
 🔒 SECURITY   ✅ 1 open — 0 Critical, 0 High (work commit OK; blocks release)
   pip-audit: no known vulnerabilities; all pins at latest release
   ✅ fixed: F1 rejected-release redownload loop (Medium)

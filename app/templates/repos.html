@@ -10,6 +10,35 @@
   <button type="submit">Add repo</button>
 </form>
 
+{% for r in repos if r.pending_signer %}
+<section class="panel panel-warn">
+  <h2>Signing change: {{ r.owner }}/{{ r.repo }} {{ r.rejected_tag }}</h2>
+  <p>
+    This release is signed differently from the one this repo was pinned to, so it was <strong>not staged</strong>.
+    Accept it only if you're sure the change is genuine (for example, the developer announced a key rotation).
+  </p>
+  <dl>
+    <dt>Pinned package</dt><dd class="mono small">{{ r.expected_package }}</dd>
+    <dt>New package</dt><dd class="mono small">{{ r.pending_package }}{% if r.pending_package != r.expected_package %} <span class="badge badge-error">different app</span>{% endif %}</dd>
+    <dt>Pinned signer</dt><dd class="mono small">{{ r.signer_sha256 }}</dd>
+    <dt>New signer</dt><dd class="mono small">{{ r.pending_signer }}</dd>
+    <dt>Rotation proof</dt>
+    <dd>
+      {% if r.pending_lineage_ok %}
+      <span class="badge badge-ok">Proven</span> The new APK's signing lineage includes the pinned certificate (APK Signature Scheme v3 key rotation).
+      {% else %}
+      <span class="badge badge-error">None</span> Nothing in the APK links the new certificate to the pinned one. Check with the developer before accepting.
+      {% endif %}
+    </dd>
+  </dl>
+  <form method="post" action="/repos/{{ r.id }}/accept-signer" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label><input type="checkbox" name="confirm" value="yes" required> I've verified this new certificate is genuine</label>
+    <button type="submit" class="danger">Accept new signer and stage</button>
+  </form>
+</section>
+{% endfor %}
+
 {% if repos %}
 {% set error_count = repos | selectattr("last_error") | list | length %}
 <p class="muted">

@@ -28,6 +28,11 @@ front (Tailscale serve, Caddy, etc.) and rebind this to `127.0.0.1:8080`.
 
 ## Using it
 
+0. **Status** (the home page) — every watched app against every trusted
+   device: installed version, latest staged version, and an Update/Install
+   button that picks the right APK for that device's CPU. "Refresh installed
+   versions" asks each device what it currently has; versions also refresh
+   after every push.
 1. **Repos** — add a GitHub `owner/repo` to watch and an asset glob (default
    `*.apk`). It's polled every `POLL_INTERVAL_MINUTES` (default 10), or check
    immediately with "Check now".
@@ -36,8 +41,17 @@ front (Tailscale serve, Caddy, etc.) and rebind this to `127.0.0.1:8080`.
    The main Wireless debugging screen separately shows a connect address.
    Enter both on the Devices page to pair. A newly paired device is **not
    trusted** by default — trust it explicitly before it can receive pushes.
+   The connect port changes whenever wireless debugging restarts. A push
+   that finds the stored port dead scans the device's last known IP
+   (`ADB_SCAN_PORTS`, default 30000-49999) and accepts a port only if the
+   device there reports the same serial; "Find" does this on demand. mDNS
+   discovery isn't used because multicast doesn't cross Docker's bridge
+   network. If the phone's IP itself changes, use Reconnect.
 3. **Staged** — every verified release lands here, with the release notes
-   GitHub reports for it (if any). Push it to any trusted device. Only the
+   GitHub reports for it (if any). Push it to any trusted device. When a
+   release has several APKs matching the asset glob (per-ABI builds such as
+   `arm64-v8a` / `armeabi-v7a` / universal), all of them are staged (up to
+   6), and a push refuses an APK the device's CPU can't run. Only the
    newest `KEEP_RELEASES_PER_REPO` (default 3) files per repo are kept on
    disk; older ones are deleted automatically, and you can delete any file by
    hand. Install history is kept either way.
@@ -58,6 +72,15 @@ account, or a malicious asset uploaded to someone else's release, from
 reaching your devices unnoticed.
 
 Debug-signed and unsigned APKs are always rejected, pin or no pin.
+
+All APKs in one release must share the same package and signer, or the
+release is rejected.
+
+**Signing-key changes.** When a release is signed by a different certificate
+than the pinned one, the Repos page shows both certificates and whether the
+new APK carries an APK Signature Scheme v3 rotation proof linking it to the
+pinned key. You can then accept the new certificate as the pin (after
+confirming it's genuine), which re-checks and stages that release.
 
 A rejected release is downloaded and checked once. The poller skips that tag
 afterwards (the error stays visible) until a newer release appears.

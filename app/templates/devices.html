@@ -10,6 +10,10 @@
     pairing code" gives you a pairing address + 6-digit code. The main Wireless debugging
     screen separately shows a connect address (ip:port) — enter both below.
   </p>
+  <p class="muted">
+    The connect port changes whenever wireless debugging restarts. Pushes find the new port
+    automatically by scanning the device's last known IP; "Find" does the same on demand.
+  </p>
   <form method="post" action="/devices/pair" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Pairing address <input type="text" name="pairing_addr" placeholder="192.168.1.50:41235" required></label>
@@ -22,7 +26,7 @@
 <table>
   <thead>
     <tr>
-      <th>Device</th><th>Serial</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
+      <th>Device</th><th>Serial</th><th>CPU</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -36,6 +40,7 @@
         </form>
       </td>
       <td class="mono small">{{ d.serial }}</td>
+      <td class="mono small">{{ d.abis.split()[0] if d.abis else "—" }}</td>
       <td>
         {% if d.trusted %}
         <form method="post" action="/devices/{{ d.serial }}/trust" class="inline-form">
@@ -57,6 +62,10 @@
           <input type="text" name="connect_addr" value="{{ d.last_connect_addr or '' }}" placeholder="ip:port">
           <button type="submit">Reconnect</button>
         </form>
+        <form method="post" action="/devices/{{ d.serial }}/find" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" title="Scan this device's IP for its new wireless debugging port">Find</button>
+        </form>
       </td>
       <td>{{ d.last_seen_at or "never" }}</td>
       <td>
@@ -67,7 +76,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6">No devices paired yet.</td></tr>
+    <tr><td colspan="7">No devices paired yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>

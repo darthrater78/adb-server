@@ -8,7 +8,7 @@
 <table>
   <thead>
     <tr>
-      <th>Repo</th><th>Tag</th><th>File</th><th>Package</th><th>Signer SHA-256</th>
+      <th>Repo</th><th>Tag</th><th>Version</th><th>File</th><th>CPU</th><th>Package</th><th>Signer SHA-256</th>
       <th>Downloaded</th><th>Release notes</th><th>Push to</th>
     </tr>
   </thead>
@@ -17,7 +17,9 @@
     <tr>
       <td>{{ a.owner }}/{{ a.repo }}</td>
       <td>{{ a.tag }}</td>
+      <td>{{ a.version_name or "—" }}</td>
       <td>{{ a.filename }}</td>
+      <td class="mono small">{{ a.abis or "any" }}</td>
       <td>{{ a.package_name }}</td>
       <td class="mono small">{{ a.signer_sha256[:16] }}…</td>
       <td>{{ a.downloaded_at }}</td>
@@ -53,7 +55,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
+    <tr><td colspan="10">Nothing staged yet — add a repo and wait for the next poll, or use "Check now".</td></tr>
     {% endfor %}
   </tbody>
 </table>

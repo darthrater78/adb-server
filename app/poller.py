@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import secrets
+from dataclasses import dataclass
 
 import apk_verify
 import db
@@ -12,6 +13,88 @@ logger = logging.getLogger("poller")
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN") or None
 MAX_RELEASE_NOTES_CHARS = 20_000
+# A release with per-ABI builds usually has 2-5 APKs. Cap it so one release
+# can't make the poller download dozens of files.
+MAX_VARIANTS_PER_RELEASE = 6
+
+
+class _Rejected(Exception):
+    """The release as a whole is rejected; message is shown on the Repos page."""
+
+    def __init__(
+        self, message: str, pending: tuple[str, str, bool] | None = None, permanent: bool = True,
+    ):
+        super().__init__(message)
+        self.pending = pending  # (package, signer, lineage_ok) for a pin mismatch
+        # A failed download may be transient: retry next poll rather than
+        # remembering the tag as rejected.
+        self.permanent = permanent
+
+
+@dataclass
+class _Variant:
+    asset: dict
+    tmp_path: str
+    sha256: str
+    signer: str
+    info: apk_verify.PackageInfo
+
+
+async def _download_and_verify(asset: dict, repo_dir: str) -> _Variant:
+    # Never build a path from the tag or asset name: both are upstream-
+    # controlled and may contain "/".
+    tmp_path = os.path.join(repo_dir, f"_download_{secrets.token_hex(8)}")
+    try:
+        sha256, _size = await github_client.download_asset(asset, tmp_path, GITHUB_TOKEN)
+    except github_client.GithubError as exc:
+        raise _Rejected(f"Download of {asset['name']} failed: {exc}", permanent=False) from exc
+    try:
+        # apksigner/aapt are blocking subprocesses (up to 60s each) — run them
+        # in a worker thread so the single event loop keeps serving the UI.
+        signer = await asyncio.to_thread(apk_verify.verify_signature, tmp_path)
+        info = await asyncio.to_thread(apk_verify.get_package_info, tmp_path)
+    except apk_verify.ApkVerifyError as exc:
+        staging.remove_file(tmp_path)
+        raise _Rejected(f"APK verification failed for {asset['name']}: {exc}") from exc
+    return _Variant(asset, tmp_path, sha256, signer, info)
+
+
+async def _check_pin(repo_row, tag: str, first: _Variant) -> None:
+    expected_package, expected_signer = repo_row["expected_package"], repo_row["signer_sha256"]
+    if expected_package is None:
+        return
+    if first.info.name == expected_package and first.signer == expected_signer:
+        return
+    lineage = await asyncio.to_thread(apk_verify.signing_lineage, first.tmp_path)
+    lineage_ok = expected_signer in lineage and first.info.name == expected_package
+    raise _Rejected(
+        f"Pin mismatch in {tag}: expected package '{expected_package}' signed by "
+        f"{expected_signer}, got '{first.info.name}' signed by {first.signer}. "
+        "Not staged — verify this release is genuinely from this repo before trusting it.",
+        pending=(first.info.name, first.signer, lineage_ok),
+    )
+
+
+def _stage(repo_row, tag: str, release: dict, variants: list[_Variant], repo_dir: str) -> int:
+    release_notes = (release.get("body") or "").strip()[:MAX_RELEASE_NOTES_CHARS] or None
+    staged = 0
+    for v in variants:
+        final_path = os.path.join(repo_dir, f"{v.sha256}.apk")
+        os.replace(v.tmp_path, final_path)
+        apk_id = db.insert_staged_apk(
+            repo_id=repo_row["id"], tag=tag, filename=v.asset["name"],
+            sha256=v.sha256, package_name=v.info.name,
+            signer_sha256=v.signer, path=final_path,
+            release_notes=release_notes,
+            version_code=v.info.version_code, version_name=v.info.version_name,
+            abis=" ".join(v.info.abis),
+        )
+        if apk_id is None:
+            # Duplicate (repo_id, tag, filename) — another check beat us to it.
+            staging.remove_file(final_path)
+        else:
+            staged += 1
+    return staged
 
 
 async def check_repo(repo_row) -> None:
@@ -35,8 +118,8 @@ async def check_repo(repo_row) -> None:
         db.mark_repo_checked(repo_row["id"])
         return
 
-    asset = github_client.find_matching_asset(release, glob_pattern)
-    if asset is None:
+    assets = github_client.find_matching_assets(release, glob_pattern)
+    if not assets:
         msg = f"No release asset in {tag} matches pattern '{glob_pattern}'"
         logger.warning("%s: %s", label, msg)
         db.update_repo_check(repo_row["id"], last_error=msg)
@@ -44,75 +127,44 @@ async def check_repo(repo_row) -> None:
 
     repo_dir = staging.repo_dir(repo_row["id"])
     os.makedirs(repo_dir, exist_ok=True)
-    # Never build a path from the tag: it's upstream-controlled and may
-    # contain "/" (e.g. "release/1.2").
-    tmp_dest = os.path.join(repo_dir, f"_download_{secrets.token_hex(8)}")
-
+    variants: list[_Variant] = []
     try:
-        sha256, _size = await github_client.download_asset(asset, tmp_dest, GITHUB_TOKEN)
-    except github_client.GithubError as exc:
-        logger.warning("%s: download failed: %s", label, exc)
-        db.update_repo_check(repo_row["id"], last_error=f"Download failed: {exc}")
+        for asset in assets[:MAX_VARIANTS_PER_RELEASE]:
+            variants.append(await _download_and_verify(asset, repo_dir))
+        first = variants[0]
+        for v in variants[1:]:
+            if (v.info.name, v.signer) != (first.info.name, first.signer):
+                raise _Rejected(
+                    f"APKs in {tag} disagree: {first.asset['name']} and {v.asset['name']} "
+                    "have different packages or signers — not staged"
+                )
+        await _check_pin(repo_row, tag, first)
+    except _Rejected as exc:
+        for v in variants:
+            staging.remove_file(v.tmp_path)
+        logger.error("%s: %s", label, exc)
+        if not exc.permanent:
+            db.update_repo_check(repo_row["id"], last_error=str(exc))
+            return
+        pkg, signer, lineage_ok = exc.pending or (None, None, None)
+        db.set_rejected_tag(repo_row["id"], tag, str(exc), pkg, signer, lineage_ok)
         return
 
-    final_path = os.path.join(repo_dir, f"{sha256}.apk")
-
-    try:
-        # apksigner/aapt are blocking subprocesses (up to 60s each) — run them
-        # in a worker thread so the single event loop keeps serving the UI.
-        signer_sha256 = await asyncio.to_thread(apk_verify.verify_signature, tmp_dest)
-        package_name = await asyncio.to_thread(apk_verify.get_package_name, tmp_dest)
-    except apk_verify.ApkVerifyError as exc:
-        os.remove(tmp_dest)
-        logger.warning("%s: verification failed: %s", label, exc)
-        db.set_rejected_tag(repo_row["id"], tag, f"APK verification failed in {tag}: {exc}")
-        return
-
-    expected_package = repo_row["expected_package"]
-    expected_signer = repo_row["signer_sha256"]
-
-    if expected_package is None:
+    if repo_row["expected_package"] is None:
         # First release ever staged for this repo — pin it. Every later
-        # release must match both, or it's a rejected, surfaced mismatch, not
-        # a silent skip.
+        # release must match both, or it's a rejected, surfaced mismatch.
         db.update_repo_check(
             repo_row["id"], last_tag=tag,
-            expected_package=package_name, signer_sha256=signer_sha256,
+            expected_package=first.info.name, signer_sha256=first.signer,
         )
-    elif package_name != expected_package or signer_sha256 != expected_signer:
-        os.remove(tmp_dest)
-        msg = (
-            f"Pin mismatch in {tag}: expected package '{expected_package}' signed by "
-            f"{expected_signer}, got '{package_name}' signed by {signer_sha256}. "
-            "Not staged — verify this release is genuinely from this repo before trusting it."
-        )
-        logger.error("%s: %s", label, msg)
-        db.set_rejected_tag(repo_row["id"], tag, msg)
-        return
     else:
         db.update_repo_check(repo_row["id"], last_tag=tag)
 
-    os.replace(tmp_dest, final_path)
-
-    release_notes = (release.get("body") or "").strip()[:MAX_RELEASE_NOTES_CHARS] or None
-
-    apk_id = db.insert_staged_apk(
-        repo_id=repo_row["id"], tag=tag, filename=asset["name"],
-        sha256=sha256, package_name=package_name,
-        signer_sha256=signer_sha256, path=final_path,
-        release_notes=release_notes,
-    )
-    if apk_id is None:
-        # Duplicate (repo_id, tag) — another poll beat us to it (shouldn't
-        # happen with max_instances=1, but stay safe if this is ever called
-        # manually while a scheduled run is in flight).
-        os.remove(final_path)
-        return
-
-    logger.info("%s: staged %s (%s)", label, tag, asset["name"])
+    staged = _stage(repo_row, tag, release, variants, repo_dir)
+    logger.info("%s: staged %s (%d APK%s)", label, tag, staged, "" if staged == 1 else "s")
     pruned = staging.prune_repo(repo_row["id"])
     if pruned:
-        logger.info("%s: pruned %d old staged release(s)", label, pruned)
+        logger.info("%s: pruned %d old staged file(s)", label, pruned)
 
 
 async def poll_all_repos() -> None:

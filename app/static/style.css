@@ -252,3 +252,17 @@ details summary {
 .login-box form { display: flex; flex-direction: column; gap: 12px; }
 
 section { margin-bottom: 24px; }
+
+.badge-update { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.badge-muted { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
+
+.panel-warn {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  margin-bottom: 16px;
+}
+.panel-warn dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+.panel-warn dt { color: var(--muted); }
+.panel-warn dd { margin: 0; overflow-wrap: anywhere; }
+
+.status-cell form { margin-top: 4px; }

@@ -96,3 +96,42 @@ def list_devices() -> list[str]:
     result = _run("devices", timeout=10)
     lines = result.stdout.strip().splitlines()[1:]
     return [line.split("\t")[0] for line in lines if "\t" in line and line.split("\t")[1].strip() == "device"]
+
+
+# Java package names: dot-separated identifiers. Checked before a package name
+# is ever placed on an `adb shell` command line, where the device's shell
+# would otherwise interpret it.
+PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
+_VERSION_CODE_RE = re.compile(r"\bversionCode=(\d+)")
+_VERSION_NAME_RE = re.compile(r"\bversionName=(\S+)")
+_ABI_RE = re.compile(r"^[a-z0-9_-]+$")
+
+
+def validate_package(package: str) -> str:
+    if not PACKAGE_RE.match(package or ""):
+        raise AdbError("Invalid package name")
+    return package
+
+
+def installed_version(serial: str, package: str) -> tuple[int | None, str | None] | None:
+    """(versionCode, versionName) of `package` on the device, or None if it
+    isn't installed. Raises AdbError if the device can't be queried."""
+    serial = _validate_serial(serial)
+    package = validate_package(package)
+    result = _run("-s", serial, "shell", "dumpsys", "package", package, timeout=20)
+    if result.returncode != 0:
+        raise AdbError(result.stderr.strip() or "Could not query installed packages")
+    if f"Package [{package}]" not in result.stdout:
+        return None
+    code = _VERSION_CODE_RE.search(result.stdout)
+    name = _VERSION_NAME_RE.search(result.stdout)
+    return (int(code.group(1)) if code else None, name.group(1) if name else None)
+
+
+def device_abis(serial: str) -> list[str]:
+    """The device's supported ABIs, most preferred first."""
+    serial = _validate_serial(serial)
+    result = _run("-s", serial, "shell", "getprop", "ro.product.cpu.abilist", timeout=10)
+    if result.returncode != 0:
+        raise AdbError(result.stderr.strip() or "Could not read device ABIs")
+    return [a for a in result.stdout.strip().split(",") if _ABI_RE.match(a)]

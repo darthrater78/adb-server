@@ -67,11 +67,8 @@ async def get_latest_release(owner: str, repo: str, token: str | None) -> dict:
     return resp.json()
 
 
-def find_matching_asset(release: dict, glob_pattern: str) -> dict | None:
-    for asset in release.get("assets", []):
-        if fnmatch.fnmatch(asset["name"], glob_pattern):
-            return asset
-    return None
+def find_matching_assets(release: dict, glob_pattern: str) -> list[dict]:
+    return [a for a in release.get("assets", []) if fnmatch.fnmatch(a["name"], glob_pattern)]
 
 
 async def download_asset(asset: dict, dest_path: str, token: str | None) -> tuple[str, int]:

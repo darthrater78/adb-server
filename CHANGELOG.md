@@ -15,6 +15,18 @@
 - New: staged APK retention — only the newest `KEEP_RELEASES_PER_REPO`
   (default 3) files per repo are kept; install history is preserved. Staged
   files can also be deleted by hand.
+- New: Status page (now the home page) — each watched app's installed
+  version on every trusted device next to the latest staged version, with a
+  one-click Update/Install.
+- New: pushes find a device again after its wireless debugging port changes,
+  by scanning its last known IP and confirming its serial; "Find" on the
+  Devices page does it on demand.
+- New: releases with several APKs (per-ABI builds) stage every variant; the
+  Status page picks the right one for each device's CPU, and a push of an
+  incompatible APK is refused. Existing databases are migrated automatically.
+- New: signing-key rotation review — a pin mismatch shows both certificates
+  and whether the new APK proves the rotation (APK Signature Scheme v3
+  lineage); the new certificate can be accepted as the pin.
 - New: automated test suite (`pytest`, run with `scripts/test.sh`).
 - New: CI builds both images and runs the tests on every push and PR;
   actionlint checks workflow edits; Dependabot watches pip, Docker base images
