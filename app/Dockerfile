@@ -48,7 +48,7 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
     && rm -rf /tmp/platform-tools.zip /opt/platform-tools
 
 # ---- stage 2: runtime image ----
-FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
+FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2
 
 # apksigner (and keytool, for this server's own signing key) run under the
 # JRE; aapt2 and zipalign are standalone native binaries.
