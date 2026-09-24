@@ -1,0 +1,4 @@
+{# Signing state of one staged APK `a`: signed with a real key, debug, or signed here. #}
+{% if a.server_signed %}<span class="badge badge-warn" title="It was unsigned; this server signed it. The phone will only accept updates signed by this server.">signed by this server</span>
+{% elif a.is_debug %}<span class="badge badge-warn" title="Signed with the default Android debug certificate">debug build</span>
+{% else %}<span class="badge badge-ok" title="Signed with the developer's own key">signed</span>{% endif %}

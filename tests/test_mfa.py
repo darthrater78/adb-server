@@ -17,14 +17,14 @@ def fresh_limits(monkeypatch):
 
 def code(offset: int = 0) -> str:
     """The authenticator code `offset` steps from now (the window is ±1)."""
-    return mfa._code_at(db.get_meta("mfa_secret"), int(time.time() // mfa.STEP_SECONDS) + offset)
+    return mfa._code_at(db.get_secret("mfa_secret"), int(time.time() // mfa.STEP_SECONDS) + offset)
 
 
 @pytest.fixture
 def enabled():
     """MFA on, as if set up just now (the current step already used)."""
     mfa.pending_secret(create=True)
-    codes = mfa.enable(mfa._code_at(db.get_meta("mfa_pending_secret"), int(time.time() // mfa.STEP_SECONDS)))
+    codes = mfa.enable(mfa._code_at(db.get_secret("mfa_pending_secret"), int(time.time() // mfa.STEP_SECONDS)))
     assert codes and mfa.enabled()
     return codes
 
@@ -62,7 +62,7 @@ def test_provisioning_uri():
 def test_setup_flow(authed):
     page = authed.get("/settings/mfa/setup")
     assert page.status_code == 200 and "<svg" in page.text and page.headers["cache-control"] == "no-store"
-    secret = db.get_meta("mfa_pending_secret")
+    secret = db.get_secret("mfa_pending_secret")
     assert mfa.format_secret(secret) in page.text
 
     wrong = authed.post("/settings/mfa/enable", data={"csrf_token": "test-csrf-token", "code": "000000"},

@@ -214,3 +214,11 @@ def test_network_errors_become_github_errors(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", Boom)
     with pytest.raises(github_client.GithubError, match="Could not reach GitHub"):
         asyncio.run(github_client.get_latest_release("o", "r", None))
+
+
+def test_httpx_request_urls_are_not_logged():
+    # Download redirects carry signed URLs that work as read tokens.
+    import logging
+
+    import main  # noqa: F401 — importing it sets the level
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING

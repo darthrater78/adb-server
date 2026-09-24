@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}GitHub — Settings — ADB Server{% endblock %}
+{% block content %}
+{% include "_settings_nav.html" %}
+<h1>GitHub</h1>
+<p class="page-intro muted">A token lets ADB Server read private repos, stage workflow artifacts, and poll without
+  GitHub's anonymous limit of 60 requests an hour. It only ever needs read access.</p>
+
+<section class="settings-section">
+  <h2>Token</h2>
+  <p class="status-line">
+    {% if token_source == "settings" %}<span class="badge badge-ok">Saved here</span> encrypted, never shown again.
+      {% if token_expiry %}
+        {% if token_expiry.days < 0 %}<span class="badge badge-error">Expired {{ token_expiry.date }}</span>
+        {% elif token_expiry.soon %}<span class="badge badge-warn">Expires {{ token_expiry.date }}</span> in {{ token_expiry.days }} days. Create a new one below.
+        {% else %}Expires {{ token_expiry.date }} ({{ token_expiry.days }} days).{% endif %}
+      {% else %}No expiry reported.{% endif %}
+    {% elif token_source == "unreadable" %}<span class="badge badge-error">Can't be decrypted</span> SECRET_KEY changed since it was saved. Save a new one.
+    {% elif token_source == "env" %}<span class="badge badge-muted">From .env</span> <code>GITHUB_TOKEN</code>. One saved here takes precedence.
+    {% else %}<span class="badge badge-muted">Not set</span>{% endif %}
+  </p>
+
+  <ol class="steps">
+    <li>
+      <a href="{{ token_template_url }}" class="button-link" target="_blank" rel="noopener noreferrer">Create a token on GitHub</a>
+      <p class="muted small">Opens GitHub with everything filled in: read-only <strong>Contents</strong>,
+        <strong>Actions</strong> and <strong>Metadata</strong>, expiring in 90 days. Under
+        <strong>Repository access</strong>, pick the repos you watch, then <strong>Generate token</strong> and copy it.</p>
+    </li>
+    <li>
+      <form method="post" action="/settings/github-token" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Paste it here
+          <input type="password" name="token" autocomplete="off" spellcheck="false" required maxlength="300"
+                 size="40" placeholder="github_pat_…">
+        </label>
+        <button type="submit">{{ "Replace token" if token_source == "settings" else "Save token" }}</button>
+      </form>
+      <p class="muted small">Checked with GitHub before it's saved. Stored encrypted, and only ever sent to
+        <code>api.github.com</code>.</p>
+    </li>
+  </ol>
+
+  {% if token_source %}
+  <div class="actions">
+    <form method="post" action="/settings/github-token/test">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary">Test token</button>
+    </form>
+    {% if token_source in ("settings", "unreadable") %}
+    <form method="post" action="/settings/github-token/clear">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="danger">Remove saved token</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+{% if token_source and token_source != "unreadable" %}
+<section class="settings-section">
+  <h2>Access</h2>
+  <p class="muted small">Checked against GitHub just now, for each watched repo.</p>
+  {% if access %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Repo</th><th>Releases</th><th>Artifacts</th><th></th></tr></thead>
+    <tbody>
+      {% for a in access %}
+      <tr>
+        <td data-label="Repo">{{ a.name }}</td>
+        <td data-label="Releases">{% if a.repo %}<span class="badge badge-ok">OK</span>{% else %}<span class="badge badge-error">No access</span>{% endif %}</td>
+        <td data-label="Artifacts">
+          {% if a.artifacts %}<span class="badge badge-ok">OK</span>
+          {% elif a.artifacts is sameas false %}<span class="badge badge-error">No access</span>
+          {% else %}<span class="badge badge-muted">Not tested</span>{% endif %}
+        </td>
+        <td class="small muted">{{ a.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No repos watched yet. Add one on <a href="/sources">Sources</a>.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="settings-section">
+  <h2>Artifact list</h2>
+  <p class="muted small">What <strong>Artifacts</strong> on a repo shows. This only tidies the list: whatever you
+    stage still has to be a zip holding exactly one APK whose signature verifies.</p>
+  <form method="post" action="/settings/artifacts" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="check"><input type="checkbox" name="hide_dockerbuild" value="1"{% if artifact_filter.hide_dockerbuild %} checked{% endif %}>
+      Hide Docker build records</label>
+    <label>Name pattern <input type="text" name="name_glob" maxlength="100" size="16" value="{{ artifact_filter.name_glob }}" placeholder="e.g. *apk*"></label>
+    <button type="submit" class="secondary">Save</button>
+  </form>
+</section>
+{% endblock %}

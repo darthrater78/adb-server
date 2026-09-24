@@ -240,7 +240,7 @@ button {
    on a row is the only solid button. */
 button.secondary { background: transparent; border-color: var(--accent-2); color: var(--accent-2); }
 button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
-button.small { padding: 4px 10px; font-size: 0.8rem; }
+button.small, .button-link.small { padding: 4px 10px; font-size: 0.8rem; }
 button:hover { opacity: 0.85; }
 
 .flash { padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; }
@@ -711,7 +711,7 @@ section { margin-bottom: 24px; }
   /* 16px stops iOS zooming into a focused field. */
   input, select, button { font-size: 16px; }
   button { min-height: 40px; }
-  button.small { min-height: 36px; font-size: 0.9rem; }
+  button.small, .button-link.small { min-height: 36px; font-size: 0.9rem; }
   .inline-form label { display: flex; flex-direction: column; gap: 4px; width: 100%; }
   .inline-form input[type="text"], .inline-form select, .upload-form input { width: 100%; }
   .inline-form label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
@@ -772,7 +772,7 @@ section { margin-bottom: 24px; }
   .release-notes { max-height: 50vh; }
   .panel { padding: 14px 14px 16px; }
 }
-#security details { margin-top: 16px; }
+.settings-section details.guide { margin-top: 16px; }
 
 /* ---- Simpler flow (3.1): Sources, Install, Status cards ---- */
 .page-intro { margin: -4px 0 18px; max-width: 70ch; }
@@ -832,3 +832,37 @@ details.nested { margin-left: 12px; }
 }
 
 .panel > h2:first-child { margin-top: 0; }
+
+/* ---- Settings: overview cards and sub-pages ---- */
+.settings-nav { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 14px; font-size: 0.9rem; }
+.settings-nav a { color: var(--muted); text-decoration: none; padding: 2px 0; border-bottom: 2px solid transparent; }
+.settings-nav a:hover { color: var(--fg); }
+.settings-nav a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
+.settings-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin: 16px 0 32px; }
+.settings-card { display: block; color: inherit; text-decoration: none; }
+.settings-card:hover, .settings-card:focus-visible { border-color: var(--accent-2); }
+.settings-card h2 { font-size: 1rem; margin: 0 0 8px; }
+.settings-card p { margin: 4px 0 0; }
+.settings-section { max-width: 60rem; }
+.status-line { margin: 6px 0 14px; }
+details.add-details { margin: 8px 0; }
+details.add-details > summary { font-weight: 600; }
+details.add-details[open] > form { margin-top: 10px; }
+.settings-section .table-wrap table { width: 100%; }
+
+/* Test builds from workflow artifacts: set apart from releases at a glance. */
+.badge-artifact { background: var(--accent-2); color: var(--on-accent-2); }
+.app-card-artifact { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.artifact-origin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 2px; }
+.push-to { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--muted); font-size: 0.9rem; }
+.row-artifact td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.commit-group { margin: 10px 0 14px; }
+.commit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.commit-subject { overflow-wrap: anywhere; }
+.commit-group table { margin-top: 6px; }
+.commit-head .tag-pill, .artifact-origin .tag-pill { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.debug-advice { margin: 8px 0; font-size: 0.9rem; white-space: normal; } .debug-advice .actions { margin-top: 8px; }
+.push-to select { width: auto; } .advice-row td { padding-top: 0; } .advice-row .debug-advice { margin: 0 0 8px; }
+.narrow-form { max-width: 26rem; }
+fieldset.choice { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+fieldset.choice legend { font-size: 0.85rem; color: var(--muted); margin-bottom: 4px; }

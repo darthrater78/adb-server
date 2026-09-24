@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Sources — ADB Server{% endblock %}
+{% block head %}{% if auto_refresh %}<meta http-equiv="refresh" content="2; url={{ auto_refresh }}">{% endif %}{% endblock %}
 {% block content %}
 <h1>Sources</h1>
 <p class="page-intro muted">Where APKs come from. Watch a GitHub repo and every new release is verified and
@@ -14,10 +15,11 @@
       <label>Repo <input type="text" name="repo_url" required placeholder="https://github.com/octocat/hello-world"></label>
       <label>Asset glob <input type="text" name="asset_glob" value="*.apk"></label>
       <label class="check"><input type="checkbox" name="include_prereleases" value="1"> Include pre-releases</label>
-      <button type="submit">Add repo</button>
+      <button type="submit">Look up repo</button>
     </form>
-    <p class="muted small">A URL, <code>owner/repo</code> or an SSH remote. The first release pins the app's
-      package name and signing certificate; later releases must match.</p>
+    <p class="muted small">A URL, <code>owner/repo</code> or an SSH remote. You'll see what GitHub says the
+      repo is before it's watched. The first release pins the app's package name and signing certificate;
+      later releases must match, and must be uploaded by the owner or a workflow.</p>
   </section>
 
   <section class="panel" id="upload">
@@ -26,6 +28,9 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="file" name="apk" accept=".apk,.zip,application/vnd.android.package-archive,application/zip" required>
       <label>Label <input type="text" name="label" maxlength="120" placeholder="optional, e.g. dev build"></label>
+      <label class="check"><input type="checkbox" name="sign_unsigned" value="yes"> If it's unsigned, sign it with this server's key</label>
+      <details class="guide"><summary>What signing with this server's key means</summary>
+        <p class="muted small">{{ sign_explanation }}</p></details>
       <button type="submit">Upload APK</button>
     </form>
     <p class="muted small">For a build that isn't a GitHub release. Up to {{ max_upload_mb }} MB. A zip
@@ -33,6 +38,34 @@
       debug-signed builds are allowed and marked "debug build".</p>
   </section>
 </div>
+
+{% if review %}{% set i = review.info %}
+<section class="panel panel-warn" id="review">
+  <h2>Is this the repo you meant?</h2>
+  <p>Check the owner and details against the developer's own site or docs before watching it. Nothing is
+    watched until you confirm, and its GitHub ID is pinned when you do: if the name later points at another
+    repo, or the repo changes owner, nothing more is staged from it.</p>
+  <dl>
+    <dt>Repo</dt><dd><a href="https://github.com/{{ i.owner }}/{{ i.repo }}" rel="noopener noreferrer">{{ i.owner }}/{{ i.repo }}</a></dd>
+    <dt>Owner</dt><dd>{{ i.owner }} ({{ "user" if i.owner_type == "User" else "organization" }})</dd>
+    {% if i.description %}<dt>Description</dt><dd>{{ i.description }}</dd>{% endif %}
+    <dt>Created</dt><dd>{{ i.created_at[:10] or "unknown" }}</dd>
+    <dt>Stars</dt><dd>{{ i.stars }}</dd>
+    <dt>GitHub ID</dt><dd class="mono small">{{ i.id }}</dd>
+  </dl>
+  {% for w in review.warnings %}<p class="flash flash-warn">{{ w }}</p>{% endfor %}
+  <form method="post" action="/repos/confirm" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="owner" value="{{ i.owner }}">
+    <input type="hidden" name="repo" value="{{ i.repo }}">
+    <input type="hidden" name="github_id" value="{{ i.id }}">
+    <input type="hidden" name="asset_glob" value="{{ review.asset_glob }}">
+    {% if review.include_prereleases %}<input type="hidden" name="include_prereleases" value="1">{% endif %}
+    <button type="submit">Watch {{ i.owner }}/{{ i.repo }}</button>
+    <a href="/sources" class="button-link secondary">Cancel</a>
+  </form>
+</section>
+{% endif %}
 
 {% for r in repos if r.pending_signer %}
 <section class="panel panel-warn">
@@ -89,8 +122,9 @@
       </td>
       <td data-label="Pinned package" class="mono small">{{ r.expected_package or "—" }}</td>
       <td data-label="Last tag">
-        {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted">—</span>{% endif %}
+        {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted small">{{ "no release yet" if r.last_checked_at else "—" }}</span>{% endif %}
         {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
+        {% if r.sign_unsigned %}<span class="badge badge-warn" title="Unsigned builds are signed with this server's key">signs unsigned</span>{% endif %}
       </td>
       <td data-label="Last checked" class="small">
         {{ r.last_checked_at | when }}
@@ -101,6 +135,7 @@
         {% endif %}
       </td>
       <td><div class="actions">
+        <a href="/repos/{{ r.id }}/artifacts" class="button-link secondary small">Builds</a>
         <form method="post" action="/repos/{{ r.id }}/check-now">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit" class="secondary small">Check now</button>
@@ -123,23 +158,31 @@
 </table>
 </div>
 
-<h2 class="section-title">Uploaded APKs</h2>
+<h2 class="section-title">Uploads and test builds</h2>
 <div class="table-wrap">
 <table>
   <thead>
-    <tr><th>Label</th><th>Version</th><th>Package</th><th>CPU</th><th>Uploaded</th><th></th></tr>
+    <tr><th>Source</th><th>Label</th><th>Version</th><th>Package</th><th>CPU</th><th>Staged</th><th></th></tr>
   </thead>
   <tbody>
     {% for a in uploads %}
-    <tr>
+    <tr{% if a.artifact_repo %} class="row-artifact"{% endif %}>
+      <td data-label="Source">
+        {% if a.artifact_repo %}
+        <span class="badge badge-artifact" title="Built by a workflow run, not a release">Artifact</span>
+        <a class="mono small" href="https://github.com/{{ a.artifact_repo }}/actions/runs/{{ a.artifact_run_id }}"
+           rel="noopener noreferrer" title="{{ a.artifact_repo }} · {{ a.artifact_branch }}">{{ a.artifact_branch }} @ {{ (a.artifact_sha or "")[:7] }}</a>
+        {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
+      </td>
       <td data-label="Label">
         <span class="clip" title="{{ a.filename }}">{{ a.tag }}</span>
-        {% if a.is_debug %}<span class="badge badge-warn" title="Signed with the default Android debug certificate">debug build</span>{% endif %}
+        {% include "_signing_badges.html" %}
       </td>
       <td data-label="Version" class="nowrap">{{ a.version_name or "—" }}</td>
       <td data-label="Package"><span class="clip mono small" title="{{ a.package_name }}">{{ a.package_name }}</span></td>
-      <td data-label="CPU" class="mono small">{{ a.abis or "any" }}</td>
-      <td data-label="Uploaded" class="small">{{ a.downloaded_at | when }}</td>
+      {% set abis = (a.abis or "").split() %}
+      <td data-label="CPU" class="mono small" title="{{ a.abis or 'any CPU' }}">{{ abis[0] if abis else "any" }}{% if abis | length > 1 %} +{{ abis | length - 1 }}{% endif %}</td>
+      <td data-label="Staged" class="small">{{ a.downloaded_at | when }}</td>
       <td><div class="actions">
         <a href="/install#upload-{{ a.id }}" class="button-link secondary">Install</a>
         <form method="post" action="/staged/{{ a.id }}/delete">
@@ -148,8 +191,11 @@
         </form>
       </div></td>
     </tr>
+    {% if a.is_debug and a.artifact_repo_id and (a.artifact_siblings | siblings) %}
+    <tr class="row-artifact advice-row"><td colspan="7">{% include "_debug_advice.html" %}</td></tr>
+    {% endif %}
     {% else %}
-    <tr><td colspan="6" class="empty-state">No uploads.</td></tr>
+    <tr><td colspan="7" class="empty-state">Nothing uploaded or staged from an artifact.</td></tr>
     {% endfor %}
   </tbody>
 </table>

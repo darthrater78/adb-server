@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 import subprocess
 import zipfile
@@ -107,6 +108,40 @@ def _inflate_capped(zf: zipfile.ZipFile, entry: zipfile.ZipInfo, out_path: str, 
             hasher.update(chunk)
             dst.write(chunk)
     return hasher.hexdigest()
+
+
+_SIGNATURE_FILE_SUFFIXES = (".SF", ".RSA", ".DSA", ".EC")
+
+
+def is_unsigned(apk_path: str) -> bool:
+    """True only for an APK that carries no signature of any kind: no v1
+    (JAR) signature files and no APK Signing Block (v2 and later). An APK
+    whose signature is present but broken is not unsigned, and never gets
+    re-signed: it's refused like any failed verification. Something that
+    isn't a readable zip isn't "unsigned" either: verification refuses it."""
+    try:
+        with zipfile.ZipFile(apk_path) as zf:
+            if any(n.upper().startswith("META-INF/") and n.upper().endswith(_SIGNATURE_FILE_SUFFIXES)
+                   for n in zf.namelist()):
+                return False
+    except zipfile.BadZipFile:
+        return False
+    with open(apk_path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        tail_len = min(size, 65_536 + 22)
+        f.seek(size - tail_len)
+        tail = f.read()
+        end = tail.rfind(b"PK\x05\x06")
+        if end < 0 or end + 20 > len(tail):
+            return False
+        directory_offset = int.from_bytes(tail[end + 16:end + 20], "little")
+        if directory_offset < 16:
+            return True
+        # A signing block sits right before the central directory and ends
+        # with this magic.
+        f.seek(directory_offset - 16)
+        return f.read(16) != b"APK Sig Block 42"
 
 
 class SignerInfo(NamedTuple):

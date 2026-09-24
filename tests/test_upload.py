@@ -27,6 +27,7 @@ def _apk_bytes(marker: str = "x") -> bytes:
 @pytest.fixture
 def verify(monkeypatch):
     state = {"debug": False}
+    monkeypatch.setattr(apk_verify, "is_unsigned", lambda path: False)  # these fakes stand for signed APKs
     monkeypatch.setattr(apk_verify, "verify_signature",
                         lambda path: apk_verify.SignerInfo(SIGNER, state["debug"]))
     monkeypatch.setattr(apk_verify, "get_package_info",

@@ -1,0 +1,17 @@
+{# For a debug-signed test build `a`: point at the other builds of its commit. #}
+{% set sibs = a.artifact_siblings | siblings %}
+{% if a.is_debug and a.artifact_repo_id and sibs %}
+<div class="flash flash-warn debug-advice">
+  <strong>Better not install this debug build.</strong> It's signed with a throwaway debug key, so a phone with the
+  signed app refuses it as an update, and it identifies nobody. This commit also built
+  {% for s in sibs %}<strong>{{ s.name }}</strong>{{ ", " if not loop.last else "" }}{% endfor %}, likely the signed one.
+  <div class="actions">
+    {% for s in sibs %}
+    <form method="post" action="/repos/{{ a.artifact_repo_id }}/artifacts/{{ s.id }}/stage">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="small">Stage {{ s.name }}</button>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

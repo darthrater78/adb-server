@@ -35,9 +35,9 @@
 <section class="panel device-card" id="device-{{ loop.index }}">
   <div class="device-card-head">
     <div>
-      <h2>{{ d.nickname or d.serial }}</h2>
+      <h2>{{ d | device_name }}</h2>
       <p class="muted small">
-        {% if d.nickname %}<span class="mono">{{ d.serial }}</span> · {% endif %}
+        {% if d.nickname and d.model %}{{ d.model }} · {% endif %}<span class="mono">{{ d.serial }}</span> ·
         {{ d.abis.split()[0] if d.abis else "CPU unknown" }} · last seen {{ d.last_seen_at | when("never") }}
       </p>
     </div>
@@ -89,7 +89,7 @@
                 <h2 id="{{ dialog }}-title">{{ verb }} {{ latest.source_label }}?</h2>
                 <p>
                   {{ verb }} <strong>{{ latest.version_name or latest.tag }}</strong>
-                  on <strong>{{ d.nickname or d.serial }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
+                  on <strong>{{ d | device_name }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
                   replacing {{ app.installed.version_name }}{% endif %}.
                 </p>
                 <p class="muted small">The app keeps its data. The install runs in the background and you'll be taken to its progress page.</p>

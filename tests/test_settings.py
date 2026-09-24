@@ -52,7 +52,7 @@ def test_custom_pair_sets_both_colours(client, authed):
 def test_preset_pair(authed):
     authed.post("/settings/appearance", data={"csrf_token": CSRF, "preset": "graphite-blue"})
     assert (db.get_meta("accent_color"), db.get_meta("accent2_color")) == appearance.PRESETS["graphite-blue"]
-    assert 'preset current' in authed.get("/settings").text
+    assert 'preset current' in authed.get("/settings/appearance").text
 
 
 def test_default_preset_clears_the_setting(authed):
@@ -71,11 +71,11 @@ def test_save_colour_pair_stores_applies_and_lists_it(client, authed):
     r = authed.post("/settings/appearance/save", data={
         "csrf_token": CSRF, "name": "  Sunset  ", "accent": "#C2410C", "accent2": "#7C3AED",
     }, follow_redirects=False)
-    assert "ok=" in r.headers["location"] and r.headers["location"].endswith("#appearance")
+    assert "ok=" in r.headers["location"] and r.headers["location"].startswith("/settings/appearance")
     (row,) = db.list_saved_colours()
     assert (row["name"], row["primary_color"], row["secondary_color"]) == ("Sunset", "#c2410c", "#7c3aed")
     assert (db.get_meta("accent_color"), db.get_meta("accent2_color")) == ("#c2410c", "#7c3aed")
-    page = authed.get("/settings").text
+    page = authed.get("/settings/appearance").text
     assert "Sunset" in page and f"swatch-saved-{row['id']}" in page
     assert f".swatch-saved-{row['id']}" in client.get("/accent.css").text
 
@@ -142,7 +142,7 @@ def test_added_service_is_shown_masked_never_raw(authed):
     r = authed.post("/settings/notify/add", data={"csrf_token": CSRF, "url": GOTIFY, "label": "phone"},
                     follow_redirects=False)
     assert "ok=" in r.headers["location"]
-    page = authed.get("/settings").text
+    page = authed.get("/settings/notifications").text
     assert "Gotify" in page and "phone" in page
     assert TOKEN not in page
     assert all(TOKEN not in e["detail"] for e in db.list_audit())
@@ -178,7 +178,7 @@ def test_remove_service(authed):
 
 def test_env_services_are_listed_read_only(authed, monkeypatch):
     monkeypatch.setenv("APPRISE_URLS", f"ntfy://ntfy.sh/topic {GOTIFY}")
-    page = authed.get("/settings").text
+    page = authed.get("/settings/notifications").text
     assert page.count('title="Set by APPRISE_URLS') == 2
     assert "/settings/notify/env" not in page  # no delete form for them
     assert TOKEN not in page
@@ -285,7 +285,7 @@ def test_add_apprise_server_from_its_notify_url(authed):
     assert "ok=" in r.headers["location"] and "Apprise%20API" in r.headers["location"]
     [row] = db.list_notify_targets()
     assert row["url"] == "apprise://apprise.local:8000/my-key" and row["label"] == "home"
-    page = authed.get("/settings").text
+    page = authed.get("/settings/notifications").text
     assert "Apprise API" in page and "apprise.local:8000" in page
 
 
@@ -328,6 +328,6 @@ def test_try_requires_csrf(authed):
 
 
 def test_forms_have_test_buttons(authed):
-    page = authed.get("/settings").text
+    page = authed.get("/settings/notifications").text
     assert 'formaction="/settings/notify/try-server"' in page
     assert 'formaction="/settings/notify/try"' in page

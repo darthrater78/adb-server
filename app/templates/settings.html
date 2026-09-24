@@ -1,299 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Settings — ADB Server{% endblock %}
 {% block content %}
+{% include "_settings_nav.html" %}
 <h1>Settings</h1>
 
-<p class="settings-jump">
-  <a href="#security">Security</a> · <a href="#notifications">Notifications</a> ·
-  <a href="#appearance">Appearance</a> · <a href="#activity">Activity</a>
-</p>
+<div class="settings-cards">
+  <a class="panel settings-card" href="/settings/general">
+    <h2>General</h2>
+    <p>{{ time_zone }}</p>
+    <p class="muted small">{{ "24-hour" if clock_24h else "12-hour" }} clock</p>
+  </a>
 
-<section id="security" class="settings-section">
-  <h2>Security</h2>
-  <h3>Two-factor sign-in</h3>
-  {% if not mfa_enabled %}
-  <p class="muted">After the password, also ask for a 6-digit code from an authenticator app on your phone
-    (Google Authenticator, Aegis, 1Password, Bitwarden and the like). A browser can be trusted for
-    {{ trust_days }} days so it isn't asked every time.</p>
-  <p><a href="/settings/mfa/setup" class="button-link">Set up two-factor sign-in</a></p>
-  {% else %}
-  <p><span class="badge badge-ok">On</span>
-    <span class="muted">Sign-in asks for a code from your authenticator app. {{ recovery_left }} recovery
-      code{{ '' if recovery_left == 1 else 's' }} left.</span>
-    {% if recovery_left <= 3 %}<span class="badge badge-warn">make new recovery codes</span>{% endif %}</p>
-  {% if mfa_locked %}
-  <p class="flash flash-warn">Two-factor sign-in is locked after too many wrong codes, for
-    {{ (mfa_locked / 60) | round(0, 'ceil') | int }} more minutes.</p>
-  {% endif %}
-  <form method="post" action="/settings/mfa/recovery-codes" class="inline-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Current code
-      <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="20" size="10" required>
-    </label>
-    <button type="submit" class="secondary">New recovery codes</button>
-    <button type="submit" class="danger" formaction="/settings/mfa/disable">Turn off two-factor</button>
-  </form>
-  <p class="muted small">Both need a current code (or a recovery code). New recovery codes replace all the old ones.</p>
+  <a class="panel settings-card" href="/settings/security">
+    <h2>Security</h2>
+    <p>{% if mfa_enabled %}<span class="badge badge-ok">2FA on</span>
+      {{ recovery_left }} recovery code{{ '' if recovery_left == 1 else 's' }} left{% if recovery_left <= 3 %} <span class="badge badge-warn">low</span>{% endif %}
+      {% else %}<span class="badge badge-warn">2FA off</span> Password only{% endif %}</p>
+    <p class="muted small">{{ trusted_browsers | length }} trusted browser{{ '' if trusted_browsers | length == 1 else 's' }}{% if mfa_locked %} · <span class="badge badge-error">locked</span>{% endif %}</p>
+  </a>
 
-  <h3>Trusted browsers</h3>
-  {% if trusted_browsers %}
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>Browser</th><th>From</th><th>Trusted since</th><th>Last used</th><th>Until</th><th></th></tr></thead>
-    <tbody>
-      {% for b in trusted_browsers %}
-      <tr>
-        <td data-label="Browser">{{ b.label }}{% if b.token_hash == this_browser %} <span class="badge badge-muted">this one</span>{% endif %}</td>
-        <td data-label="From" class="mono small">{{ b.client or "—" }}</td>
-        <td data-label="Since">{{ b.created_at | when }}</td>
-        <td data-label="Last used">{{ b.last_used_at | when("—") }}</td>
-        <td data-label="Until">{{ b.expires_at | when }}</td>
-        <td>
-          <form method="post" action="/settings/mfa/trusted/revoke">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="browser" value="{{ b.token_hash }}">
-            <button type="submit" class="danger">Revoke</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  <form method="post" action="/settings/mfa/trusted/revoke">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="secondary">Revoke all</button>
-  </form>
-  {% else %}
-  <p class="muted small">None. Tick "Trust this browser" when entering a code to skip it for {{ trust_days }} days.</p>
-  {% endif %}
+  <a class="panel settings-card" href="/settings/notifications">
+    <h2>Notifications</h2>
+    {% set on = events | selectattr(2) | list | length %}
+    <p>{% if targets %}{{ targets | length }} service{{ '' if targets | length == 1 else 's' }}{% else %}<span class="badge badge-muted">None set up</span>{% endif %}</p>
+    <p class="muted small">{{ on }} of {{ events | length }} events on</p>
+  </a>
 
-  <details class="guide">
-    <summary>Locked out, or lost your phone?</summary>
-    <ul class="muted small">
-      <li>Sign in with one of your recovery codes, in place of the 6-digit code.</li>
-      <li>Five wrong codes lock two-factor sign-in for 15 minutes. To unlock it now, on the server:
-        <code>docker compose exec app python mfa_admin.py unlock</code></li>
-      <li>No recovery codes left: <code>docker compose exec app python mfa_admin.py reset</code> turns two-factor
-        off (and signs everyone out), so you can sign in with the password and set it up again.</li>
-    </ul>
-  </details>
-  {% endif %}
-</section>
+  <a class="panel settings-card" href="/settings/github">
+    <h2>GitHub</h2>
+    <p>{% if token_source == "settings" %}<span class="badge badge-ok">Token saved</span>
+      {% elif token_source == "env" %}<span class="badge badge-muted">Token from .env</span>
+      {% elif token_source == "unreadable" %}<span class="badge badge-error">Token unreadable</span>
+      {% else %}<span class="badge badge-muted">No token</span>{% endif %}
+      {% if token_expiry %}{% if token_expiry.days < 0 %} <span class="badge badge-error">expired</span>
+      {% elif token_expiry.soon %} <span class="badge badge-warn">{{ token_expiry.days }} days left</span>{% endif %}{% endif %}</p>
+    <p class="muted small">{% if token_expiry and token_expiry.days >= 0 %}Expires {{ token_expiry.date }}{% elif not token_source %}Needed for artifacts and private repos{% else %}Artifacts and private repos{% endif %}</p>
+  </a>
 
-<section id="notifications" class="settings-section">
-  <h2>Notifications</h2>
-  <p class="muted">
-    ADB Server sends notifications through <a href="https://github.com/caronc/apprise/wiki" rel="noopener noreferrer">Apprise</a>,
-    which reaches ntfy, Gotify, Home Assistant, Discord, Telegram, Slack, email, plain webhooks and over 100 other
-    services. Each service is one URL. Tokens and passwords in a URL are masked everywhere they're shown.
-  </p>
+  <a class="panel settings-card" href="/settings/appearance">
+    <h2>Appearance</h2>
+    <p>{% if current_preset %}{{ current_preset | replace('-', ' & ') | title }}{% else %}Custom colours{% endif %}</p>
+    <p class="muted small">Theme is per browser, in the top bar</p>
+  </a>
+</div>
 
-  <h3>Services</h3>
-  <p class="muted small">Each saved service has its own <strong>Send test</strong> button. To try one before saving it,
-    fill in a form below and press <strong>Test</strong>.</p>
-  <div class="table-wrap">
-  <table class="notify-table">
-    <thead><tr><th>Service</th><th>Address</th><th>Label</th><th></th></tr></thead>
-    <tbody>
-      {% for t in targets %}
-      <tr>
-        <td data-label="Service">
-          {{ t.service }}
-          {% if t.from_env %}<span class="badge badge-muted" title="Set by APPRISE_URLS in .env — edit it there">.env</span>{% endif %}
-          {% if not t.valid %}<span class="badge badge-error">not recognised</span>{% endif %}
-        </td>
-        <td data-label="Address" class="mono small">{{ t.masked }}</td>
-        <td data-label="Label">{{ t.label or "—" }}</td>
-        <td class="actions">
-          <form method="post" action="/settings/notify/test">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="target" value="{{ t.key }}">
-            <button type="submit" class="secondary">Send test</button>
-          </form>
-          {% if not t.from_env %}
-          <form method="post" action="/settings/notify/{{ t.key }}/delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="danger">Remove</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="4" class="empty-state">No services yet — add one below.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-
-  {% if targets %}
-  <form method="post" action="/settings/notify/test" class="inline-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="target" value="all">
-    <button type="submit">Send test to all services</button>
-  </form>
-  {% endif %}
-
-  <h3>Add an Apprise server</h3>
-  <p class="muted small">If you run an <a href="https://github.com/caronc/apprise-api" rel="noopener noreferrer">Apprise
-    API server</a>, point ADB Server at it and manage the actual services there. Paste its notify URL — e.g.
-    <code>http://apprise.local:8000/notify/my-key</code> — or the address and config key separately.
-    Tags, if you use them, pick which of that config's services receive these notifications.</p>
-  <form method="post" action="/settings/notify/add-server" class="inline-form panel add-service">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Server address or notify URL
-      <input type="text" name="server" required maxlength="500" autocomplete="off" autocapitalize="none"
-             spellcheck="false" placeholder="http://apprise.local:8000/notify/my-key" size="36" value="{{ draft.server or '' }}">
-    </label>
-    <label>Config key
-      <input type="text" name="key" maxlength="128" autocomplete="off" autocapitalize="none" spellcheck="false"
-             placeholder="my-key (if not in the URL)" value="{{ draft.key or '' }}">
-    </label>
-    <label>Tags (optional)
-      <input type="text" name="tags" maxlength="400" autocomplete="off" autocapitalize="none" spellcheck="false"
-             placeholder="e.g. phone, desk" value="{{ draft.tags or '' }}">
-    </label>
-    <label>Label (optional)
-      <input type="text" name="label" maxlength="80" placeholder="e.g. home server" value="{{ draft.server_label or '' }}">
-    </label>
-    <button type="submit" class="secondary" formaction="/settings/notify/try-server">Test</button>
-    <button type="submit">Add server</button>
-  </form>
-
-  <h3>Add a service directly</h3>
-  <p class="muted small">Any single Apprise URL — see the guide below for formats.</p>
-  <form method="post" action="/settings/notify/add" class="inline-form panel add-service">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Apprise URL
-      <input type="text" name="url" required maxlength="2000" autocomplete="off" autocapitalize="none"
-             spellcheck="false" placeholder="ntfy://ntfy.sh/my-topic" size="44" value="{{ draft.url or '' }}">
-    </label>
-    <label>Label (optional)
-      <input type="text" name="label" maxlength="80" placeholder="e.g. my phone" value="{{ draft.url_label or '' }}">
-    </label>
-    <button type="submit" class="secondary" formaction="/settings/notify/try">Test</button>
-    <button type="submit">Add service</button>
-  </form>
-
-  <h3>Events</h3>
-  <form method="post" action="/settings/notify/events" class="events-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% for key, label, on in events %}
-    <label class="check">
-      <input type="checkbox" name="events" value="{{ key }}"{% if on %} checked{% endif %}>
-      <span>{{ label }}</span>
-    </label>
-    {% endfor %}
-    <p class="muted small">
-      {% if events_from == "settings" %}Saved here.
-      {% elif events_from == "env" %}Currently from <code>NOTIFY_EVENTS</code> in .env — saving here overrides it.
-      {% else %}All events are on by default.{% endif %}
-    </p>
-    <button type="submit">Save events</button>
-  </form>
-
-  <details class="apprise-guide">
-    <summary>Apprise URL guide</summary>
-    <p>Paste the URL for your service. A few common ones:</p>
-    <table class="guide-table">
-      <thead><tr><th>Service</th><th>URL format</th></tr></thead>
-      <tbody>
-        <tr><td data-label="Service">Apprise API server</td><td data-label="Format" class="mono small">http://your-server:port/notify/your-key<br>apprise://your-server:port/your-key?tags=phone</td></tr>
-        <tr><td data-label="Service">ntfy</td><td data-label="Format" class="mono small">ntfy://ntfy.sh/your-topic<br>ntfys://user:pass@your-server/topic</td></tr>
-        <tr><td data-label="Service">Gotify</td><td data-label="Format" class="mono small">gotifys://your-server/AppToken</td></tr>
-        <tr><td data-label="Service">Home Assistant</td><td data-label="Format" class="mono small">hassios://your-ha:8123/LongLivedAccessToken</td></tr>
-        <tr><td data-label="Service">Discord</td><td data-label="Format" class="mono small">discord://WebhookID/WebhookToken</td></tr>
-        <tr><td data-label="Service">Telegram</td><td data-label="Format" class="mono small">tgram://BotToken/ChatID</td></tr>
-        <tr><td data-label="Service">Slack</td><td data-label="Format" class="mono small">slack://TokenA/TokenB/TokenC/#channel</td></tr>
-        <tr><td data-label="Service">Pushover</td><td data-label="Format" class="mono small">pover://UserKey@AppToken</td></tr>
-        <tr><td data-label="Service">Email</td><td data-label="Format" class="mono small">mailtos://user:app-password@gmail.com</td></tr>
-        <tr><td data-label="Service">Webhook (JSON POST)</td><td data-label="Format" class="mono small">jsons://your-server/path</td></tr>
-      </tbody>
-    </table>
-    <ul class="muted small">
-      <li>Every other service and all options are in the <a href="https://github.com/caronc/apprise/wiki" rel="noopener noreferrer">Apprise wiki</a>.
-        An "s" on the end of a scheme (<code>ntfys</code>, <code>gotifys</code>, <code>jsons</code>) means HTTPS — prefer it.</li>
-      <li>Services added here are stored in the app's database on the data volume, unencrypted, like the rest of its
-        state. Services in <code>APPRISE_URLS</code> in <code>.env</code> are shown too, but can only be changed there.</li>
-      <li>This server makes the request, so a URL can point at anything this server can reach, including your LAN.</li>
-      <li>A failed notification never stops a poll or a push; it's logged and skipped.</li>
-    </ul>
-  </details>
-</section>
-
-<section id="appearance" class="settings-section">
-  <h2>Appearance</h2>
-  <p class="muted">Two colours for the whole app, for everyone who signs in: a <strong>primary</strong> for solid
-    buttons and the current page, and a <strong>secondary</strong> for links, tags, outlined buttons and highlights.
-    Both are adjusted automatically in each theme so text and buttons stay readable.</p>
-  <div class="colour-preview" aria-label="Preview of the current colours">
-    <span class="preview-btn">Primary button</span>
-    <span class="preview-btn outline">Outlined</span>
-    <a href="#appearance">A link</a>
-    <span class="tag-pill">v{{ app_version }}</span>
-    <span class="badge badge-update">update available</span>
-  </div>
-
-  <h3>Presets</h3>
-  <form method="post" action="/settings/appearance" class="presets" aria-label="Colour pairs">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% for name, pair in presets.items() %}
-    {% set nice = name | replace('-', ' & ') | title %}
-    <button type="submit" name="preset" value="{{ name }}"
-            class="preset{{ ' current' if name == current_preset else '' }}"{% if name == current_preset %} aria-pressed="true"{% endif %}>
-      <span class="preset-dot swatch-{{ name }}" aria-hidden="true"></span>
-      {{ nice }}{% if name == default_preset %} <span class="muted small">default</span>{% endif %}
-    </button>
-    {% endfor %}
-  </form>
-
-  {% if saved_colours %}
-  <h3>Saved</h3>
-  <form method="post" action="/settings/appearance" class="presets" aria-label="Saved colour pairs">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% for s in saved_colours %}
-    {% set is_current = current_preset is none and accent == s.primary_color and accent2 == s.secondary_color %}
-    <span class="saved-pair">
-      <button type="submit" name="saved" value="{{ s.id }}"
-              class="preset{{ ' current' if is_current else '' }}"{% if is_current %} aria-pressed="true"{% endif %}
-              title="{{ s.primary_color }} / {{ s.secondary_color }}">
-        <span class="preset-dot swatch-saved-{{ s.id }}" aria-hidden="true"></span>
-        {{ s.name }}
-      </button>
-      <button type="submit" class="preset-delete" formaction="/settings/appearance/saved/{{ s.id }}/delete"
-              aria-label="Delete {{ s.name }}" title="Delete {{ s.name }}">×</button>
-    </span>
-    {% endfor %}
-  </form>
-  {% endif %}
-
-  <h3>Custom</h3>
-  <form method="post" action="/settings/appearance" class="custom-pair">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="colour-field">
-      <input type="color" class="colour-dot" name="accent" value="{{ accent or default_pair[0] }}">
-      <span><strong>Primary</strong><code>{{ accent or default_pair[0] }}</code></span>
-    </label>
-    <label class="colour-field">
-      <input type="color" class="colour-dot" name="accent2" value="{{ accent2 or default_pair[1] }}">
-      <span><strong>Secondary</strong><code>{{ accent2 or default_pair[1] }}</code></span>
-    </label>
-    <button type="submit">Apply</button>
-    <span class="save-pair">
-      <label class="visually-hidden" for="colour-name">Name for this pair</label>
-      <input type="text" id="colour-name" name="name" maxlength="40" placeholder="Name this pair" size="16">
-      <button type="submit" class="secondary" formaction="/settings/appearance/save">Save as preset</button>
-    </span>
-    {% if accent %}
-    <button type="submit" class="secondary" formaction="/settings/appearance" name="preset" value="{{ default_preset }}">Reset to default</button>
-    {% endif %}
-  </form>
-  <p class="muted small">Tap a circle to choose a colour, then Apply — or name it and Save as preset to keep it
-    in Saved. Saving an existing name updates it.</p>
-</section>
-<section id="activity" class="settings-section">
+<section class="settings-section">
   <h2>Activity</h2>
-  <p class="muted">Everything that happened, newest first.</p>
   <ul class="link-list">
     <li><a href="/installs">Install history</a>: every push, with its log.</li>
     <li><a href="/audit">Audit log</a>: sign-ins, trust changes, pushes and settings changes.</li>

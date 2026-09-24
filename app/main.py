@@ -1,9 +1,13 @@
+import asyncio
+import fnmatch
 import hashlib
+import json
 import logging
 import os
 import re
 import sqlite3
 import tempfile
+import zoneinfo
 from datetime import datetime, timezone
 from typing import NamedTuple
 from contextlib import asynccontextmanager
@@ -30,9 +34,14 @@ import notify
 import poller
 import pushes
 import selection
+import signing
 import staging
 
 logging.basicConfig(level=logging.INFO)
+# httpx logs every request's full URL at INFO, and a release asset's or an
+# artifact's download redirects to a signed URL whose query string is a
+# working read token. Only warnings and errors from it are logged.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("adb_server")
 
 ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
@@ -105,21 +114,80 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+TIME_ZONES = sorted(zoneinfo.available_timezones() | {"UTC"})
+_display_zone: list = []  # [ZoneInfo], loaded on first use and replaced when saved
+
+
+def _zone_name() -> str:
+    """Settings → Appearance, else TZ from the environment, else UTC."""
+    for name in (db.get_meta("timezone"), os.environ.get("TZ")):
+        if name in TIME_ZONES:
+            return name
+    return "UTC"
+
+
+_clock: list = []  # [bool: 24-hour], cached like the zone
+
+
+def _clock_24h() -> bool:
+    if not _clock:
+        _clock.append(db.get_meta("clock") == "24")
+    return _clock[0]
+
+
+def display_zone() -> zoneinfo.ZoneInfo:
+    if not _display_zone:
+        _display_zone.append(zoneinfo.ZoneInfo(_zone_name()))
+    return _display_zone[0]
+
+
 def _when(value: str | None, empty: str = "never") -> Markup:
-    """Renders a stored UTC ISO timestamp as a short, readable <time>, keeping
-    the exact value in the tooltip and the machine-readable attribute."""
+    """Renders a stored UTC ISO timestamp as a short, readable <time> in the
+    display time zone, keeping the exact UTC value in the tooltip and the
+    machine-readable attribute."""
     if not value:
         return Markup('<span class="muted">{}</span>').format(empty)
     try:
-        at = datetime.fromisoformat(value)
+        at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return Markup("{}").format(value)
-    year = "" if at.year == datetime.now(timezone.utc).year else f" {at.year}"
-    label = f"{at:%b} {at.day}{year}, {at:%H:%M} UTC"
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    local = at.astimezone(display_zone())
+    year = "" if local.year == datetime.now(display_zone()).year else f" {local.year}"
+    if _clock_24h():
+        clock = f"{local:%H:%M}"
+    else:
+        clock = f"{local.hour % 12 or 12}:{local:%M} {'AM' if local.hour < 12 else 'PM'}"
+    label = f"{local:%b} {local.day}{year}, {clock} {local.tzname() or ''}".rstrip()
     return Markup('<time datetime="{0}" title="{0}">{1}</time>').format(value, label)
 
 
 templates.env.filters["when"] = _when
+
+
+def _device_name(d) -> str:
+    """What to call a device: its nickname, else its model with the end of
+    its serial (two identical phones stay distinguishable), else the serial."""
+    if d["nickname"]:
+        return d["nickname"]
+    model = d["model"] if "model" in d.keys() else None
+    return f"{model} · …{d['serial'][-5:]}" if model else d["serial"]
+
+
+templates.env.filters["device_name"] = _device_name
+
+
+def _siblings(raw: str | None) -> list[dict]:
+    """Other builds of an artifact's commit, as stored at staging time."""
+    try:
+        items = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    return [i for i in items if isinstance(i, dict) and isinstance(i.get("id"), int) and isinstance(i.get("name"), str)]
+
+
+templates.env.filters["siblings"] = _siblings
 
 
 @app.middleware("http")
@@ -167,9 +235,11 @@ VALID_THEMES = {"flashbang", "dark", "oled"}
 # Exact allow-list, not a prefix/startswith check — the "next" field on the
 # theme form is client-supplied, and an open redirect is exactly what a
 # permissive check here would hand an attacker.
-KNOWN_NAV_PATHS = {"/status", "/sources", "/devices", "/install", "/settings", "/installs", "/audit"}
+SETTINGS_PAGES = ("general", "security", "notifications", "github", "appearance")
+KNOWN_NAV_PATHS = {"/status", "/sources", "/devices", "/install", "/settings", "/installs", "/audit",
+                   *(f"/settings/{p}" for p in SETTINGS_PAGES)}
 # Pages reached from Settings rather than the top bar highlight Settings.
-NAV_SECTION = {"/installs": "/settings", "/audit": "/settings"}
+NAV_SECTION = {"/installs": "/settings", "/audit": "/settings", **{f"/settings/{p}": "/settings" for p in SETTINGS_PAGES}}
 
 
 def _get_theme(request: Request) -> str:
@@ -182,6 +252,7 @@ def _tctx(request: Request, session: dict | None = None, **extra) -> dict:
         "app_version": APP_VERSION,
         "repo_url": REPO_URL,
         "release_notes_url": RELEASE_NOTES_URL,
+        "sign_explanation": signing.EXPLANATION,
         # Changes whenever the accent does, so browsers refetch /accent.css.
         "accent_version": "".join((db.get_meta(k) or "") for k in ("accent_color", "accent2_color")).replace("#", "")
                           or "default",
@@ -367,17 +438,47 @@ def _moved(request: Request, path: str) -> RedirectResponse:
 
 # ---- sources: watched repos and uploads ----
 
+CHECK_WAIT_SECONDS = 60
+
+
+def _check_result(repo) -> dict:
+    """The flash for a finished Check now, in plain words."""
+    name = f"{repo['owner']}/{repo['repo']}"
+    if repo["last_error"]:
+        return {"error": f"{name}: {repo['last_error']}"}
+    if not repo["last_tag"]:
+        return {"ok": f"{name} has no releases yet, only workflow builds: stage one from Builds."}
+    return {"ok": f"{name} checked: its latest release is {repo['last_tag']}."}
+
+
 @app.get("/sources", response_class=HTMLResponse)
 def sources_page(
     request: Request, session: dict = Depends(auth.require_auth),
     error: str | None = None, ok: str | None = None, warn: str | None = None,
+    checking: int | None = None, since: str | None = None,
 ):
-    uploads = [a for a in db.list_staged_apks() if a["repo_id"] is None]
-    return templates.TemplateResponse(
-        request, "sources.html",
-        _tctx(request, session, repos=db.list_repos(), uploads=uploads, error=error, ok=ok, warn=warn,
-              max_upload_mb=MAX_UPLOAD_BYTES // (1024 * 1024)),
-    )
+    """While a Check now runs (?checking=<repo>&since=<when it started>) the
+    page reloads itself every 2 seconds with a meta refresh (no JavaScript
+    here), then shows what the check found."""
+    refresh = None
+    since = since.replace(" ", "+") if since else since  # a "+" left unencoded in the URL arrives as a space
+    if checking is not None and since:
+        repo = db.get_repo(checking)
+        try:
+            started = datetime.fromisoformat(since)
+            waited = (datetime.now(timezone.utc) - started).total_seconds()
+        except ValueError:
+            repo, waited = None, 0
+        if repo is not None:
+            if repo["last_checked_at"] and repo["last_checked_at"] >= since:
+                flash = _check_result(repo)
+                error, ok = flash.get("error"), flash.get("ok")
+            elif waited < CHECK_WAIT_SECONDS:
+                refresh = f"/sources?checking={int(checking)}&since={quote(since)}"
+                ok = f"Checking {repo['owner']}/{repo['repo']}…"
+            else:
+                warn = "The check is taking a while (a large download?). This page will show the result when you reload it."
+    return _sources_page(request, session, error=error, ok=ok, warn=warn, auto_refresh=refresh)
 
 
 @app.get("/repos")
@@ -386,8 +487,75 @@ def old_sources_pages(request: Request, session: dict = Depends(auth.require_aut
     return _moved(request, "/sources")
 
 
-@app.post("/repos")
-def create_repo(
+# Newer than this and a repo gets a "just created" warning on review: a
+# look-alike of a real project is usually days old.
+NEW_REPO_DAYS = 30
+
+
+def _repo_warnings(info: github_client.RepoInfo, apk_kind: str) -> list[str]:
+    warnings = []
+    if info.fork:
+        warnings.append("It's a fork. Forks are where look-alikes of real projects live — make sure this "
+                        "is the one the developer publishes from.")
+    if info.archived:
+        warnings.append("It's archived: read-only, no new releases will come.")
+    try:
+        created = datetime.fromisoformat(info.created_at.replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - created).days
+        if age_days < NEW_REPO_DAYS:
+            warnings.append(f"It was created {age_days} day{'' if age_days == 1 else 's'} ago.")
+    except ValueError:
+        warnings.append("GitHub didn't say when it was created.")
+    if apk_kind == "artifact":
+        warnings.append("No release has an APK yet, but its workflow artifacts do: test builds can be staged "
+                        "from Builds now, and releases will be staged once one has an APK.")
+    if info.owner_type != "User":
+        warnings.append(f"It belongs to an organization, so release assets are only accepted when a workflow "
+                        f"uploaded them ({github_client.ACTIONS_BOT}), never a member by hand.")
+    return warnings
+
+
+async def _apk_evidence(info: github_client.RepoInfo, asset_glob: str) -> tuple[str | None, str]:
+    """Whether a repo has anything this app can install: a published release
+    with an asset matching the glob, else (with a token) a recent workflow
+    artifact whose zip lists an .apk. Returns (kind, reason); kind None
+    means it has none, and the reason says why and what would change it."""
+    token = poller.github_token()
+    try:
+        releases = await github_client.list_releases(info.owner, info.repo, token)
+    except github_client.GithubError:
+        releases = []
+    if any(github_client.find_matching_assets(r, asset_glob) for r in releases):
+        return "release", ""
+    none_in_releases = (f"none of its releases has an asset matching '{asset_glob}'" if releases
+                        else "it has no published releases")
+    if not token:
+        return None, (f"{info.owner}/{info.repo} has no APK to install: {none_in_releases}. Its workflow artifacts "
+                      "can only be checked with a GitHub token (Settings → GitHub).")
+    try:
+        artifacts = await github_client.list_artifacts(info.owner, info.repo, info.id, token)
+    except github_client.GithubError:
+        artifacts = []
+    candidates = [a for a in artifacts if not a.name.lower().endswith(".dockerbuild")][:3]
+    for artifact in candidates:
+        if await github_client.artifact_lists_apk(info.owner, info.repo, artifact.id, token):
+            return "artifact", ""
+    return None, (f"{info.owner}/{info.repo} has no APK to install: {none_in_releases}, and "
+                  f"{'none of its recent workflow artifacts holds one' if candidates else 'its only workflow artifacts are Docker build records' if artifacts else 'it has no workflow artifacts'}. "
+                  "ADB Server only watches repos that publish APKs.")
+
+
+def _sources_page(request: Request, session: dict, **extra) -> HTMLResponse:
+    uploads = [a for a in db.list_staged_apks() if a["repo_id"] is None]
+    return templates.TemplateResponse(
+        request, "sources.html",
+        _tctx(request, session, repos=db.list_repos(), uploads=uploads,
+              max_upload_mb=MAX_UPLOAD_BYTES // (1024 * 1024), **extra),
+    )
+
+
+@app.post("/repos", response_class=HTMLResponse)
+async def review_repo(
     request: Request,
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
@@ -395,18 +563,62 @@ def create_repo(
     asset_glob: str = Form("*.apk"),
     include_prereleases: str = Form(""),
 ):
+    """Step one of adding a repo: look it up and show what GitHub says it is.
+    Nothing is watched until the operator confirms that this is the repo
+    they meant — the moment a look-alike name would otherwise slip through."""
     _check_csrf(request, session, csrf_token)
     asset_glob = asset_glob.strip() or "*.apk"
     try:
         owner, repo = github_client.parse_repo_reference(repo_url)
+        info = await github_client.get_repo_info(owner, repo, poller.github_token())
     except github_client.GithubError as exc:
         return _redirect("/sources", error=str(exc))
+    if db.get_repo_by_github_id(info.id) is not None:
+        return _redirect("/sources", error="That repo is already registered")
+    kind, reason = await _apk_evidence(info, asset_glob)
+    if kind is None:
+        return _redirect("/sources", error=reason)
+    return _sources_page(request, session, review={
+        "info": info, "asset_glob": asset_glob, "include_prereleases": include_prereleases == "1",
+        "warnings": _repo_warnings(info, kind),
+    })
+
+
+@app.post("/repos/confirm")
+async def confirm_repo(
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    owner: str = Form(...),
+    repo: str = Form(...),
+    github_id: int = Form(...),
+    asset_glob: str = Form("*.apk"),
+    include_prereleases: str = Form(""),
+):
+    """Step two: watch the repo that was reviewed, and pin its identity. It is
+    looked up again, and refused if the name now points at a different repo
+    than the one on the review page."""
+    _check_csrf(request, session, csrf_token)
+    asset_glob = asset_glob.strip() or "*.apk"
     try:
-        db.create_repo(owner, repo, asset_glob, include_prereleases == "1")
+        info = await github_client.get_repo_info(owner, repo, poller.github_token())
+    except github_client.GithubError as exc:
+        return _redirect("/sources", error=str(exc))
+    if info.id != github_id:
+        return _redirect("/sources", error="That name points at a different repo than the one you reviewed "
+                                           "— nothing was added. Look it up again.")
+    if db.get_repo_by_github_id(info.id) is not None:
+        return _redirect("/sources", error="That repo is already registered")
+    kind, reason = await _apk_evidence(info, asset_glob)  # confirm can be posted without a review
+    if kind is None:
+        return _redirect("/sources", error=reason)
+    try:
+        db.create_repo(info.owner, info.repo, asset_glob, include_prereleases == "1",
+                       github_id=info.id, owner_id=info.owner_id, owner_type=info.owner_type)
     except sqlite3.IntegrityError:
         return _redirect("/sources", error="That repo is already registered")
-    _audit(request, "repo_add", f"{owner}/{repo} glob={asset_glob}")
-    return _redirect("/sources", ok="Repo added")
+    _audit(request, "repo_add", f"{info.owner}/{info.repo} id={info.id} owner={info.owner_type} glob={asset_glob}")
+    return _redirect("/sources", ok=f"Watching {info.owner}/{info.repo}")
 
 
 @app.post("/repos/{repo_id}/delete")
@@ -432,7 +644,8 @@ def check_repo_now(
     if repo_row is None:
         raise HTTPException(status_code=404)
     background_tasks.add_task(poller.check_repo, repo_row)
-    return _redirect("/sources", ok="Check started — reload this page in a moment to see the result")
+    # The Sources page then reloads itself until this check has finished.
+    return _redirect("/sources", checking=repo_id, since=db.now())
 
 
 @app.post("/repos/{repo_id}/prereleases")
@@ -481,17 +694,22 @@ def _install_groups() -> list[dict]:
     for a in db.list_staged_apks():  # newest first
         if a["repo_id"] is None:
             # An upload's tag is its label (or version, or filename).
-            groups.append({"repo_id": None, "label": a["tag"], "releases": [{"tag": a["tag"], "apks": [a]}]})
+            kind = "artifact" if a["artifact_repo"] else "upload"
+            groups.append({"repo_id": None, "kind": kind, "label": a["artifact_repo"] or a["tag"],
+                           "releases": [{"tag": a["tag"], "apks": [a]}]})
             continue
         group = by_repo.get(a["repo_id"])
         if group is None:
-            group = by_repo[a["repo_id"]] = {"repo_id": a["repo_id"], "label": a["source_label"], "releases": []}
+            group = by_repo[a["repo_id"]] = {"repo_id": a["repo_id"], "kind": "release",
+                                             "label": a["source_label"], "releases": []}
             groups.append(group)
         if not group["releases"] or group["releases"][-1]["tag"] != a["tag"]:
             group["releases"].append({"tag": a["tag"], "apks": []})
         group["releases"][-1]["apks"].append(a)
-    # Watched repos first, alphabetically; uploads after them, newest first.
-    return sorted(groups, key=lambda g: (g["repo_id"] is None, g["label"].lower() if g["repo_id"] else ""))
+    # Watched repos first, alphabetically; then test builds from artifacts,
+    # then plain uploads, each newest first.
+    order = {"release": 0, "artifact": 1, "upload": 2}
+    return sorted(groups, key=lambda g: (order[g["kind"]], g["label"].lower() if g["repo_id"] else ""))
 
 
 @app.get("/install", response_class=HTMLResponse)
@@ -553,6 +771,33 @@ class VerifiedUpload(NamedTuple):
     archive_name: str | None  # the zip it arrived in, if it came as an artifact zip
     signer: apk_verify.SignerInfo
     info: apk_verify.PackageInfo
+    server_signed: bool  # it was unsigned, and was signed with this server's key (opted in)
+
+
+UNSIGNED_REFUSAL = ("the APK is unsigned, and Android can't install an unsigned APK. To stage it anyway, opt in "
+                    "to signing it with this server's key (see what that means next to the option)")
+
+
+def _sha256_file(path: str) -> str:
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1024 * 1024):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _sign_if_unsigned(tmp_path: str, allowed: bool) -> bool:
+    """Signs an unsigned APK with the server key when the source opted in.
+    Returns whether it did. Raises for an unsigned APK without the opt-in."""
+    if not apk_verify.is_unsigned(tmp_path):
+        return False
+    if not allowed:
+        raise apk_verify.ApkVerifyError(UNSIGNED_REFUSAL)
+    try:
+        signing.sign_in_place(tmp_path)
+    except signing.SigningError as exc:
+        raise apk_verify.ApkVerifyError(f"signing it with this server's key failed: {exc}") from exc
+    return True
 
 
 def _unwrap_archive(tmp_path: str) -> apk_verify.ArchivedApk | None:
@@ -571,16 +816,18 @@ def _unwrap_archive(tmp_path: str) -> apk_verify.ArchivedApk | None:
         staging.remove_file(apk_path)  # partial extraction, or unused; gone after a replace
 
 
-def _verify_upload(upload: UploadFile, tmp_path: str) -> VerifiedUpload:
-    display_name = _display_filename(upload.filename)
+def _verify_file(tmp_path: str, digest: str, display_name: str, sign_unsigned: bool = False) -> VerifiedUpload:
+    """Checks a received file (a bare APK, or a zip holding one) in place."""
     archive_name = None
-    digest = _receive_upload(upload, tmp_path)
     archived = _unwrap_archive(tmp_path)
     if archived is not None:
         digest, archive_name, display_name = archived.sha256, display_name, _display_filename(archived.name)
     apk_verify.assert_apk_container(tmp_path)
+    server_signed = _sign_if_unsigned(tmp_path, sign_unsigned)
+    if server_signed:
+        digest = _sha256_file(tmp_path)
     return VerifiedUpload(digest, display_name, archive_name,
-                          apk_verify.verify_signature(tmp_path), apk_verify.get_package_info(tmp_path))
+                          apk_verify.verify_signature(tmp_path), apk_verify.get_package_info(tmp_path), server_signed)
 
 
 def _upload_warnings(info: apk_verify.PackageInfo, signer: apk_verify.SignerInfo) -> list[str]:
@@ -605,6 +852,7 @@ def upload_apk(
     csrf_token: str = Form(...),
     apk: UploadFile = File(...),
     label: str = Form(""),
+    sign_unsigned: str = Form(""),
 ):
     """Stages an APK the operator supplies directly. It has no upstream repo,
     so it neither reads nor writes a repo's package/signer pin — the operator
@@ -621,46 +869,299 @@ def upload_apk(
     Sync on purpose: Starlette runs it in a threadpool, keeping apksigner and
     aapt2 off the event loop the poller shares."""
     _check_csrf(request, session, csrf_token)
-    upload_dir = _upload_dir()
-    os.makedirs(upload_dir, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=upload_dir, prefix="_upload_")
-    os.close(fd)
+    tmp_path = _new_upload_tmp()
     try:
-        verified = _verify_upload(apk, tmp_path)
-    except (UploadRejected, apk_verify.ApkVerifyError) as exc:
+        digest = _receive_upload(apk, tmp_path)
+    except UploadRejected as exc:
         staging.remove_file(tmp_path)
-        logger.warning("upload rejected (%s): %s", _display_filename(apk.filename), exc)
         return _redirect("/sources", error=f"Upload refused: {exc}")
     except BaseException:
         staging.remove_file(tmp_path)
         raise
+    return _stage_received(request, tmp_path, digest, _display_filename(apk.filename), label,
+                           sign_unsigned=sign_unsigned == "yes")
+
+
+def _new_upload_tmp() -> str:
+    upload_dir = _upload_dir()
+    os.makedirs(upload_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=upload_dir, prefix="_upload_")
+    os.close(fd)
+    return tmp_path
+
+
+def _stage_received(
+    request: Request, tmp_path: str, digest: str, display_name: str, label: str,
+    origin: str | None = None, refused_to: str = "/sources", notes: str | None = None,
+    artifact: dict | None = None, sign_unsigned: bool = False, on_verified=None,
+) -> RedirectResponse:
+    """Verifies and stages a file already on disk at tmp_path, which this
+    consumes: it ends up staged or removed. `origin` describes where the file
+    came from, for the flash message and the audit log; without one, a zip's
+    own name is used."""
+    try:
+        verified = _verify_file(tmp_path, digest, display_name, sign_unsigned)
+    except (UploadRejected, apk_verify.ApkVerifyError) as exc:
+        staging.remove_file(tmp_path)
+        logger.warning("upload rejected (%s): %s", display_name, exc)
+        return _redirect(refused_to, error=f"Upload refused: {exc}")
+    except BaseException:
+        staging.remove_file(tmp_path)
+        raise
     digest, display_name, signer, info = verified.sha256, verified.display_name, verified.signer, verified.info
+    if on_verified is not None:
+        on_verified(verified)
 
     existing = db.get_uploaded_apk_by_sha256(digest)
     if existing is not None:
         staging.remove_file(tmp_path)
-        return _redirect("/sources", error=f"That exact APK is already staged as \"{existing['filename']}\"")
+        return _redirect(refused_to, error=f"That exact APK is already staged as \"{existing['filename']}\"")
 
-    final_path = os.path.join(upload_dir, f"{digest}.apk")
+    final_path = os.path.join(_upload_dir(), f"{digest}.apk")
     os.replace(tmp_path, final_path)
     apk_id = db.insert_staged_apk(
         repo_id=None, tag=(label.strip() or info.version_name or display_name)[:120],
         filename=display_name, sha256=digest, package_name=info.name,
         signer_sha256=signer.fingerprint, path=final_path,
         version_code=info.version_code, version_name=info.version_name,
-        abis=" ".join(info.abis), source="upload", is_debug=signer.debug,
+        abis=" ".join(info.abis), source="upload", is_debug=signer.debug, release_notes=notes,
+        artifact=artifact, server_signed=verified.server_signed,
     )
     if apk_id is None:
         # A concurrent upload of the same file won; final_path is its file too.
-        return _redirect("/sources", error="That exact APK is already staged")
+        return _redirect(refused_to, error="That exact APK is already staged")
 
-    source = f" from {verified.archive_name}" if verified.archive_name else ""
-    _audit(request, "upload", f"{display_name}{source} {info.name} sha256={digest[:12]} debug={signer.debug}")
+    source = origin or (f" from {verified.archive_name}" if verified.archive_name else "")
+    _audit(request, "upload", f"{display_name}{source} {info.name} sha256={digest[:12]} debug={signer.debug}"
+                              f"{' server_signed=True' if verified.server_signed else ''}")
     staged = f"Staged {display_name} ({info.name}){source}."
+    if verified.server_signed:
+        staged += " It was unsigned, so it was signed with this server's key."
     warnings = _upload_warnings(info, signer)
     if warnings:
         return _redirect("/install", warn=" ".join([staged, *warnings]))
     return _redirect("/install", ok=staged)
+
+
+# ---- workflow artifacts: test builds straight from a watched repo ----
+
+async def _pinned_repo(repo_id: int) -> tuple[sqlite3.Row, str | None]:
+    """The repo row, and why its artifacts can't be fetched right now (or
+    None). Same identity rule as the poller: the name must still be the repo
+    that was pinned."""
+    repo = db.get_repo(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404)
+    if not poller.github_token():
+        return repo, ("Fetching workflow artifacts needs a GitHub token: GitHub serves artifact downloads only to "
+                      "an authenticated caller, even for a public repo. Add one under Settings → GitHub, "
+                      "with Actions: read on this repo.")
+    if repo["github_id"] is None:
+        return repo, "This repo's GitHub ID isn't pinned yet. Press Check now on Sources first."
+    try:
+        info = await github_client.get_repo_info(repo["owner"], repo["repo"], poller.github_token())
+    except github_client.GithubError as exc:
+        return repo, str(exc)
+    return repo, poller._identity_problem(repo, info)
+
+
+def _by_commit(artifacts: list[github_client.Artifact], runs: dict[int, dict]) -> list[dict]:
+    """One entry per commit, newest first, each holding every artifact built
+    from it (several workflows, or several outputs of one, often share one)."""
+    groups: dict[str, dict] = {}
+    for a in artifacts:  # newest first already
+        g = groups.get(a.head_sha)
+        if g is None:
+            run = runs.get(a.run_id, {})
+            g = groups[a.head_sha] = {"sha": a.head_sha, "branch": a.branch, "created": a.created_at,
+                                      "subject": run.get("subject", ""), "message": run.get("message", ""),
+                                      "artifacts": []}
+        g["artifacts"].append({"a": a, "run": runs.get(a.run_id, {})})
+    return list(groups.values())
+
+
+@app.get("/repos/{repo_id}/artifacts", response_class=HTMLResponse)
+async def artifacts_page(
+    repo_id: int, request: Request, session: dict = Depends(auth.require_auth),
+    error: str | None = None, ok: str | None = None, warn: str | None = None, refresh: bool = False,
+):
+    if refresh:
+        repo_row = db.get_repo(repo_id)
+        if repo_row is not None:
+            github_client.forget_cached(repo_row["owner"], repo_row["repo"])
+    repo, problem = await _pinned_repo(repo_id)
+    artifacts, releases, signing = [], [], {}
+    token = poller.github_token()
+    if problem is None:
+        try:
+            listed = await github_client.list_releases(repo["owner"], repo["repo"], token)
+            staged_tags = {a["tag"] for a in db.list_staged_apks(repo_id)}
+            releases = [{"id": r["id"], "tag": r["tag_name"], "name": r.get("name") or "",
+                         "published": (r.get("published_at") or "")[:10], "prerelease": bool(r.get("prerelease")),
+                         "apks": len(github_client.find_matching_assets(r, repo["asset_glob"])),
+                         "staged": r["tag_name"] in staged_tags, "current": r["tag_name"] == repo["last_tag"]}
+                        for r in listed]
+            tags = {r["tag"] for r in releases}
+            # A build of a release (its tag's run, or its tagged commit) is that
+            # release: it arrives through Releases, with the release checks.
+            release_shas = await github_client.release_commits(repo["owner"], repo["repo"], tags, token)
+            flt = _artifact_filter()
+            shown = [a for a in await github_client.list_artifacts(repo["owner"], repo["repo"], repo["github_id"], token)
+                     if _artifact_shown(a, flt) and a.branch not in tags and a.head_sha not in release_shas]
+            try:
+                runs = await github_client.list_runs(repo["owner"], repo["repo"], token)
+            except github_client.GithubError:
+                runs = {}  # the list still works; it just can't say what each build is
+            artifacts = _by_commit(shown, runs)
+            signing = db.artifact_signing_map(repo_id)
+        except github_client.GithubError as exc:
+            problem = str(exc)
+    return templates.TemplateResponse(
+        request, "artifacts.html",
+        _tctx(request, session, repo=repo, artifacts=artifacts, releases=releases, problem=problem, signing=signing,
+              max_mb=MAX_UPLOAD_BYTES // (1024 * 1024), error=error, ok=ok, warn=warn),
+    )
+
+
+@app.post("/repos/{repo_id}/sign-unsigned")
+def set_sign_unsigned(
+    repo_id: int, request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), on: str = Form(...), understood: str = Form(""),
+):
+    """Per-repo opt-in to signing its unsigned builds (releases and artifacts)
+    with this server's key. Turning it on needs the explanation acknowledged."""
+    _check_csrf(request, session, csrf_token)
+    repo = db.get_repo(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404)
+    turn_on = on == "1"
+    if turn_on and understood != "yes":
+        return _redirect(f"/repos/{int(repo_id)}/artifacts#signing",
+                         error="Tick that you understand what signing with this server's key means first")
+    db.set_sign_unsigned(repo_id, turn_on)
+    _audit(request, "sign_unsigned_on" if turn_on else "sign_unsigned_off", f"{repo['owner']}/{repo['repo']}")
+    return _redirect(f"/repos/{int(repo_id)}/artifacts#signing",
+                     ok=("Unsigned builds from this repo will be signed with this server's key" if turn_on
+                         else "Unsigned builds from this repo will be refused again"))
+
+
+@app.post("/repos/{repo_id}/releases/{release_id}/stage")
+async def stage_release(
+    repo_id: int, release_id: int, request: Request,
+    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+):
+    """Stages an older release of a watched repo, through every release check
+    (uploader, signature, no debug builds, the pin)."""
+    _check_csrf(request, session, csrf_token)
+    back = f"/repos/{int(repo_id)}/artifacts"
+    if db.get_repo(repo_id) is None:
+        raise HTTPException(status_code=404)
+    ok, message = await poller.stage_past_release(repo_id, release_id)
+    repo = db.get_repo(repo_id)
+    _audit(request, "release_stage" if ok else "release_stage_refused",
+           f"{repo['owner']}/{repo['repo']} release={int(release_id)}: {message}")
+    return _redirect("/install" if ok else back, **({"ok": message} if ok else {"error": message}))
+
+
+@app.post("/repos/{repo_id}/artifacts/{artifact_id}/stage")
+async def stage_artifact(
+    repo_id: int, artifact_id: int, request: Request,
+    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+):
+    """Stages the APK inside a workflow artifact, for testing a build that
+    isn't released. It is handled exactly like an uploaded zip (debug builds
+    allowed and flagged, no repo pin read or written), with the repo, run,
+    branch and commit it came from recorded as its provenance."""
+    _check_csrf(request, session, csrf_token)
+    back = f"/repos/{int(repo_id)}/artifacts"
+    repo, problem = await _pinned_repo(repo_id)
+    if problem:
+        return _redirect(back, error=problem)
+    owner, name, token = repo["owner"], repo["repo"], poller.github_token()
+    tmp_path = _new_upload_tmp()
+    try:
+        artifact = await github_client.get_artifact(owner, name, artifact_id, repo["github_id"], token)
+        digest = await github_client.download_artifact(owner, name, artifact.id, tmp_path, token)
+    except github_client.GithubError as exc:
+        staging.remove_file(tmp_path)
+        return _redirect(back, error=f"Artifact refused: {exc}")
+    except BaseException:
+        staging.remove_file(tmp_path)
+        raise
+    try:
+        notes = await github_client.get_build_notes(owner, name, artifact, token)
+    except github_client.GithubError as exc:
+        # Notes are a courtesy: the build still stages without them.
+        logger.warning("build notes for %s/%s run %d: %s", owner, name, artifact.run_id, exc)
+        notes = None
+    sha = artifact.head_sha[:7]
+    origin = f" from {owner}/{name} artifact {artifact.name} ({artifact.branch} @ {sha}, run {artifact.run_id})"
+    label = f"{artifact.name} {artifact.branch}@{sha}"
+    try:  # other builds of the same commit, for advice if this one is debug-signed
+        listed = await github_client.list_artifacts(owner, name, repo["github_id"], token)
+        siblings = [{"id": a.id, "name": a.name} for a in listed
+                    if a.head_sha == artifact.head_sha and a.id != artifact.id
+                    and not a.name.lower().endswith(".dockerbuild")][:10]
+    except github_client.GithubError:
+        siblings = []
+    marker = f"Commit {artifact.head_sha[:7]}:\n"  # get_build_notes puts the commit message after this
+    subject = notes.split(marker, 1)[1].split("\n", 1)[0] if notes and marker in notes else ""
+    provenance = {"repo": f"{owner}/{name}", "run_id": artifact.run_id, "branch": artifact.branch,
+                  "sha": artifact.head_sha, "subject": subject[:200], "repo_id": int(repo_id),
+                  "siblings": json.dumps(siblings)}
+
+    def remember(verified: VerifiedUpload) -> None:
+        kind = "unsigned" if verified.server_signed else "debug" if verified.signer.debug else "signed"
+        db.record_artifact_signing(artifact.id, repo_id, kind,
+                                   None if verified.server_signed else verified.signer.fingerprint)
+
+    # apksigner and aapt2 block for seconds: keep them off the event loop.
+    return await asyncio.to_thread(_stage_received, request, tmp_path, digest,
+                                   _display_filename(f"{artifact.name}.zip"), label, origin, back, notes,
+                                   provenance, bool(repo["sign_unsigned"]), remember)
+
+
+SIGNING_LABELS = {"signed": "signed with a real key", "debug": "signed with a debug key",
+                  "unsigned": "unsigned", "invalid": "not a valid APK build"}
+
+
+def _inspect_signing(tmp_path: str) -> tuple[str, str | None, str]:
+    """What a downloaded artifact is signed with: (kind, signer, detail)."""
+    try:
+        _unwrap_archive(tmp_path)
+        apk_verify.assert_apk_container(tmp_path)
+        if apk_verify.is_unsigned(tmp_path):
+            return "unsigned", None, ""
+        signer = apk_verify.verify_signature(tmp_path)
+    except apk_verify.ApkVerifyError as exc:
+        return "invalid", None, str(exc)
+    return ("debug" if signer.debug else "signed"), signer.fingerprint, ""
+
+
+@app.post("/repos/{repo_id}/artifacts/{artifact_id}/check")
+async def check_artifact_signing(
+    repo_id: int, artifact_id: int, request: Request,
+    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+):
+    """Downloads a test build only to see how it's signed, then deletes it.
+    The answer is kept: an artifact never changes."""
+    _check_csrf(request, session, csrf_token)
+    back = f"/repos/{int(repo_id)}/artifacts"
+    repo, problem = await _pinned_repo(repo_id)
+    if problem:
+        return _redirect(back, error=problem)
+    token = poller.github_token()
+    tmp_path = _new_upload_tmp()
+    try:
+        artifact = await github_client.get_artifact(repo["owner"], repo["repo"], artifact_id, repo["github_id"], token)
+        await github_client.download_artifact(repo["owner"], repo["repo"], artifact.id, tmp_path, token)
+        kind, signer, detail = await asyncio.to_thread(_inspect_signing, tmp_path)
+    except github_client.GithubError as exc:
+        return _redirect(back, error=f"Couldn't check it: {exc}")
+    finally:
+        staging.remove_file(tmp_path)
+    db.record_artifact_signing(artifact.id, repo_id, kind, signer, detail)
+    return _redirect(f"{back}#artifact-{artifact.id}", ok=f"{artifact.name}: {SIGNING_LABELS[kind]}")
 
 
 @app.post("/staged/{apk_id}/delete")
@@ -995,9 +1496,13 @@ def _find_target(key: str) -> notify.Target | None:
     return notify.Target(row["id"], row["url"], row["label"]) if row else None
 
 
-def _render_settings(request: Request, session: dict, draft: dict | None = None, **flash) -> HTMLResponse:
-    return templates.TemplateResponse(request, "settings.html", _tctx(
-        request, session, **flash, draft=draft or {},
+def _render_settings(
+    request: Request, session: dict, draft: dict | None = None, page: str = "notifications", **flash,
+) -> HTMLResponse:
+    """One of the Settings pages ("overview" is /settings itself)."""
+    name = "settings.html" if page == "overview" else f"settings_{page}.html"
+    return templates.TemplateResponse(request, name, _tctx(
+        request, session, **flash, draft=draft or {}, settings_page=page,
         targets=_notify_rows(), max_targets=notify.MAX_TARGETS,
         events=[(e, notify.EVENT_LABELS[e], e in notify.enabled_events()) for e in notify.EVENTS],
         events_from=("settings" if db.get_meta("notify_events") is not None
@@ -1010,7 +1515,159 @@ def _render_settings(request: Request, session: dict, draft: dict | None = None,
         current_preset=appearance.preset_name(db.get_meta("accent_color"), db.get_meta("accent2_color")),
         default_pair=appearance.PRESETS[appearance.DEFAULT_PRESET],
         default_preset=appearance.DEFAULT_PRESET,
+        token_source=poller.token_source(), artifact_filter=_artifact_filter(),
+        time_zone=_zone_name(), time_zones=TIME_ZONES, clock_24h=_clock_24h(),
     ))
+
+
+# ---- settings: GitHub token and artifacts ----
+
+ARTIFACT_GLOB_RE = re.compile(r"^[A-Za-z0-9*?._\-\[\]]{0,100}$")
+
+
+TOKEN_TEMPLATE_DAYS = 90
+TOKEN_EXPIRY_WARN_DAYS = 7
+
+
+def _token_template_url(request: Request) -> str:
+    """GitHub's fine-grained token page, pre-filled with exactly what this app
+    needs: read-only Contents, Actions and Metadata. Which repos it covers is
+    the one thing GitHub can't pre-fill; the operator picks them there."""
+    owners = sorted({r["owner"] for r in db.list_repos()})
+    params = {
+        "name": f"ADB Server {request.url.hostname or ''}".strip()[:40],
+        "description": "Read-only: releases and workflow artifacts for ADB Server",
+        "expires_in": str(TOKEN_TEMPLATE_DAYS),
+        "contents": "read", "actions": "read", "metadata": "read",
+    }
+    if len(owners) == 1:
+        params["target_name"] = owners[0]
+    return "https://github.com/settings/personal-access-tokens/new?" + "&".join(
+        f"{k}={quote(v)}" for k, v in params.items())
+
+
+def _token_expiry() -> dict | None:
+    """When the saved token expires, as GitHub reported it at save or test."""
+    raw = db.get_meta("github_token_expires")
+    if not raw:
+        return None
+    try:
+        when = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    days = (when - datetime.now(timezone.utc)).days
+    return {"date": when.date().isoformat(), "days": days, "soon": days < TOKEN_EXPIRY_WARN_DAYS}
+
+
+def _record_token_status(status: github_client.TokenStatus) -> None:
+    db.set_meta("github_token_expires", status.expires_at)
+
+
+async def _repo_access(repo, token: str) -> dict:
+    """Can the token read this repo, and download its artifacts? Checked
+    for real: a public repo is readable with any token, so only the artifact
+    download (a redirect GitHub hands out only when allowed) proves access."""
+    row = {"name": f"{repo['owner']}/{repo['repo']}", "id": repo["id"], "repo": None, "artifacts": None, "note": ""}
+    try:
+        await github_client.get_repo_info(repo["owner"], repo["repo"], token)
+        row["repo"] = True
+    except github_client.GithubError as exc:
+        row["repo"], row["note"] = False, str(exc)
+        return row
+    try:
+        artifacts = await github_client.list_artifacts(repo["owner"], repo["repo"], repo["github_id"] or 0, token)
+        if not artifacts:
+            row["note"] = "No artifacts to test with yet"
+            return row
+        row["artifacts"] = await github_client.can_download_artifact(repo["owner"], repo["repo"], artifacts[0].id, token)
+        if not row["artifacts"]:
+            row["note"] = "The token can't download its artifacts: add this repo to it, with Actions: read"
+    except github_client.GithubError as exc:
+        row["note"] = str(exc)
+    return row
+
+
+async def _access_report(token: str) -> list[dict]:
+    repos = db.list_repos()
+    return list(await asyncio.gather(*(_repo_access(r, token) for r in repos)))
+
+
+def _artifact_filter() -> dict:
+    return {"hide_dockerbuild": db.get_meta("artifacts_hide_dockerbuild") != "0",
+            "name_glob": db.get_meta("artifacts_name_glob") or ""}
+
+
+def _artifact_shown(artifact: github_client.Artifact, flt: dict) -> bool:
+    name = artifact.name.lower()
+    # docker/build-push-action uploads a build record named <owner>~<repo>~<id>.dockerbuild.
+    if flt["hide_dockerbuild"] and name.endswith(".dockerbuild"):
+        return False
+    return not flt["name_glob"] or fnmatch.fnmatch(name, flt["name_glob"].lower())
+
+
+@app.post("/settings/github-token")
+async def save_github_token(
+    request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), token: str = Form(...),
+):
+    """Saves a GitHub token, encrypted, once GitHub confirms it works. The
+    token is never echoed back, logged, or put in a redirect."""
+    _check_csrf(request, session, csrf_token)
+    token = token.strip()
+    if not github_client.TOKEN_RE.fullmatch(token):
+        return _redirect("/settings/github", error="That doesn't look like a GitHub token "
+                                                       "(ghp_… or github_pat_…) — nothing was saved")
+    try:
+        status = await github_client.check_token(token)
+    except github_client.GithubError as exc:
+        return _redirect("/settings/github", error=f"Not saved: {exc}")
+    db.set_secret("github_token", token)
+    _record_token_status(status)
+    _audit(request, "github_token_set", f"login={status.login} expires={status.expires_at or 'never'}")
+    return _redirect("/settings/github",
+                     ok=f"Token saved. GitHub knows it as {status.login} ({status.rate_limit} requests/hour).")
+
+
+@app.post("/settings/github-token/test")
+async def test_github_token(request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    token = poller.github_token()
+    if not token:
+        return _redirect("/settings/github", error="No GitHub token is set")
+    try:
+        status = await github_client.check_token(token)
+    except github_client.GithubError as exc:
+        return _redirect("/settings/github", error=str(exc))
+    if poller.token_source() == "settings":
+        _record_token_status(status)
+    return _redirect("/settings/github",
+                     ok=f"The token works: GitHub knows it as {status.login} ({status.rate_limit} requests/hour).")
+
+
+@app.post("/settings/github-token/clear")
+def clear_github_token(request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+    _check_csrf(request, session, csrf_token)
+    db.set_meta("github_token", None)
+    db.set_meta("github_token_expires", None)
+    _audit(request, "github_token_cleared")
+    fallback = " GITHUB_TOKEN from .env is used instead." if poller.GITHUB_TOKEN else ""
+    return _redirect("/settings/github", ok="Token removed." + fallback)
+
+
+@app.post("/settings/artifacts")
+def save_artifact_filter(
+    request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+    hide_dockerbuild: str = Form(""), name_glob: str = Form(""),
+):
+    _check_csrf(request, session, csrf_token)
+    name_glob = name_glob.strip()
+    if not ARTIFACT_GLOB_RE.fullmatch(name_glob):
+        return _redirect("/settings/github", error="The name pattern may use letters, digits, . _ - * ? and [ ], "
+                                                       "up to 100 characters")
+    db.set_meta("artifacts_hide_dockerbuild", "1" if hide_dockerbuild == "1" else "0")
+    db.set_meta("artifacts_name_glob", name_glob or None)
+    _audit(request, "artifact_filter", f"hide_dockerbuild={hide_dockerbuild == '1'} glob={name_glob or '*'}")
+    return _redirect("/settings/github", ok="Artifact filter saved")
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1018,7 +1675,38 @@ def settings_page(
     request: Request, session: dict = Depends(auth.require_auth),
     error: str | None = None, ok: str | None = None, warn: str | None = None,
 ):
-    return _render_settings(request, session, error=error, ok=ok, warn=warn)
+    return _render_settings(request, session, page="overview", error=error, ok=ok, warn=warn,
+                            token_expiry=_token_expiry())
+
+
+@app.get("/settings/general", response_class=HTMLResponse)
+@app.get("/settings/security", response_class=HTMLResponse)
+@app.get("/settings/notifications", response_class=HTMLResponse)
+@app.get("/settings/appearance", response_class=HTMLResponse)
+def settings_subpage(
+    request: Request, session: dict = Depends(auth.require_auth),
+    error: str | None = None, ok: str | None = None, warn: str | None = None,
+):
+    page = request.url.path.rsplit("/", 1)[-1]
+    extra = {}
+    if page == "security":
+        try:
+            extra["signing_fingerprint"] = signing.key_fingerprint()
+        except signing.SigningError:
+            extra["signing_fingerprint"] = None
+    return _render_settings(request, session, page=page, error=error, ok=ok, warn=warn, **extra)
+
+
+@app.get("/settings/github", response_class=HTMLResponse)
+async def settings_github(
+    request: Request, session: dict = Depends(auth.require_auth),
+    error: str | None = None, ok: str | None = None, warn: str | None = None,
+):
+    token = poller.github_token()
+    access = await _access_report(token) if token else []
+    return _render_settings(request, session, page="github", error=error, ok=ok, warn=warn,
+                            access=access, token_expiry=_token_expiry(),
+                            token_template_url=_token_template_url(request))
 
 
 def _try_target(request: Request, session: dict, url: str | None, problem: str | None, draft: dict) -> HTMLResponse:
@@ -1073,18 +1761,18 @@ def add_notify_target(
     try:
         url = notify.validate(url)
     except ValueError as exc:
-        return _redirect("/settings", error=str(exc))
+        return _redirect("/settings/notifications", error=str(exc))
     return _store_notify_target(request, url, label)
 
 
 def _store_notify_target(request: Request, url: str, label: str) -> RedirectResponse:
     if len(db.list_notify_targets()) >= notify.MAX_TARGETS:
-        return _redirect("/settings", error=f"You can store up to {notify.MAX_TARGETS} services")
+        return _redirect("/settings/notifications", error=f"You can store up to {notify.MAX_TARGETS} services")
     if db.add_notify_target(url, label.strip()[:80] or None) is None:
-        return _redirect("/settings", error="That service is already configured")
+        return _redirect("/settings/notifications", error="That service is already configured")
     info = notify.describe(url)
     _audit(request, "notify_add", f"{info['service']} {info['masked']}")
-    return _redirect("/settings", ok=f"Added {info['service']} — send a test to check it")
+    return _redirect("/settings/notifications", ok=f"Added {info['service']} — send a test to check it")
 
 
 @app.post("/settings/notify/add-server")
@@ -1097,7 +1785,7 @@ def add_apprise_server(
     try:
         url = notify.build_api_url(server, key, tags)
     except ValueError as exc:
-        return _redirect("/settings", error=str(exc))
+        return _redirect("/settings/notifications", error=str(exc))
     return _store_notify_target(request, url, label)
 
 
@@ -1112,7 +1800,7 @@ def delete_notify_target(
     db.delete_notify_target(target_id)
     info = notify.describe(row["url"])
     _audit(request, "notify_remove", f"{info['service']} {info['masked']}")
-    return _redirect("/settings", ok=f"Removed {info['service']}")
+    return _redirect("/settings/notifications", ok=f"Removed {info['service']}")
 
 
 @app.post("/settings/notify/events")
@@ -1124,7 +1812,7 @@ def set_notify_events(
     chosen = sorted(set(events) & set(notify.EVENTS))
     db.set_meta("notify_events", ",".join(chosen))
     _audit(request, "notify_events", ",".join(chosen) or "(none)")
-    return _redirect("/settings", ok="Notification events saved" if chosen else "All notification events turned off")
+    return _redirect("/settings/notifications", ok="Notification events saved" if chosen else "All notification events turned off")
 
 
 @app.post("/settings/notify/test")
@@ -1137,7 +1825,7 @@ def test_notify(
     if target == "all":
         chosen = notify.targets()
         if not chosen:
-            return _redirect("/settings", error="No notification services are configured yet")
+            return _redirect("/settings/notifications", error="No notification services are configured yet")
     else:
         found = _find_target(target)
         if found is None:
@@ -1150,8 +1838,8 @@ def test_notify(
     _audit(request, "notify_test", "; ".join(r[1] for r in results)[:500])
     summary = " · ".join(r[1] for r in results)
     if all(ok for ok, _ in results):
-        return _redirect("/settings", ok=f"Test sent — {summary}")
-    return _redirect("/settings", error=f"Test failed for some services — {summary}")
+        return _redirect("/settings/notifications", ok=f"Test sent — {summary}")
+    return _redirect("/settings/notifications", error=f"Test failed for some services — {summary}")
 
 
 MAX_SAVED_COLOURS = 20
@@ -1162,15 +1850,15 @@ def _apply_colours(request: Request, primary: str | None, secondary: str | None,
     db.set_meta("accent2_color", secondary)
     if primary is None:
         _audit(request, "accent_reset")
-        return _redirect("/settings#appearance", ok="Colours reset to the default teal and ocean")
+        return _redirect("/settings/appearance", ok="Colours reset to the default teal and ocean")
     _audit(request, "accent_set", f"{primary} / {secondary}")
-    return _redirect("/settings#appearance", ok=f"Colours set to {name or f'{primary} and {secondary}'}")
+    return _redirect("/settings/appearance", ok=f"Colours set to {name or f'{primary} and {secondary}'}")
 
 
 # ---- settings: two-factor sign-in ----
 
 def _settings_error(message: str) -> RedirectResponse:
-    return _redirect("/settings#security", error=message)
+    return _redirect("/settings/security", error=message)
 
 
 def _check_current_code(code: str) -> str | None:
@@ -1192,7 +1880,7 @@ def _show_recovery_codes(request: Request, session: dict, codes: list[str]):
 @app.get("/settings/mfa/setup", response_class=HTMLResponse)
 def mfa_setup_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None):
     if mfa.enabled():
-        return _redirect("/settings#security")
+        return _redirect("/settings/security")
     secret = mfa.pending_secret(create=True)
     uri = mfa.provisioning_uri(secret, auth.APP_USERNAME)
     response = templates.TemplateResponse(request, "mfa_setup.html", _tctx(
@@ -1207,7 +1895,7 @@ def mfa_enable(request: Request, session: dict = Depends(auth.require_auth),
                csrf_token: str = Form(...), code: str = Form(...)):
     _check_csrf(request, session, csrf_token)
     if mfa.enabled():
-        return _redirect("/settings#security")
+        return _redirect("/settings/security")
     codes = mfa.enable(code)
     if codes is None:
         return _redirect("/settings/mfa/setup", error="That code didn't match — scan the QR code again and "
@@ -1227,7 +1915,7 @@ def mfa_new_recovery_codes(request: Request, session: dict = Depends(auth.requir
                            csrf_token: str = Form(...), code: str = Form(...)):
     _check_csrf(request, session, csrf_token)
     if not mfa.enabled():
-        return _redirect("/settings#security")
+        return _redirect("/settings/security")
     if (error := _check_current_code(code)):
         return _settings_error(error)
     _audit(request, "mfa_recovery_codes_replaced")
@@ -1239,12 +1927,12 @@ def mfa_disable(request: Request, session: dict = Depends(auth.require_auth),
                 csrf_token: str = Form(...), code: str = Form(...)):
     _check_csrf(request, session, csrf_token)
     if not mfa.enabled():
-        return _redirect("/settings#security")
+        return _redirect("/settings/security")
     if (error := _check_current_code(code)):
         return _settings_error(error)
     mfa.disable()
     _audit(request, "mfa_disabled")
-    response = _redirect("/settings#security", ok="Two-factor sign-in is off")
+    response = _redirect("/settings/security", ok="Two-factor sign-in is off")
     response.delete_cookie(auth.MFA_TRUST_COOKIE, path="/")
     return response
 
@@ -1258,7 +1946,7 @@ def mfa_revoke_browser(request: Request, session: dict = Depends(auth.require_au
         raise HTTPException(status_code=400)
     db.delete_trusted_browser(browser or None)
     _audit(request, "mfa_trust_revoked", "one browser" if browser else "all browsers")
-    return _redirect("/settings#security", ok="That browser will be asked for a code next time" if browser
+    return _redirect("/settings/security", ok="That browser will be asked for a code next time" if browser
                      else "Every browser will be asked for a code next time")
 
 
@@ -1274,21 +1962,41 @@ def set_accent(
     if saved:
         row = db.get_saved_colour(int(saved)) if saved.isdigit() else None
         if row is None:
-            return _redirect("/settings#appearance", error="That saved colour pair no longer exists")
+            return _redirect("/settings/appearance", error="That saved colour pair no longer exists")
         return _apply_colours(request, row["primary_color"], row["secondary_color"], row["name"])
     if preset:
         if preset not in appearance.PRESETS:
-            return _redirect("/settings", error="Unknown colour preset")
+            return _redirect("/settings/appearance", error="Unknown colour preset")
         primary, secondary = (None, None) if preset == appearance.DEFAULT_PRESET else appearance.PRESETS[preset]
     elif accent:
         try:
             primary = appearance.normalize(accent)
             secondary = appearance.normalize(accent2 or appearance.PRESETS[appearance.DEFAULT_PRESET][1])
         except ValueError as exc:
-            return _redirect("/settings", error=str(exc))
+            return _redirect("/settings/appearance", error=str(exc))
     else:
         primary = secondary = None
     return _apply_colours(request, primary, secondary)
+
+
+@app.post("/settings/timezone")
+def set_timezone(
+    request: Request, session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...), tz: str = Form(...), clock: str = Form("12"),
+):
+    """The zone and clock every date and time in the app is shown in (all are
+    stored in UTC)."""
+    _check_csrf(request, session, csrf_token)
+    if tz not in TIME_ZONES:
+        return _redirect("/settings/general", error="Pick a time zone from the list")
+    if clock not in ("12", "24"):
+        return _redirect("/settings/general", error="Pick a 12-hour or a 24-hour clock")
+    db.set_meta("timezone", tz)
+    db.set_meta("clock", clock)
+    _display_zone.clear()
+    _clock.clear()
+    _audit(request, "timezone", f"{tz} {clock}h")
+    return _redirect("/settings/general", ok=f"Times are now shown in {tz}, on a {clock}-hour clock")
 
 
 @app.post("/settings/appearance/save")
@@ -1300,14 +2008,14 @@ def save_colours(
     _check_csrf(request, session, csrf_token)
     name = " ".join(name.split())
     if not name or len(name) > 40:
-        return _redirect("/settings#appearance", error="Give the colour pair a name of up to 40 characters")
+        return _redirect("/settings/appearance", error="Give the colour pair a name of up to 40 characters")
     try:
         primary, secondary = appearance.normalize(accent), appearance.normalize(accent2)
     except ValueError as exc:
-        return _redirect("/settings#appearance", error=str(exc))
+        return _redirect("/settings/appearance", error=str(exc))
     names = {r["name"] for r in db.list_saved_colours()}
     if name not in names and len(names) >= MAX_SAVED_COLOURS:
-        return _redirect("/settings#appearance", error=f"You can save up to {MAX_SAVED_COLOURS} colour pairs — delete one first")
+        return _redirect("/settings/appearance", error=f"You can save up to {MAX_SAVED_COLOURS} colour pairs — delete one first")
     db.save_colour(name, primary, secondary)
     _audit(request, "colours_saved", f"{name}: {primary} / {secondary}")
     return _apply_colours(request, primary, secondary, name)
@@ -1324,7 +2032,7 @@ def delete_saved_colours(
         raise HTTPException(status_code=404)
     db.delete_saved_colour(colour_id)
     _audit(request, "colours_deleted", row["name"])
-    return _redirect("/settings#appearance", ok=f"Deleted the saved pair “{row['name']}”")
+    return _redirect("/settings/appearance", ok=f"Deleted the saved pair “{row['name']}”")
 
 
 @app.get("/accent.css")

@@ -17,13 +17,19 @@ class PushRefused(Exception):
 
 
 def refresh_abis(serial: str, addr: str) -> str:
-    """Best effort: a device that can't be queried keeps its last known ABIs."""
+    """Best effort: a device that can't be queried keeps its last known ABIs.
+    Its model name is read at the same time, for display."""
     try:
         abis = adb_client.device_abis(addr)
     except adb_client.AdbError:
         device = db.get_device(serial)
         return device["abis"] if device else ""
     db.set_device_abis(serial, abis)
+    try:
+        if model := adb_client.device_model(addr):
+            db.set_device_model(serial, model)
+    except adb_client.AdbError:
+        pass
     return " ".join(abis)
 
 

@@ -17,6 +17,7 @@ ownership there."""
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 import struct
 import time
@@ -26,6 +27,9 @@ from urllib.parse import quote
 import segno
 
 import db
+import secretbox
+
+logger = logging.getLogger("mfa")
 
 ISSUER = "ADB Server"
 STEP_SECONDS = 30
@@ -87,14 +91,25 @@ def format_secret(secret: str) -> str:
 # ---- state ----
 
 def enabled() -> bool:
+    # Presence, not readability: an undecryptable secret still means 2FA is
+    # on, so sign-in fails closed rather than silently dropping the factor.
     return db.get_meta("mfa_secret") is not None
 
 
+def _read_secret(key: str) -> str | None:
+    try:
+        return db.get_secret(key)
+    except secretbox.SecretUnreadable:
+        logger.error("%s can't be decrypted (SECRET_KEY changed?) — reset two-factor with "
+                     "`python mfa_admin.py reset`", key)
+        return None
+
+
 def pending_secret(create: bool = False) -> str | None:
-    secret = db.get_meta("mfa_pending_secret")
+    secret = _read_secret("mfa_pending_secret")
     if secret is None and create:
         secret = new_secret()
-        db.set_meta("mfa_pending_secret", secret)
+        db.set_secret("mfa_pending_secret", secret)
     return secret
 
 
@@ -104,7 +119,7 @@ def enable(code: str) -> list[str] | None:
     secret = pending_secret()
     if secret is None or (step := matching_step(secret, code)) is None:
         return None
-    db.set_meta("mfa_secret", secret)
+    db.set_secret("mfa_secret", secret)
     db.set_meta("mfa_pending_secret", None)
     db.set_meta("mfa_last_step", str(step))
     unlock()
@@ -166,7 +181,7 @@ def check(code: str) -> str | None:
     claimed atomically: sign-in runs in a threadpool, so a burst of parallel
     requests could otherwise all pass the lockout check, or all spend the
     same code, before any of them recorded anything."""
-    secret = db.get_meta("mfa_secret")
+    secret = _read_secret("mfa_secret")
     if secret is None or locked_for():
         return None
     attempt = db.increment_meta("mfa_failures")

@@ -3,6 +3,8 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+import secretbox
+
 DB_PATH = os.environ.get("DB_PATH", "/data/app.db")
 
 SCHEMA = """
@@ -21,6 +23,10 @@ CREATE TABLE IF NOT EXISTS repos (
     pending_signer    TEXT,
     pending_lineage_ok INTEGER,
     include_prereleases INTEGER NOT NULL DEFAULT 0,
+    sign_unsigned     INTEGER NOT NULL DEFAULT 0,  -- opt-in: sign unsigned builds with the server key
+    github_id         INTEGER,  -- GitHub repo ID, pinned when added (or on the first poll)
+    owner_id          INTEGER,
+    owner_type        TEXT,
     UNIQUE(owner, repo)
 );
 
@@ -41,6 +47,16 @@ CREATE TABLE IF NOT EXISTS staged_apks (
     abis          TEXT NOT NULL DEFAULT '',
     source        TEXT NOT NULL DEFAULT 'github',  -- 'github' | 'upload'
     is_debug      INTEGER NOT NULL DEFAULT 0,
+    -- set for an upload fetched from the workflow artifact of a watched repo
+    artifact_repo   TEXT,
+    artifact_run_id INTEGER,
+    artifact_branch TEXT,
+    artifact_sha    TEXT,
+    artifact_subject TEXT,  -- first line of the commit message
+    artifact_repo_id INTEGER,  -- the watched repo it came from
+    artifact_siblings TEXT,  -- JSON list of other builds of the same commit, as id and name
+    released_at     TEXT,  -- publish date of the release: orders "latest"
+    server_signed   INTEGER NOT NULL DEFAULT 0,  -- was unsigned, signed with the server key
     UNIQUE(repo_id, tag, filename)
 );
 
@@ -51,7 +67,8 @@ CREATE TABLE IF NOT EXISTS devices (
     last_connect_addr TEXT,
     paired_at         TEXT NOT NULL,
     last_seen_at      TEXT,
-    abis              TEXT NOT NULL DEFAULT ''
+    abis              TEXT NOT NULL DEFAULT '',
+    model             TEXT      -- "Google Pixel 8", read over adb; display only
 );
 
 CREATE TABLE IF NOT EXISTS device_packages (
@@ -68,6 +85,17 @@ CREATE TABLE IF NOT EXISTS device_follows (
     device_serial TEXT NOT NULL REFERENCES devices(serial) ON DELETE CASCADE,
     repo_id       INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     PRIMARY KEY (device_serial, repo_id)
+);
+
+-- What a workflow artifact turned out to be signed with, once downloaded
+-- (by staging it, or Check signing). Artifacts never change, so it is final.
+CREATE TABLE IF NOT EXISTS artifact_signing (
+    artifact_id INTEGER PRIMARY KEY,
+    repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,  -- signed, debug, unsigned or invalid
+    signer      TEXT,
+    detail      TEXT,
+    checked_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -162,6 +190,23 @@ def init_db() -> None:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
         _migrate(conn)
+        _seal_plaintext_secrets(conn)
+
+
+# meta keys holding a secret: always sealed (secretbox) at rest.
+SECRET_META_KEYS = ("mfa_secret", "mfa_pending_secret", "github_token", "signing_key_password")
+
+
+def _seal_plaintext_secrets(conn: sqlite3.Connection) -> None:
+    """Secrets stored before 3.3.0 were plaintext; seal them in place. Runs
+    every start and touches only values not yet sealed, so it's idempotent."""
+    for key in SECRET_META_KEYS:
+        row = conn.execute("SELECT key, value FROM meta WHERE key = ?", (key,)).fetchone()
+        if row is not None and row["value"] is not None and not secretbox.is_sealed(row["value"]):
+            conn.execute("UPDATE meta SET value = ? WHERE key = ?", (secretbox.seal(row["value"]), row["key"]))
+    for row in conn.execute("SELECT id, url FROM notify_targets").fetchall():
+        if not secretbox.is_sealed(row["url"]):
+            conn.execute("UPDATE notify_targets SET url = ? WHERE id = ?", (secretbox.seal(row["url"]), row["id"]))
 
 
 def _rebuild_staged_apks_unique() -> None:
@@ -216,6 +261,20 @@ _ADDED_COLUMNS = [
     ("repos", "pending_lineage_ok", "INTEGER"),
     ("devices", "abis", "TEXT NOT NULL DEFAULT ''"),
     ("repos", "include_prereleases", "INTEGER NOT NULL DEFAULT 0"),
+    ("devices", "model", "TEXT"),
+    ("staged_apks", "released_at", "TEXT"),
+    ("staged_apks", "artifact_subject", "TEXT"),
+    ("staged_apks", "artifact_repo_id", "INTEGER"),
+    ("staged_apks", "artifact_siblings", "TEXT"),
+    ("staged_apks", "artifact_repo", "TEXT"),
+    ("staged_apks", "artifact_run_id", "INTEGER"),
+    ("staged_apks", "artifact_branch", "TEXT"),
+    ("staged_apks", "artifact_sha", "TEXT"),
+    ("repos", "sign_unsigned", "INTEGER NOT NULL DEFAULT 0"),
+    ("staged_apks", "server_signed", "INTEGER NOT NULL DEFAULT 0"),
+    ("repos", "github_id", "INTEGER"),
+    ("repos", "owner_id", "INTEGER"),
+    ("repos", "owner_type", "TEXT"),
 ]
 
 
@@ -240,13 +299,37 @@ def get_repo(repo_id: int) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM repos WHERE id = ?", (repo_id,)).fetchone()
 
 
-def create_repo(owner: str, repo: str, asset_glob: str, include_prereleases: bool = False) -> int:
+def create_repo(
+    owner: str, repo: str, asset_glob: str, include_prereleases: bool = False,
+    github_id: int | None = None, owner_id: int | None = None, owner_type: str | None = None,
+) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO repos (owner, repo, asset_glob, include_prereleases) VALUES (?, ?, ?, ?)",
-            (owner, repo, asset_glob, int(include_prereleases)),
+            """INSERT INTO repos (owner, repo, asset_glob, include_prereleases, github_id, owner_id, owner_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (owner, repo, asset_glob, int(include_prereleases), github_id, owner_id, owner_type),
         )
         return cur.lastrowid
+
+
+def get_repo_by_github_id(github_id: int) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM repos WHERE github_id = ?", (github_id,)).fetchone()
+
+
+def set_repo_identity(repo_id: int, github_id: int, owner_id: int, owner_type: str) -> None:
+    """Pins a repo added before 3.3, on its first poll. Only fills blanks: an
+    identity already pinned is never overwritten here."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET github_id = ?, owner_id = ?, owner_type = ? WHERE id = ? AND github_id IS NULL",
+            (github_id, owner_id, owner_type, repo_id),
+        )
+
+
+def set_sign_unsigned(repo_id: int, on: bool) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE repos SET sign_unsigned = ? WHERE id = ?", (int(on), repo_id))
 
 
 def set_include_prereleases(repo_id: int, include: bool) -> None:
@@ -331,17 +414,24 @@ def insert_staged_apk(
     release_notes: str | None = None,
     version_code: int | None = None, version_name: str | None = None,
     abis: str = "", source: str = "github", is_debug: bool = False,
+    artifact: dict | None = None, released_at: str | None = None, server_signed: bool = False,
 ) -> int | None:
+    """`artifact` (repo, run_id, branch, sha) marks an upload that came from
+    a watched repo's workflow artifact."""
+    art = artifact or {}
     with get_conn() as conn:
         try:
             cur = conn.execute(
                 """INSERT INTO staged_apks
                    (repo_id, tag, filename, sha256, package_name, signer_sha256, path,
                     downloaded_at, release_notes, version_code, version_name, abis,
-                    source, is_debug)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    source, is_debug, artifact_repo, artifact_run_id, artifact_branch, artifact_sha, released_at,
+                    server_signed, artifact_subject, artifact_repo_id, artifact_siblings)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (repo_id, tag, filename, sha256, package_name, signer_sha256, path, now(),
-                 release_notes, version_code, version_name, abis, source, int(is_debug)),
+                 release_notes, version_code, version_name, abis, source, int(is_debug),
+                 art.get("repo"), art.get("run_id"), art.get("branch"), art.get("sha"), released_at,
+                 int(server_signed), art.get("subject"), art.get("repo_id"), art.get("siblings")),
             )
             return cur.lastrowid
         except sqlite3.IntegrityError:
@@ -359,14 +449,15 @@ def list_staged_apks(repo_id: int | None = None) -> list[sqlite3.Row]:
             return conn.execute(
                 f"""SELECT staged_apks.*, repos.owner, repos.repo, {_SOURCE_LABEL}
                    FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
-                   WHERE repo_id = ? AND pruned_at IS NULL ORDER BY downloaded_at DESC""",
+                   WHERE repo_id = ? AND pruned_at IS NULL
+                   ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC""",
                 (repo_id,),
             ).fetchall()
         return conn.execute(
             f"""SELECT staged_apks.*, repos.owner, repos.repo, {_SOURCE_LABEL}
                FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
                WHERE pruned_at IS NULL
-               ORDER BY downloaded_at DESC"""
+               ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC"""
         ).fetchall()
 
 
@@ -385,14 +476,15 @@ def list_prunable_apks(repo_id: int, keep: int) -> list[sqlite3.Row]:
 
 
 def list_latest_variants() -> list[sqlite3.Row]:
-    """Every unpruned variant of each repo's most recently staged release."""
+    """Every unpruned variant of each repo's newest staged release, by release
+    date (download date for rows staged before that was recorded)."""
     with get_conn() as conn:
         return conn.execute(
             f"""SELECT s.*, repos.owner, repos.repo, {_SOURCE_LABEL} FROM staged_apks s
                JOIN repos ON repos.id = s.repo_id
                WHERE s.pruned_at IS NULL AND s.tag = (
                    SELECT tag FROM staged_apks WHERE repo_id = s.repo_id AND pruned_at IS NULL
-                   ORDER BY downloaded_at DESC, id DESC LIMIT 1
+                   ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC LIMIT 1
                )
                ORDER BY repos.owner, repos.repo, s.filename"""
         ).fetchall()
@@ -471,6 +563,11 @@ def touch_device(serial: str, connect_addr: str) -> None:
 def set_device_abis(serial: str, abis: list[str]) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE devices SET abis = ? WHERE serial = ?", (" ".join(abis), serial))
+
+
+def set_device_model(serial: str, model: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE devices SET model = ? WHERE serial = ?", (model, serial))
 
 
 def upsert_device_package(
@@ -610,6 +707,23 @@ def list_followers(repo_id: int) -> list[sqlite3.Row]:
 AUDIT_KEEP = 5000
 
 
+def record_artifact_signing(artifact_id: int, repo_id: int, kind: str, signer: str | None, detail: str = "") -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO artifact_signing (artifact_id, repo_id, kind, signer, detail, checked_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(artifact_id) DO UPDATE SET kind = excluded.kind, signer = excluded.signer,
+                   detail = excluded.detail, checked_at = excluded.checked_at""",
+            (artifact_id, repo_id, kind, signer, detail[:300], now()),
+        )
+
+
+def artifact_signing_map(repo_id: int) -> dict[int, sqlite3.Row]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM artifact_signing WHERE repo_id = ?", (repo_id,)).fetchall()
+    return {r["artifact_id"]: r for r in rows}
+
+
 def insert_audit(action: str, detail: str, client: str | None) -> None:
     with get_conn() as conn:
         cur = conn.execute(
@@ -631,6 +745,16 @@ def get_meta(key: str) -> str | None:
     with get_conn() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else None
+
+
+def get_secret(key: str) -> str | None:
+    """A secret meta value, decrypted. Raises secretbox.SecretUnreadable."""
+    value = get_meta(key)
+    return None if value is None else secretbox.unseal(value)
+
+
+def set_secret(key: str, value: str | None) -> None:
+    set_meta(key, None if value is None else secretbox.seal(value))
 
 
 def set_meta(key: str, value: str | None) -> None:
@@ -684,25 +808,40 @@ def bump_session_epoch() -> None:
 
 # ---- notification targets ----
 
-def list_notify_targets() -> list[sqlite3.Row]:
-    with get_conn() as conn:
-        return conn.execute("SELECT * FROM notify_targets ORDER BY id").fetchall()
+def _open_target(row: sqlite3.Row) -> dict:
+    """A target with its URL decrypted; url is None when it can't be (the
+    SECRET_KEY changed), so it's shown for removal but never sent to."""
+    target = dict(row)
+    try:
+        target["url"] = secretbox.unseal(row["url"])
+    except secretbox.SecretUnreadable:
+        target["url"] = None
+    return target
 
 
-def get_notify_target(target_id: int) -> sqlite3.Row | None:
+def list_notify_targets() -> list[dict]:
     with get_conn() as conn:
-        return conn.execute("SELECT * FROM notify_targets WHERE id = ?", (target_id,)).fetchone()
+        return [_open_target(r) for r in conn.execute("SELECT * FROM notify_targets ORDER BY id").fetchall()]
+
+
+def get_notify_target(target_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM notify_targets WHERE id = ?", (target_id,)).fetchone()
+    return _open_target(row) if row else None
 
 
 def add_notify_target(url: str, label: str | None) -> int | None:
-    """Returns the new id, or None if that exact URL is already stored."""
+    """Returns the new id, or None if that exact URL is already stored.
+    Sealed URLs never repeat, so the column's UNIQUE can't catch a duplicate:
+    they're compared decrypted, in the same transaction as the insert."""
     with get_conn() as conn:
-        try:
-            return conn.execute(
-                "INSERT INTO notify_targets (url, label, created_at) VALUES (?, ?, ?)", (url, label, now()),
-            ).lastrowid
-        except sqlite3.IntegrityError:
-            return None
+        for row in conn.execute("SELECT * FROM notify_targets").fetchall():
+            if _open_target(row)["url"] == url:
+                return None
+        return conn.execute(
+            "INSERT INTO notify_targets (url, label, created_at) VALUES (?, ?, ?)",
+            (secretbox.seal(url), label, now()),
+        ).lastrowid
 
 
 def delete_notify_target(target_id: int) -> None:

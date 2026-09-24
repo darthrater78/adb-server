@@ -190,6 +190,25 @@ def installed_version(addr: str, package: str) -> tuple[int | None, str | None] 
     return (int(code.group(1)) if code else None, name.group(1) if name else None)
 
 
+_MODEL_UNSAFE = re.compile(r"[^A-Za-z0-9 ._()+/-]")
+
+
+def device_model(addr: str) -> str:
+    """Make and model, e.g. "Google Pixel 8", for display. Device-reported,
+    so reduced to a plain character set and length."""
+    addr = _validate_addr(addr)
+    parts = []
+    for prop in ("ro.product.manufacturer", "ro.product.model"):
+        result = _run("-s", addr, "shell", "getprop", prop, timeout=10)
+        if result.returncode != 0:
+            raise AdbError(result.stderr.strip() or "Could not read the device model")
+        parts.append(_MODEL_UNSAFE.sub("", result.stdout.strip())[:40])
+    maker, model = parts
+    # Many models already start with the maker ("SM-S918B" doesn't; "Pixel 8" doesn't; "OnePlus 12" does).
+    name = model if not maker or model.lower().startswith(maker.lower()) else f"{maker.title()} {model}"
+    return name.strip()[:60]
+
+
 def device_abis(addr: str) -> list[str]:
     """The supported ABIs of the device at `addr`, most preferred first."""
     addr = _validate_addr(addr)

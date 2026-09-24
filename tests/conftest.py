@@ -26,6 +26,9 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "app.db"))
     monkeypatch.setattr(staging, "STAGING_ROOT", str(tmp_path / "staging"))
     db.init_db()
+    if "main" in sys.modules:  # the display time zone is cached per process
+        sys.modules["main"]._display_zone.clear()
+        sys.modules["main"]._clock.clear()
     yield
 
 

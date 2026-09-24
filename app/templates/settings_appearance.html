@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Appearance — Settings — ADB Server{% endblock %}
+{% block content %}
+{% include "_settings_nav.html" %}
+<h1>Appearance</h1>
+<p class="page-intro muted">Colours for everyone who signs in. The theme (Flashbang, Dark, OLED) is per browser, in the top bar.</p>
+
+<section class="settings-section">
+  <p class="muted">Two colours for the whole app, for everyone who signs in: a <strong>primary</strong> for solid
+    buttons and the current page, and a <strong>secondary</strong> for links, tags, outlined buttons and highlights.
+    Both are adjusted automatically in each theme so text and buttons stay readable.</p>
+  <div class="colour-preview" aria-label="Preview of the current colours">
+    <span class="preview-btn">Primary button</span>
+    <span class="preview-btn outline">Outlined</span>
+    <a href="#appearance">A link</a>
+    <span class="tag-pill">v{{ app_version }}</span>
+    <span class="badge badge-update">update available</span>
+  </div>
+
+  <h3>Presets</h3>
+  <form method="post" action="/settings/appearance" class="presets" aria-label="Colour pairs">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for name, pair in presets.items() %}
+    {% set nice = name | replace('-', ' & ') | title %}
+    <button type="submit" name="preset" value="{{ name }}"
+            class="preset{{ ' current' if name == current_preset else '' }}"{% if name == current_preset %} aria-pressed="true"{% endif %}>
+      <span class="preset-dot swatch-{{ name }}" aria-hidden="true"></span>
+      {{ nice }}{% if name == default_preset %} <span class="muted small">default</span>{% endif %}
+    </button>
+    {% endfor %}
+  </form>
+
+  {% if saved_colours %}
+  <h3>Saved</h3>
+  <form method="post" action="/settings/appearance" class="presets" aria-label="Saved colour pairs">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for s in saved_colours %}
+    {% set is_current = current_preset is none and accent == s.primary_color and accent2 == s.secondary_color %}
+    <span class="saved-pair">
+      <button type="submit" name="saved" value="{{ s.id }}"
+              class="preset{{ ' current' if is_current else '' }}"{% if is_current %} aria-pressed="true"{% endif %}
+              title="{{ s.primary_color }} / {{ s.secondary_color }}">
+        <span class="preset-dot swatch-saved-{{ s.id }}" aria-hidden="true"></span>
+        {{ s.name }}
+      </button>
+      <button type="submit" class="preset-delete" formaction="/settings/appearance/saved/{{ s.id }}/delete"
+              aria-label="Delete {{ s.name }}" title="Delete {{ s.name }}">×</button>
+    </span>
+    {% endfor %}
+  </form>
+  {% endif %}
+
+  <h3>Custom</h3>
+  <form method="post" action="/settings/appearance" class="custom-pair">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="colour-field">
+      <input type="color" class="colour-dot" name="accent" value="{{ accent or default_pair[0] }}">
+      <span><strong>Primary</strong><code>{{ accent or default_pair[0] }}</code></span>
+    </label>
+    <label class="colour-field">
+      <input type="color" class="colour-dot" name="accent2" value="{{ accent2 or default_pair[1] }}">
+      <span><strong>Secondary</strong><code>{{ accent2 or default_pair[1] }}</code></span>
+    </label>
+    <button type="submit">Apply</button>
+    <span class="save-pair">
+      <label class="visually-hidden" for="colour-name">Name for this pair</label>
+      <input type="text" id="colour-name" name="name" maxlength="40" placeholder="Name this pair" size="16">
+      <button type="submit" class="secondary" formaction="/settings/appearance/save">Save as preset</button>
+    </span>
+    {% if accent %}
+    <button type="submit" class="secondary" formaction="/settings/appearance" name="preset" value="{{ default_preset }}">Reset to default</button>
+    {% endif %}
+  </form>
+  <p class="muted small">Tap a circle to choose a colour, then Apply — or name it and Save as preset to keep it
+    in Saved. Saving an existing name updates it.</p>
+
+</section>
+{% endblock %}

@@ -28,6 +28,12 @@ class FakeUpstream:
         self.download_error: str | None = None
         self.downloads = 0
         self._abis_by_path: dict[str, tuple] = {}
+        self.info = github_client.RepoInfo(id=1, owner="o", repo="r", owner_id=10, owner_type="User",
+                                           created_at="2020-01-01T00:00:00Z", fork=False, archived=False,
+                                           stars=5, description="")
+        self.uploader = "o"
+        self.repo_lookups = 0
+        monkeypatch.setattr(github_client, "get_repo_info", self._repo_info)
         monkeypatch.setattr(github_client, "get_latest_release", self._release)
         monkeypatch.setattr(github_client, "download_asset", self._download)
         monkeypatch.setattr(apk_verify, "verify_signature",
@@ -35,9 +41,14 @@ class FakeUpstream:
         monkeypatch.setattr(apk_verify, "get_package_info", self._info)
         monkeypatch.setattr(apk_verify, "signing_lineage", lambda path: self.lineage)
 
+    async def _repo_info(self, owner, repo, token):
+        self.repo_lookups += 1
+        return self.info
+
     async def _release(self, owner, repo, token, include_prereleases=False):
         return {"tag_name": self.tag, "body": f"notes for {self.tag}",
-                "assets": [{"name": n, "url": f"https://api.github.com/{n}"} for n in self.assets]}
+                "assets": [{"name": n, "url": f"https://api.github.com/{n}", "uploader": {"login": self.uploader}}
+                           for n in self.assets]}
 
     async def _download(self, asset, dest, token):
         if self.download_error:
@@ -228,3 +239,18 @@ def test_debug_signed_release_is_refused_and_not_pinned(upstream):
     assert db.list_staged_apks() == []
     assert "debug certificate" in repo["last_error"]
     assert repo["signer_sha256"] is None
+
+
+def test_an_unsigned_release_is_refused_unless_the_repo_opted_in(upstream, monkeypatch):
+    monkeypatch.setattr(apk_verify, "is_unsigned", lambda path: True)
+    signed = []
+    monkeypatch.setattr(poller.signing, "sign_in_place", lambda path: signed.append(path))
+    rid = db.create_repo("o", "r", "*.apk", github_id=1, owner_id=10, owner_type="User")
+    _poll(rid)
+    repo = db.get_repo(rid)
+    assert "unsigned" in repo["last_error"] and repo["rejected_tag"] == "v1" and signed == []
+    db.set_sign_unsigned(rid, True)
+    upstream.tag = "v2"
+    _poll(rid)
+    [apk] = db.list_staged_apks()
+    assert apk["tag"] == "v2" and apk["server_signed"] == 1 and len(signed) == 1

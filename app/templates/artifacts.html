@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Builds: {{ repo.owner }}/{{ repo.repo }} — ADB Server{% endblock %}
+{% block content %}
+<p class="breadcrumb"><a href="/sources">Sources</a> /</p>
+<h1>Builds: {{ repo.owner }}/{{ repo.repo }}</h1>
+<p class="page-intro muted">Stage an older release, or a test build straight from a workflow run. Staged builds show up
+  on <a href="/install">Install</a>.</p>
+<p><a href="/repos/{{ repo.id }}/artifacts?refresh=1" class="button-link secondary">Refresh from GitHub</a></p>
+
+{% if problem %}
+<p class="flash flash-error">{{ problem }}</p>
+<p><a href="/settings/github" class="button-link secondary">Settings → GitHub</a></p>
+{% else %}
+<section class="settings-section">
+  <h2>Releases</h2>
+  <p class="muted small">Each goes through the same checks as a polled release: uploaded by the owner or a workflow,
+    signed with the repo's pinned certificate, and not a debug build. An older release staged here doesn't become
+    "latest": auto-update and <strong>Push latest</strong> keep using the newest release.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Release</th><th>Published</th><th>APKs</th><th></th></tr></thead>
+    <tbody>
+      {% for r in releases %}
+      <tr>
+        <td data-label="Release">
+          <span class="tag-pill">{{ r.tag }}</span>
+          {% if r.name and r.name != r.tag %}<span class="small">{{ r.name }}</span>{% endif %}
+          {% if r.current %}<span class="badge badge-ok">current</span>{% endif %}
+          {% if r.prerelease %}<span class="badge badge-muted">pre-release</span>{% endif %}
+        </td>
+        <td data-label="Published" class="small">{{ r.published or "—" }}</td>
+        <td data-label="APKs" class="small">{{ r.apks or "none matching " ~ repo.asset_glob }}</td>
+        <td>
+          {% if r.staged %}<span class="badge badge-muted">staged</span>
+          {% elif r.apks %}
+          <form method="post" action="/repos/{{ repo.id }}/releases/{{ r.id }}/stage">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="small secondary">Stage</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty-state">No published releases.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="settings-section">
+  <h2>Test builds from workflow artifacts</h2>
+  <p class="muted small">Staging one is like uploading its zip: it must hold exactly one APK, up to {{ max_mb }} MB,
+    whose signature verifies. Debug builds are allowed and marked. Only builds from this repo's own branches are
+    listed: never one from a pull request opened from a fork, and never a release's own build (that's under
+    Releases). Builds of the same commit are grouped.</p>
+  <details class="guide" open>
+    <summary>Which build to pick</summary>
+    <ul class="muted small">
+      <li><span class="badge badge-ok">signed · same key as releases</span> is the one to install: a phone that has the
+        app from this repo's releases takes it as an update, keeping the app's data, and the next release updates it
+        again.</li>
+      <li><span class="badge badge-ok">signed · different key</span> is properly signed, but not by the key the releases
+        use: a phone with the release installed refuses it until the app is uninstalled (which deletes its data).</li>
+      <li><span class="badge badge-warn">debug build</span> is signed with a throwaway debug key made on the build
+        machine. It identifies nobody, and a phone with the signed app refuses it as an update. Fine on a test phone
+        that never had the release.</li>
+      <li><span class="badge badge-error">unsigned</span> can't be installed at all, unless you let this server sign it
+        (Unsigned builds, below).</li>
+    </ul>
+    <p class="muted small">How a build is signed is only known once it's downloaded: <strong>Check signing</strong>
+      downloads it, checks it and deletes it; staging one records it too.</p>
+  </details>
+  {% for c in artifacts %}
+  <div class="panel commit-group">
+    <div class="commit-head">
+      <span class="tag-pill" title="Branch">{{ c.branch or "?" }}</span>
+      <a class="mono small" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/commit/{{ c.sha }}" rel="noopener noreferrer">{{ c.sha[:7] }}</a>
+      <strong class="commit-subject">{{ c.subject or "(no commit message available)" }}</strong>
+      <span class="muted small">{{ c.created | when }}</span>
+    </div>
+    {% if c.message and c.message != c.subject %}
+    <details><summary>Commit message</summary><pre class="release-notes">{{ c.message }}</pre></details>
+    {% endif %}
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Artifact</th><th>Signing</th><th>Workflow run</th><th>Size</th><th></th></tr></thead>
+      <tbody>
+        {% for item in c.artifacts %}{% set a = item.a %}
+        {% set sig = signing.get(a.id) %}
+        <tr id="artifact-{{ a.id }}">
+          <td data-label="Artifact"><span class="clip" title="{{ a.name }}">{{ a.name }}</span></td>
+          <td data-label="Signing">
+            {% if not sig %}
+            <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/check">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="small secondary" title="Downloads it, checks the signature, deletes it">Check signing</button>
+            </form>
+            {% elif sig.kind == "signed" %}
+              {% if repo.signer_sha256 and sig.signer == repo.signer_sha256 %}<span class="badge badge-ok" title="Updates the app installed from releases">signed · same key as releases</span>
+              {% elif repo.signer_sha256 %}<span class="badge badge-ok" title="A phone with the release installed refuses it">signed · different key</span>
+              {% else %}<span class="badge badge-ok">signed</span>{% endif %}
+            {% elif sig.kind == "debug" %}<span class="badge badge-warn" title="Signed with a throwaway debug key">debug build</span>
+            {% elif sig.kind == "unsigned" %}<span class="badge badge-error" title="Can't be installed unless this server signs it">unsigned</span>
+            {% else %}<span class="badge badge-error" title="{{ sig.detail }}">not a valid build</span>{% endif %}
+          </td>
+          <td data-label="Workflow run" class="small">
+            <a href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/actions/runs/{{ a.run_id }}" rel="noopener noreferrer">{{ item.run.title or "run" }}{% if item.run.number %} #{{ item.run.number }}{% endif %}</a>
+            {% if item.run.event %}<span class="muted">{{ item.run.event }}</span>{% endif %}
+          </td>
+          <td data-label="Size" class="small">{{ "%.1f" | format(a.size / 1048576) }} MB</td>
+          <td>
+            <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/stage">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="small"{% if a.size > max_mb * 1048576 %} disabled title="Over the size cap"{% endif %}>Stage</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% else %}
+  <p class="empty-state">No test builds: none yet, all expired, or all from releases or fork pull requests.</p>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="settings-section" id="signing">
+  <h2>Unsigned builds</h2>
+  {% if repo.sign_unsigned %}
+  <p><span class="badge badge-warn">On</span> Unsigned releases and test builds from this repo are signed with this
+    server's key before they're staged.</p>
+  <form method="post" action="/repos/{{ repo.id }}/sign-unsigned" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="on" value="0">
+    <button type="submit" class="secondary">Turn off</button>
+  </form>
+  {% else %}
+  <p><span class="badge badge-muted">Off</span> An unsigned build from this repo is refused.</p>
+  {% endif %}
+  <p class="muted small">{{ sign_explanation }} It never applies to a debug-signed release, which is refused either
+    way.</p>
+  {% if not repo.sign_unsigned %}
+  <form method="post" action="/repos/{{ repo.id }}/sign-unsigned" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="on" value="1">
+    <label class="check"><input type="checkbox" name="understood" value="yes" required> I understand</label>
+    <button type="submit" class="danger">Sign unsigned builds from this repo</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}
