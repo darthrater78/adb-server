@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.1.0](https://github.com/darthrater78/adb-server/releases/tag/v3.1.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.2.0](https://github.com/darthrater78/adb-server/releases/tag/v3.2.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.1.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.2.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -136,7 +136,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.1.0
+    image: ghcr.io/darthrater78/adb-server/app:3.2.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -166,7 +166,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.1.0), updated with every release
+# image: both pinned to this release (3.2.0), updated with every release
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -239,7 +239,8 @@ the pinned one, a **Signing change** panel shows both certificates and whether
 the new APK proves the rotation (see [Release verification](#release-verification)).
 
 **Upload an APK** (up to 500 MB) for builds that aren't published as GitHub
-releases. Its signature must still verify, and its signer is recorded. It
+releases, either the APK itself or a zip holding exactly one APK, such as a
+workflow run's artifact download. Its signature must still verify, and its signer is recorded. It
 belongs to no watched repo, so it neither sets nor is checked against a repo's
 pin: you, the uploader, are its provenance. Uploads may be debug-signed, and
 such builds are marked **debug build** for as long as they stay staged. If the
@@ -520,6 +521,12 @@ below).
 - Debug-signed uploads are allowed but permanently marked **debug build**.
   You're warned when an upload's package matches a watched repo but its
   signer doesn't.
+- A zip must hold exactly one `.apk`. It is streamed out under the same
+  500 MB cap, counted on the bytes actually unpacked rather than the size the
+  zip declares. Nothing is ever written under a name from the zip, zips
+  inside it aren't opened, and encrypted entries are refused. The zip is
+  deleted as soon as the APK is out, before any check runs. The APK then
+  faces every check above, and duplicates are matched on the APK, not the zip.
 
 ### GitHub access
 
@@ -542,7 +549,7 @@ below).
   (uid 10001) with `cap_drop: [ALL]`, `no-new-privileges`, and a **read-only
   root filesystem**. Writable paths are only the data bind mounts and small
   tmpfs mounts.
-- **Verified tooling.** `adb`, `apksigner` and `aapt` come from Google's
+- **Verified tooling.** `adb`, `apksigner` and `aapt2` come from Google's
   official releases, with pinned URLs and SHA-256 checksums verified at build
   time. They're never taken from third-party images.
 - **Pinned bases.** Every base image is pinned by digest.
@@ -646,7 +653,7 @@ pip install -r requirements-dev.txt
 bash scripts/test.sh
 ```
 
-The tests stub out GitHub, `adb`, `apksigner` and `aapt`, so they need no
+The tests stub out GitHub, `adb`, `apksigner` and `aapt2`, so they need no
 Android tooling and no device.
 
 To run the stack from your own build instead of the published images,
