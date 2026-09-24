@@ -1,11 +1,12 @@
 # ---- stage 1: fetch and verify Android tooling this container needs ----
 # Full build-tools is ~65MB and includes renderscript/LLVM/d8 we don't need;
-# apksigner and aapt need exactly four files between them (verified by hand
-# against this exact release before writing this Dockerfile):
+# apksigner and aapt2 need exactly three files between them:
 #   apksigner            - wrapper script, resolves lib/apksigner.jar relative to itself
 #   lib/apksigner.jar
-#   aapt                 - native binary
-#   lib64/libc++.so       - aapt's only non-libc runtime dependency (RUNPATH: $ORIGIN/lib64)
+#   aapt2                - native binary, links nothing beyond libc/libm/libgcc_s
+# aapt2, not aapt: the legacy aapt's `dump badging` fails outright on APKs
+# built against current SDKs ("ERROR getting 'android:icon'"), while aapt2
+# prints the same badging output and exits cleanly.
 # `adb` itself (from platform-tools, same verified source as adb-server/Dockerfile)
 # is also needed here: adb_client.py shells out to a local `adb` binary acting
 # as a TCP client against the adb-server container — the protocol has no
@@ -29,12 +30,11 @@ RUN curl -fsSL -o /tmp/build-tools.zip "$BUILD_TOOLS_URL" \
     && unzip -q /tmp/build-tools.zip -d /opt/extracted \
     && rm /tmp/build-tools.zip \
     && BT_DIR=$(find /opt/extracted -maxdepth 1 -mindepth 1 -type d) \
-    && mkdir -p /opt/build-tools/lib /opt/build-tools/lib64 \
+    && mkdir -p /opt/build-tools/lib \
     && cp "$BT_DIR/apksigner" /opt/build-tools/ \
     && cp "$BT_DIR/lib/apksigner.jar" /opt/build-tools/lib/ \
-    && cp "$BT_DIR/aapt" /opt/build-tools/ \
-    && cp "$BT_DIR/lib64/libc++.so" /opt/build-tools/lib64/ \
-    && chmod +x /opt/build-tools/apksigner /opt/build-tools/aapt \
+    && cp "$BT_DIR/aapt2" /opt/build-tools/ \
+    && chmod +x /opt/build-tools/apksigner /opt/build-tools/aapt2 \
     && rm -rf /opt/extracted
 
 RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
@@ -47,7 +47,7 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
 # ---- stage 2: runtime image ----
 FROM python:3.13-slim@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0
 
-# apksigner is a JAR run under `java`; aapt is a standalone native binary and
+# apksigner is a JAR run under `java`; aapt2 is a standalone native binary and
 # needs no JRE.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends default-jre-headless \

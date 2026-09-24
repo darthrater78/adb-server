@@ -5,6 +5,7 @@ import re
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
+from typing import NamedTuple
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
@@ -546,10 +547,40 @@ def _receive_upload(upload: UploadFile, tmp_path: str) -> str:
     return hasher.hexdigest()
 
 
-def _verify_upload(upload: UploadFile, tmp_path: str) -> tuple[str, apk_verify.SignerInfo, apk_verify.PackageInfo]:
+class VerifiedUpload(NamedTuple):
+    sha256: str
+    display_name: str
+    archive_name: str | None  # the zip it arrived in, if it came as an artifact zip
+    signer: apk_verify.SignerInfo
+    info: apk_verify.PackageInfo
+
+
+def _unwrap_archive(tmp_path: str) -> apk_verify.ArchivedApk | None:
+    """If tmp_path is an artifact zip, replaces it in place with the one APK
+    inside. The zip is deleted by that replace, straight after extraction and
+    before any APK check runs, so no archive outlives its unpacking — whatever
+    happens next, only one temp file is left for the caller to clean up."""
+    fd, apk_path = tempfile.mkstemp(dir=os.path.dirname(tmp_path), prefix="_upload_")
+    os.close(fd)
+    try:
+        archived = apk_verify.extract_archived_apk(tmp_path, apk_path, MAX_UPLOAD_BYTES)
+        if archived is not None:
+            os.replace(apk_path, tmp_path)
+        return archived
+    finally:
+        staging.remove_file(apk_path)  # partial extraction, or unused; gone after a replace
+
+
+def _verify_upload(upload: UploadFile, tmp_path: str) -> VerifiedUpload:
+    display_name = _display_filename(upload.filename)
+    archive_name = None
     digest = _receive_upload(upload, tmp_path)
+    archived = _unwrap_archive(tmp_path)
+    if archived is not None:
+        digest, archive_name, display_name = archived.sha256, display_name, _display_filename(archived.name)
     apk_verify.assert_apk_container(tmp_path)
-    return digest, apk_verify.verify_signature(tmp_path), apk_verify.get_package_info(tmp_path)
+    return VerifiedUpload(digest, display_name, archive_name,
+                          apk_verify.verify_signature(tmp_path), apk_verify.get_package_info(tmp_path))
 
 
 def _upload_warnings(info: apk_verify.PackageInfo, signer: apk_verify.SignerInfo) -> list[str]:
@@ -584,23 +615,26 @@ def upload_apk(
     build is the point of uploading by hand. It is flagged and warned about,
     because a debug certificate is generated per machine and identifies nobody.
 
+    A zip is accepted too — the artifact a workflow run hands back — as long
+    as it holds exactly one APK; that APK is then held to every rule above.
+
     Sync on purpose: Starlette runs it in a threadpool, keeping apksigner and
-    aapt off the event loop the poller shares."""
+    aapt2 off the event loop the poller shares."""
     _check_csrf(request, session, csrf_token)
-    display_name = _display_filename(apk.filename)
     upload_dir = _upload_dir()
     os.makedirs(upload_dir, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=upload_dir, prefix="_upload_")
     os.close(fd)
     try:
-        digest, signer, info = _verify_upload(apk, tmp_path)
+        verified = _verify_upload(apk, tmp_path)
     except (UploadRejected, apk_verify.ApkVerifyError) as exc:
         staging.remove_file(tmp_path)
-        logger.warning("upload rejected (%s): %s", display_name, exc)
+        logger.warning("upload rejected (%s): %s", _display_filename(apk.filename), exc)
         return _redirect("/sources", error=f"Upload refused: {exc}")
     except BaseException:
         staging.remove_file(tmp_path)
         raise
+    digest, display_name, signer, info = verified.sha256, verified.display_name, verified.signer, verified.info
 
     existing = db.get_uploaded_apk_by_sha256(digest)
     if existing is not None:
@@ -620,8 +654,9 @@ def upload_apk(
         # A concurrent upload of the same file won; final_path is its file too.
         return _redirect("/sources", error="That exact APK is already staged")
 
-    _audit(request, "upload", f"{display_name} {info.name} sha256={digest[:12]} debug={signer.debug}")
-    staged = f"Staged {display_name} ({info.name})."
+    source = f" from {verified.archive_name}" if verified.archive_name else ""
+    _audit(request, "upload", f"{display_name}{source} {info.name} sha256={digest[:12]} debug={signer.debug}")
+    staged = f"Staged {display_name} ({info.name}){source}."
     warnings = _upload_warnings(info, signer)
     if warnings:
         return _redirect("/install", warn=" ".join([staged, *warnings]))

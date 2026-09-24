@@ -24,12 +24,13 @@
     <h2>Upload an APK</h2>
     <form method="post" action="/staged/upload" enctype="multipart/form-data" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="file" name="apk" accept=".apk,application/vnd.android.package-archive" required>
+      <input type="file" name="apk" accept=".apk,.zip,application/vnd.android.package-archive,application/zip" required>
       <label>Label <input type="text" name="label" maxlength="120" placeholder="optional, e.g. dev build"></label>
       <button type="submit">Upload APK</button>
     </form>
-    <p class="muted small">For a build that isn't a GitHub release. Up to {{ max_upload_mb }} MB. The signature
-      must verify; debug-signed builds are allowed and marked "debug build".</p>
+    <p class="muted small">For a build that isn't a GitHub release. Up to {{ max_upload_mb }} MB. A zip
+      holding one APK works too, such as a workflow run's artifact download. The signature must verify;
+      debug-signed builds are allowed and marked "debug build".</p>
   </section>
 </div>
 

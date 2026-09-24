@@ -1,6 +1,6 @@
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.1.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.2.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -22,7 +22,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.1.0
+    image: ghcr.io/darthrater78/adb-server/app:3.2.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -52,7 +52,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.1.0), updated with every release
+# image: both pinned to this release (3.2.0), updated with every release
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS

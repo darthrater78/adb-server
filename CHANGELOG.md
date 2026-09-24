@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.2.0 — 2026-09-24
+
+- Added: **upload a zip holding an APK**, such as the artifact a GitHub
+  Actions run hands back, without unzipping it first. The zip must hold
+  exactly one APK; anything else in it (`output-metadata.json`, a mapping
+  file) is ignored. The APK inside goes through every check a bare upload
+  does (signature, package, debug flag), and the zip is deleted as soon as
+  the APK is out of it. The same APK uploaded bare and zipped counts as one.
+- Fixed: APKs built against current Android SDKs could not be staged at all,
+  uploaded or polled. The legacy `aapt` failed reading them ("ERROR getting
+  'android:icon'"); package info now comes from `aapt2`, from the same pinned
+  build-tools release.
+
 ## 3.1.0 — 2026-09-23
 
 - Changed: a simpler flow. The top bar is now **Status · Sources · Devices ·

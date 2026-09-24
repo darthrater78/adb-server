@@ -1,6 +1,8 @@
+import hashlib
 import re
 import subprocess
 import zipfile
+import zlib
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -31,6 +33,80 @@ def assert_apk_container(apk_path: str) -> None:
                 raise ApkVerifyError("file has no AndroidManifest.xml — not a valid APK")
     except zipfile.BadZipFile as exc:
         raise ApkVerifyError(f"file is not a readable zip/APK: {exc}") from exc
+
+
+# A workflow's artifact zip is a handful of build outputs; thousands of
+# entries is not that, and the central directory is read into memory.
+MAX_ARCHIVE_ENTRIES = 1000
+
+
+class ArchivedApk(NamedTuple):
+    name: str    # the entry's path inside the zip — display text only
+    sha256: str  # of the extracted APK, so a zipped and a bare upload dedupe
+
+
+def _is_apk_entry(info: zipfile.ZipInfo) -> bool:
+    if info.is_dir() or not info.filename.lower().endswith(".apk"):
+        return False
+    # Finder's zips add a __MACOSX/._name.apk resource fork beside every file.
+    parts = info.filename.split("/")
+    return "__MACOSX" not in parts and not parts[-1].startswith("._")
+
+
+def extract_archived_apk(zip_path: str, out_path: str, max_bytes: int) -> ArchivedApk | None:
+    """Unwraps the zip GitHub Actions hands back for an uploaded artifact.
+
+    Returns None when zip_path is not such a zip — it is an APK itself (its
+    manifest sits at the root), or not a zip at all — so the caller checks it
+    as an APK as before. Otherwise the zip must hold exactly one APK, which is
+    streamed to out_path under max_bytes; everything else in it is ignored,
+    and nothing is ever written under a name taken from the zip. The result
+    still has to pass every APK check: this only finds it."""
+    with open(zip_path, "rb") as f:
+        if f.read(4) != b"PK\x03\x04":
+            return None
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            infos = zf.infolist()
+            if any(i.filename == "AndroidManifest.xml" for i in infos):
+                return None
+            if len(infos) > MAX_ARCHIVE_ENTRIES:
+                raise ApkVerifyError(f"zip has {len(infos)} entries — an artifact zip holding one APK has a few")
+            apks = [i for i in infos if _is_apk_entry(i)]
+            if not apks:
+                raise ApkVerifyError("zip has no APK in it and isn't an APK itself")
+            if len(apks) > 1:
+                raise ApkVerifyError(f"zip holds {len(apks)} APKs — upload a zip with exactly one")
+            [entry] = apks
+            if entry.flag_bits & 0x1:
+                raise ApkVerifyError("the APK in that zip is encrypted")
+            sha256 = _inflate_capped(zf, entry, out_path, max_bytes)
+    # zlib.error and EOFError: a corrupt or truncated deflate stream, which
+    # zipfile passes through rather than wrapping in BadZipFile.
+    except (zipfile.BadZipFile, zlib.error, EOFError) as exc:
+        raise ApkVerifyError(f"file is not a readable zip: {exc}") from exc
+    except NotImplementedError as exc:  # a compression method zipfile can't inflate
+        raise ApkVerifyError(f"zip uses an unsupported compression method: {exc}") from exc
+    return ArchivedApk(name=entry.filename, sha256=sha256)
+
+
+def _inflate_capped(zf: zipfile.ZipFile, entry: zipfile.ZipInfo, out_path: str, max_bytes: int) -> str:
+    """Streams one entry to out_path and returns its sha256. The declared size
+    is a cheap early refusal, not the limit: it's attacker-controlled, so the
+    bytes actually inflated are what get counted."""
+    too_big = ApkVerifyError(f"the APK in that zip exceeds the {max_bytes // (1024 * 1024)}MB size cap")
+    if entry.file_size > max_bytes:
+        raise too_big
+    hasher = hashlib.sha256()
+    written = 0
+    with zf.open(entry) as src, open(out_path, "wb") as dst:
+        while chunk := src.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                raise too_big
+            hasher.update(chunk)
+            dst.write(chunk)
+    return hasher.hexdigest()
 
 
 class SignerInfo(NamedTuple):
@@ -103,11 +179,11 @@ _DIGEST_RE = re.compile(r"SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$", re.MULTILINE
 
 def get_package_info(apk_path: str) -> PackageInfo:
     result = subprocess.run(
-        ["aapt", "dump", "badging", apk_path],
+        ["aapt2", "dump", "badging", apk_path],
         capture_output=True, text=True, timeout=60, check=False,
     )
     if result.returncode != 0:
-        raise ApkVerifyError(f"aapt dump badging failed: {result.stderr.strip()}")
+        raise ApkVerifyError(f"aapt2 dump badging failed: {result.stderr.strip()}")
     return parse_badging(result.stdout)
 
 

@@ -15,7 +15,7 @@ SIGNER_B = "b" * 64
 
 
 class FakeUpstream:
-    """Stands in for GitHub + apksigner/aapt: one current release, a counter
+    """Stands in for GitHub + apksigner/aapt2: one current release, a counter
     of downloads, and whatever signer/package the next APK reports."""
 
     def __init__(self, monkeypatch):

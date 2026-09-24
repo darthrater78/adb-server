@@ -59,7 +59,7 @@ async def _download_and_verify(asset: dict, repo_dir: str) -> _Variant:
     except github_client.GithubError as exc:
         raise _Rejected(f"Download of {asset['name']} failed: {exc}", permanent=False) from exc
     try:
-        # apksigner/aapt are blocking subprocesses (up to 60s each) — run them
+        # apksigner/aapt2 are blocking subprocesses (up to 60s each) — run them
         # in a worker thread so the single event loop keeps serving the UI.
         signer = await asyncio.to_thread(apk_verify.verify_signature, tmp_path)
         # Nobody is watching when the poller runs, so a debug certificate
