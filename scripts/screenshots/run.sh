@@ -27,9 +27,11 @@ docker run -d --name "$NAME" -p "$HOST_IP:$PORT:8080" --read-only \
 for _ in $(seq 1 40); do curl -sf "http://$HOST_IP:$PORT/healthz" >/dev/null && break; sleep 1; done
 docker exec -i "$NAME" python - base < "$HERE/seed.py"
 
+# The browser reaches the app at the LAN IP it's published on, from Docker's
+# default bridge network: never the host network.
 shoot() {
-  docker run --rm --network host -v "$PWD/$HERE:/shots:ro" -v "$OUT:/out" \
-    mcr.microsoft.com/playwright/python:v1.62.0-jammy \
+  docker run --rm -v "$PWD/$HERE:/shots:ro" -v "$OUT:/out" \
+    mcr.microsoft.com/playwright/python:v1.62.0-jammy@sha256:017530b316b85f71b3f0989310393a9095253820e77e9ed94aa3b7d7eb5ecd16 \
     bash -c "pip install -q playwright==1.62.0 >/dev/null 2>&1 && python /shots/shoot.py http://$HOST_IP:$PORT /out '$PASSWORD' $1"
 }
 shoot base

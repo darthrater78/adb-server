@@ -33,19 +33,23 @@ next session must ask again.
 **New in v3.3.0 (where to look):**
 - Source verification: `github_client.get_repo_info` / `uploader_allowed`,
   `poller._check_identity` (runs only for a new release or an unpinned repo),
-  `main.review_repo` / `confirm_repo` / `_apk_evidence`.
-- Builds page (`/repos/{id}/artifacts`, `artifacts.html`): past releases
+  `routes_sources.review_repo` / `confirm_repo` / `_apk_evidence`.
+- Builds page (`/repos/{id}/artifacts`, `routes_builds.py`, `artifacts.html`): past releases
   (`poller.stage_past_release`), test builds grouped by commit with messages,
   signing badges (`artifact_signing` table, Check signing), Refresh.
 - Artifacts: `github_client` list/get/download, `artifact_lists_apk` (zip
   file list by range requests), build notes, siblings + debug advice.
-- Unsigned opt-in: `app/signing.py` (server key: keytool + zipalign +
-  apksigner, password via env only), `apk_verify.is_unsigned`.
+- Unsigned opt-in: `app/signing.py` (one key per source: `github-<repo ID>`
+  or `uploads`; keytool + zipalign + apksigner, password via env only),
+  `apk_verify.is_unsigned`.
 - Secrets: `app/secretbox.py`, `db.get_secret` / `set_secret`, startup sealing.
 - Settings split: `settings.html` (overview) + `settings_{general,security,
   notifications,github,appearance}.html`; token template URL, expiry warning
   (`poller._warn_token_expiry`), per-repo access check.
-- Display: `_when` (time zone + 12/24-hour), `_device_name` (model over adb).
+- Display: `web.when` (time zone + 12/24-hour), `web.device_name` (model over adb).
+- Layout: `main.py` is the app, middleware and scheduler only; pages live in
+  `routes_{auth,sources,builds,install,devices,settings}.py`, shared page
+  helpers in `web.py`, upload staging in `uploads.py`.
 
 **Waiting on the user:**
 1. Go-ahead to run the rest of the release: push, PR, test images from the PR

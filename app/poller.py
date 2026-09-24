@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 import os
 import secrets
@@ -77,7 +76,9 @@ class _Variant:
     server_signed: bool = False
 
 
-async def _download_and_verify(asset: dict, repo_dir: str, sign_unsigned: bool = False) -> _Variant:
+async def _download_and_verify(asset: dict, repo_dir: str, sign_as: str | None = None) -> _Variant:
+    """`sign_as` is the signing source an unsigned APK is signed for, or None
+    when the repo hasn't opted in (it is then refused)."""
     # Never build a path from the tag or asset name: both are upstream-
     # controlled and may contain "/".
     tmp_path = os.path.join(repo_dir, f"_download_{secrets.token_hex(8)}")
@@ -88,21 +89,21 @@ async def _download_and_verify(asset: dict, repo_dir: str, sign_unsigned: bool =
     server_signed = False
     try:
         if await asyncio.to_thread(apk_verify.is_unsigned, tmp_path):
-            if not sign_unsigned:
+            if sign_as is None:
                 raise apk_verify.ApkVerifyError(
                     "it's unsigned, and Android can't install an unsigned APK. Turn on signing unsigned builds "
                     "with this server's key for this repo (Sources → Builds) to stage it")
             try:
-                await asyncio.to_thread(signing.sign_in_place, tmp_path)
+                await asyncio.to_thread(signing.sign_in_place, tmp_path, sign_as)
             except signing.SigningError as exc:
                 raise apk_verify.ApkVerifyError(f"signing it with this server's key failed: {exc}") from exc
-            sha256, server_signed = await asyncio.to_thread(_sha256_file, tmp_path), True
+            sha256, server_signed = await asyncio.to_thread(apk_verify.sha256_file, tmp_path), True
         # apksigner/aapt2 are blocking subprocesses (up to 60s each) — run them
         # in a worker thread so the single event loop keeps serving the UI.
         signer = await asyncio.to_thread(apk_verify.verify_signature, tmp_path)
         # Nobody is watching when the poller runs, so a debug certificate
         # (generated locally per machine, identifies nobody) is refused here.
-        # Manual uploads allow it with a warning — see main.upload_apk.
+        # Manual uploads allow it with a warning — see routes_sources.upload_apk.
         if signer.debug:
             raise apk_verify.ApkVerifyError(
                 "APK is signed with the default Android debug certificate (CN=Android Debug)"
@@ -128,14 +129,6 @@ async def _check_pin(repo_row, tag: str, first: _Variant) -> None:
         "Not staged — verify this release is genuinely from this repo before trusting it.",
         pending=(first.info.name, first.signer, lineage_ok),
     )
-
-
-def _sha256_file(path: str) -> str:
-    hasher = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(1024 * 1024):
-            hasher.update(chunk)
-    return hasher.hexdigest()
 
 
 def _release_date(release: dict) -> str | None:
@@ -197,7 +190,7 @@ def _spawn(coro) -> None:
     task.add_done_callback(_background.discard)
 
 
-def _identity_problem(repo_row, info: github_client.RepoInfo) -> str | None:
+def identity_problem(repo_row, info: github_client.RepoInfo) -> str | None:
     """Whether the repo GitHub serves under this name is still the one that
     was pinned. A different ID means the name now belongs to another repo
     (the old one was renamed or deleted and the name re-registered); a
@@ -233,7 +226,7 @@ async def _check_identity(repo_row, label: str) -> github_client.RepoInfo | None
         logger.warning("%s: %s", label, exc)
         db.update_repo_check(repo_row["id"], last_error=str(exc))
         return None
-    problem = _identity_problem(repo_row, info)
+    problem = identity_problem(repo_row, info)
     if problem:
         logger.error("%s: %s", label, problem)
         if repo_row["last_error"] != problem:  # notify once, not every poll
@@ -251,11 +244,12 @@ async def _verify_release(repo_row, tag: str, assets: list[dict], info, repo_dir
     it, each APK's download and signature, that its APKs agree, and the pin.
     Raises _Rejected, having removed anything it downloaded."""
     assets = assets[:MAX_VARIANTS_PER_RELEASE]
+    sign_as = signing.repo_source(info.id) if repo_row["sign_unsigned"] else None
     variants: list[_Variant] = []
     try:
         _check_uploaders(tag, assets, info)
         for asset in assets:
-            variants.append(await _download_and_verify(asset, repo_dir, bool(repo_row["sign_unsigned"])))
+            variants.append(await _download_and_verify(asset, repo_dir, sign_as))
         first = variants[0]
         for v in variants[1:]:
             if (v.info.name, v.signer) != (first.info.name, first.signer):
@@ -287,7 +281,7 @@ async def stage_past_release(repo_id: int, release_id: int) -> tuple[bool, str]:
             release = await github_client.get_release(owner, repo, release_id, github_token())
         except github_client.GithubError as exc:
             return False, str(exc)
-        if problem := _identity_problem(repo_row, info):
+        if problem := identity_problem(repo_row, info):
             return False, problem
         tag = release.get("tag_name")
         if not tag or release.get("draft"):

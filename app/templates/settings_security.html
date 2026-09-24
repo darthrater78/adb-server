@@ -75,13 +75,19 @@
     </ul>
   </details>
   {% endif %}
-  <h3>This server's signing key</h3>
-  {% if signing_fingerprint %}
-  <p class="mono small">SHA-256 {{ signing_fingerprint }}</p>
-  <p class="muted small">Signs unsigned builds from sources you opted in. Apps signed with it only accept updates
-    signed by it: back up the data directory and <code>.env</code> (SECRET_KEY) together.</p>
+  <h3>This server's signing keys</h3>
+  {% if signing_keys %}
+  <ul class="signing-keys">
+    {% for k in signing_keys %}
+    <li><strong>{{ k.name }}</strong> <span class="mono small">{{ "SHA-256 " ~ k.fingerprint if k.fingerprint else "can't be read (SECRET_KEY changed?)" }}</span></li>
+    {% endfor %}
+  </ul>
+  <p class="muted small">One per source (each watched repo, and uploads), so one source's build can never pass as an
+    update to another's app. Apps signed with a key only accept updates signed by it: back up the data directory
+    and <code>.env</code> (SECRET_KEY) together.</p>
   {% else %}
-  <p class="muted small">None yet. It's created the first time an unsigned build is signed, for a source you opted in.</p>
+  <p class="muted small">None yet. A source's key is created the first time an unsigned build from it is signed, for a
+    source you opted in.</p>
   {% endif %}
 </section>
 {% endblock %}

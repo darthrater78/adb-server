@@ -2,6 +2,7 @@
 pinned by GitHub ID, and release assets accepted only from the owner or a
 workflow."""
 import asyncio
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -186,7 +187,7 @@ def test_looking_up_a_repo_shows_it_and_watches_nothing(authed, lookup):
 
 def test_review_warns_about_look_alike_signals(authed, lookup):
     lookup["info"] = _info(fork=True, archived=True, owner_type="Organization",
-                           created_at=main.datetime.now(main.timezone.utc).isoformat())
+                           created_at=datetime.now(timezone.utc).isoformat())
     page = _review(authed).text
     for needle in ("It&#39;s a fork", "archived", "created 0 days ago", "belongs to an organization"):
         assert needle in page, needle
@@ -568,15 +569,15 @@ def test_one_kind_of_card_gets_no_section_headings(authed, artifact_env):
 
 
 def test_device_names_prefer_nickname_then_model(monkeypatch):
-    import main as _main
+    import web
     row = lambda **kw: {"nickname": None, "model": None, "serial": "56220DLCR005KT", **kw}
 
     class R(dict):
         def keys(self):
             return super().keys()
-    assert _main._device_name(R(row(nickname="Steve's phone"))) == "Steve's phone"
-    assert _main._device_name(R(row(model="Google Pixel 8"))) == "Google Pixel 8 · …005KT"
-    assert _main._device_name(R(row())) == "56220DLCR005KT"
+    assert web.device_name(R(row(nickname="Steve's phone"))) == "Steve's phone"
+    assert web.device_name(R(row(model="Google Pixel 8"))) == "Google Pixel 8 · …005KT"
+    assert web.device_name(R(row())) == "56220DLCR005KT"
 
 
 def test_device_model_is_read_and_sanitised(monkeypatch):
@@ -898,11 +899,26 @@ def test_a_signed_build_gets_the_signed_badge_and_no_advice(authed, artifact_env
 
 
 def test_bad_sibling_data_is_ignored():
-    import main as _main
-    assert _main._siblings("not json") == [] and _main._siblings('[{"id": "x", "name": 1}, {"id": 2, "name": "ok"}]') == [{"id": 2, "name": "ok"}]
+    import web
+    assert web.siblings("not json") == [] and web.siblings('[{"id": "x", "name": 1}, {"id": 2, "name": "ok"}]') == [{"id": 2, "name": "ok"}]
 
 
 # ---- Builds page: how each test build is signed ----
+
+def test_an_unsigned_artifact_is_signed_with_its_repos_own_key(authed, artifact_env, monkeypatch):
+    """The repo's key, so the test build can update the repo's own app and
+    no other source's."""
+    import signing as _signing
+    monkeypatch.setattr(apk_verify, "is_unsigned", lambda path: True)
+    used = []
+    monkeypatch.setattr(_signing, "sign_in_place", lambda path, source: used.append(source))
+    rid = artifact_env["rid"]
+    r = authed.post(f"/repos/{rid}/artifacts/5/stage", data={"csrf_token": CSRF}, follow_redirects=False)
+    assert "unsigned" in r.headers["location"] and used == []  # not opted in: refused
+    db.set_sign_unsigned(rid, True)
+    authed.post(f"/repos/{rid}/artifacts/5/stage", data={"csrf_token": CSRF})
+    assert used == ["github-1"]
+
 
 def test_staging_an_artifact_records_its_signing(authed, artifact_env):
     authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF})

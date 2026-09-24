@@ -9,6 +9,7 @@ import pytest
 import apk_verify
 import db
 import main
+import uploads
 import staging
 from conftest import CSRF
 
@@ -106,7 +107,7 @@ def test_upload_after_delete_is_allowed(authed, verify):
 
 
 def test_oversize_upload_is_refused_in_handler(authed, verify, monkeypatch):
-    monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 10)
+    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 10)
     monkeypatch.setattr(main, "UPLOAD_FORM_OVERHEAD", 10_000)
     r = _upload(authed, _apk_bytes())
     assert "size%20cap" in r.headers["location"]
@@ -114,7 +115,7 @@ def test_oversize_upload_is_refused_in_handler(authed, verify, monkeypatch):
 
 
 def test_oversize_upload_is_refused_before_parsing(authed, verify, monkeypatch):
-    monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 10)
+    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 10)
     monkeypatch.setattr(main, "UPLOAD_FORM_OVERHEAD", 10)
     r = _upload(authed, _apk_bytes())
     assert r.status_code == 413
@@ -319,7 +320,7 @@ def test_zipped_apk_over_the_cap_is_refused(authed, verify, monkeypatch):
     # Tiny on the wire, big once inflated: the cap applies to the APK, not the zip.
     big = _zip_bytes({"AndroidManifest.xml": b"\0" * 200_000}, zipfile.ZIP_STORED)
     content = _zip_bytes({"app.apk": big})
-    monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", len(content) + 1000)
+    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", len(content) + 1000)
     r = _upload_zip(authed, content)
     assert "size%20cap" in r.headers["location"]
     assert db.list_staged_apks() == [] and os.listdir(_uploads_dir()) == []

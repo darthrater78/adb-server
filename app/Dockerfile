@@ -13,7 +13,7 @@
 # is also needed here: adb_client.py shells out to a local `adb` binary acting
 # as a TCP client against the adb-server container — the protocol has no
 # pure-Python client, the `adb` executable *is* the client.
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS android-tools
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS android-tools
 
 # Google's repository manifest publishes only SHA-1. These SHA-256 pins were
 # computed from downloads that matched those SHA-1s (70954e99…, 477254aa…),
@@ -61,8 +61,11 @@ COPY --from=android-tools /opt/build-tools /opt/build-tools
 ENV PATH="/opt/build-tools:${PATH}"
 
 WORKDIR /app
+# requirements.txt is a lockfile: every package, direct and transitive, pinned
+# with its hashes (compiled from requirements.in), so the image installs
+# exactly the tree CI audited and nothing else.
 COPY app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY app/ .
 COPY VERSION .

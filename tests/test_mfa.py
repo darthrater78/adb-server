@@ -147,6 +147,15 @@ def test_recovery_code_works_once(client, enabled):
     assert client.post("/login/mfa", data={"code": enabled[0]}).status_code == 401
 
 
+@pytest.mark.parametrize("use_recovery", [False, True])
+def test_the_login_audit_says_when_the_browser_was_trusted(client, enabled, use_recovery):
+    login(client)
+    client.post("/login/mfa", data={"code": enabled[0] if use_recovery else code(1), "trust": "1"})
+    [entry] = [a for a in db.list_audit() if a["action"] == "login"]
+    how = "with a recovery code" if use_recovery else "with an authenticator code"
+    assert entry["detail"] == f"{how}, trusted for {mfa.TRUST_DAYS} days"
+
+
 def test_lockout_and_unlock(client, enabled):
     login(client)
     for _ in range(mfa.MAX_FAILURES - 1):

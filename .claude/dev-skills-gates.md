@@ -1,59 +1,50 @@
 # Dev Skills gate state
 Track: release sequence → v3.3.0 (source verification, artifacts, encryption, UI rework)
-Mode: semi-autonomous (approved 2026-09-24, session 7) — commits and the tag still require the user's approval
-Model: Opus 5.5 approved by user (session 7: zip upload, repo hardening)
+Mode: semi-autonomous (approved 2026-09-24, session 8) — commits and the tag still require the user's approval
+Model: Opus 5.5 approved by user (session 8, current task)
 Origin: darthrater78/adb-server (not a fork)
-Standards: at-rest ✅ encrypted (secretbox: TOTP, notify URLs, GitHub token) · TOTP ✅ · rescue ✅ · Apprise ✅ · compose ✅ §10.5
-Version: 3.2.0
-Updated: 2026-09-24 (session 7, handoff written)
+Standards: at-rest ✅ encrypted (secretbox: TOTP, notify URLs, GitHub token, signing-key passwords) · TOTP ✅ · rescue ✅ · Apprise ✅ · compose ✅ §10.5
+Version: 3.3.0
+Updated: 2026-09-24 (session 8: full audit, all findings fixed on this branch)
 
 ## Current: v3.3.0 (feat/repo-legitimacy) — source verification, workflow artifacts, secrets encrypted at rest
 🔢 VERSION    ✅ 3.3.0 MINOR (user approved the commit carrying it: "commit here", 2026-09-24)
               VERSION, compose.yaml images + comment, README links/block all 3.3.0; prior tag v3.2.0 → 1ddd87f
-🔨 BUILD      ✅ working tree: 498 pytest passed (py3.13), tree unchanged during run
-              stack t330 on 10.0.0.252:18183 (gh token in env only, tmpfs /data), rebuilt after Settings split:
-              real review/confirm of android-heartrate + hunter-douglas-blind (IDs pinned); wrong-id confirm refused;
-              real artifact staged w/ provenance, no zip/spool left; real poll staged v1.5.1 (github-actions[bot]);
-              Settings token saved sealed (raw absent from db), bad token refused; GitHub access table OK/OK for both;
-              every Settings page + artifacts desk/phone dark: no horizontal overflow
-              Install: Releases / Test builds / Uploads sections, artifact card badged + branch/commit→run (screenshot)
-              device names: nickname > model · …serial tail > serial (unit tested; phone re-pair pending)
-              real: dockge + cert-generator refused (no APK; cert-generator via artifact zip-list range read),
-              hunter-douglas-blind accepted artifact-only (Azure: explicit ranges, suffix ranges ignored → fixed);
-              Builds: 6 releases, v1.5.0 staged via release checks, latest stayed v1.5.1; 25 artifacts in 15 commit
-              groups with messages, release builds excluded; unsigned heartrate APK refused, then with opt-in
-              signed by server key (keytool+zipalign+apksigner in image, v3 verifies, no .idsig left);
-              Check now in browser: auto-refresh → "no releases yet, only workflow builds" / "latest is v1.5.1";
-              no page overflow desk/phone (long branch pill fixed)
-              signing badges (signed / debug / signed by this server) + debug advice with sibling Stage;
-              Settings → General: time zone + 12-hour (default) / 24-hour clock
-              Builds: signing badge per test build (same key as releases / different key / debug / unsigned),
-              Check signing on real heartrate commit: -apk = same key as releases, -debug = debug; nothing kept
-              real artifact staged with build notes (run title/trigger/branch/link + full commit message)
-              t330-adb fixed: key tmpfs uid 10001 (was 1000: no key, crashed on first connect); adbkey present,
-              app → adb-server resolves, `adb devices` OK. Same flaw in the v3.2.0 zip320 smoke stack (disclosed)
+🔨 BUILD      ✅ working tree (session 8 fixes): 520 pytest passed, tree unchanged during run; handoff offered
+              images audit-wip built from the tree (hash-checked install; pip freeze == lockfile; trixie both;
+              adb/aapt2/zipalign/apksigner/keytool run). Stack t33a on 10.0.0.252:18184 (gh token env only):
+              all 14 pages 200; unsigned upload refused, then staged with opt-in (uploads key); real repo
+              review/confirm + opt-in; repo key made with real tools: 2 keys, different certs, 600/700;
+              Settings lists both by name; spoofed X-Forwarded-For ignored (audit = real IP, 429 after 5);
+              FORWARDED_ALLOW_IPS=proxy → per-client limit + real IPs in audit; app → adb-server OK
+              screenshots retaken with browser on bridge network (no host net); security + builds updated
+              session 7 evidence (source verification, artifacts, Builds, signing badges): commit 23d3020
   test artifact: ⬜ rebuild from the exact PR head commit before merge
-🔒 SECURITY   ✅ 0 open — 0 Critical, 0 High
-              new dep cryptography==50.0.1 (current, PyCA); pip-audit --strict clean (whole tree)
-              bandit: only the 6 known B608 in db.py (unchanged fns) — withdrawn as before;
-              ✅ fixed: 💡 my IN(...) f-string query in seal migration → per-key parameterized query
-              ✅ fixed: 📝 identity lookup every poll doubled anonymous rate-limit use → only on new release/unpinned
-              token: TOKEN_RE + checked with GitHub before save, never echoed/logged/in URL, sent only to api.github.com;
-              artifact downloads: token dropped at storage redirect, redirect host allow-list (+blob.core.windows.net);
-              fork-PR artifacts excluded (head_repository_id == pinned id); SECRET_KEY change fails closed
-              ✅ fixed: 📝 Medium (pre-existing) — httpx INFO logged full download URLs incl. signed storage
-                 tokens (release assets + artifacts) → httpx logger at WARNING; 0 sig= in logs after (verified)
-              signing: password only via env (never argv), keystore 600 + dir 700, never overwritten, only truly
-                 unsigned APKs (no v1 files, no signing block) are signed; broken signatures still refused
-              Standards: at-rest ✅ now encrypted (TOTP, notify URLs, GitHub token, signing-key password)
-📄 DOCS       ✅ CHANGELOG 3.3.0 (+ Settings split, token template/expiry/access); README Settings + GitHub token sections,
+  test creds: generated per run, shown to user
+🔒 SECURITY   ✅ 0 open — 0 Critical, 0 High (session 8 full audit: 12 found, 12 fixed, user: "fix it on this branch")
+              ✅ fixed: 📝 M1 shared signing key → one key per source (github-<id> / uploads); tested with real tools
+              ✅ fixed: ⚠️ H1 found while fixing: screenshots/run.sh ran Playwright with --network host (user rule:
+                 never) → bridge network; retaken screenshots prove it works
+              ✅ fixed: 💡 L1 rate limit: IPv6 by /64; FORWARDED_ALLOW_IPS documented + verified (spoof ignored)
+              ✅ fixed: 💡 L2 short SECRET_KEY/APP_PASSWORD warned (log + banner), user chose warn over refuse
+              ✅ fixed: 💡 L3 audit precedence (regression test fails without fix)
+              ✅ fixed: 💡 L4 all stages on pinned trixie-slim · L5 hashed lockfiles, --require-hashes, CI agreement check
+              ✅ fixed: 💡 L6 .env.example · L7 Playwright image pinned by digest (found with H1)
+              ✅ fixed: 💡 Q1 main.py → web/uploads/routes_* (same 73 routes, verified) · Q2 shared sha256_file,
+                 public identity_problem · W1 bandit in CI (-ll; B608 exceptions nosec'd with reasons)
+              evidence: pip-audit --require-hashes clean; bandit -ll clean; pyflakes clean; actionlint ok; 520 passed
+              Standards: at-rest ✅ encrypted (TOTP, notify URLs, GitHub token, per-source signing-key passwords)
+📄 DOCS       ✅ session 8: CHANGELOG 3.3.0 + audit fixes; README (per-source keys, FORWARDED_ALLOW_IPS, rate limit,
+              short secrets, lockfiles/bandit, data at rest; stale "no encryption at rest" + NOTIFY_EVENTS fixed);
+              .env.example; HANDOFF layout; settings-security.png + builds.png retaken
+              session 7: CHANGELOG 3.3.0 (+ Settings split, token template/expiry/access); README Settings + GitHub token sections,
               Sources (review, artifacts), Source verification section, threat model row,
               Data at rest (encrypted + SECRET_KEY change), GitHub access, Configuration; .env.example; HANDOFF
               pre-existing inaccuracies fixed: ETag 304s only free when authenticated; Apprise guide said "unencrypted"
               ALL 16 screenshots retaken from invented data, GitHub mocked (scripts/screenshots/run.sh): no real
               repo/account/token/device in any; new repo-review.png + builds.png; README refs all resolve, none unused
-📦 RELEASE    ⏳ commit approved + made on feat/repo-legitimacy (user: "commit here"); not pushed, no PR yet
-              notes = CHANGELOG 3.3.0; next: push, PR, PR-head test images, then SHIP
+📦 RELEASE    ⏳ commit + release notes approved (user: "yes, commit and ship it", 2026-09-24); notes = CHANGELOG 3.3.0
+              branch synced (0 behind origin/main); next: commit, push, PR, PR-head test images, merge on green CI
 🚀 SHIP       ⬜
 
 ## Previous: v3.2.0 (feat/zip-apk-upload) — upload an artifact zip holding one APK; aapt → aapt2

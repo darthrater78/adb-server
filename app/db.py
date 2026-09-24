@@ -194,7 +194,9 @@ def init_db() -> None:
 
 
 # meta keys holding a secret: always sealed (secretbox) at rest.
-SECRET_META_KEYS = ("mfa_secret", "mfa_pending_secret", "github_token", "signing_key_password")
+# (Signing-key passwords, signing_key_password:<source>, have been sealed from the
+# start, so they are never in this list.)
+SECRET_META_KEYS = ("mfa_secret", "mfa_pending_secret", "github_token")
 
 
 def _seal_plaintext_secrets(conn: sqlite3.Connection) -> None:
@@ -234,8 +236,9 @@ def _rebuild_staged_apks_unique() -> None:
         conn.execute(ddl.replace("IF NOT EXISTS staged_apks", "staged_apks_new", 1))
         old_cols = [r[1] for r in conn.execute("PRAGMA table_info(staged_apks)")]
         new_cols = {r[1] for r in conn.execute("PRAGMA table_info(staged_apks_new)")}
+        # Column names from PRAGMA table_info, never input (hence nosec B608).
         cols = ", ".join(c for c in old_cols if c in new_cols)
-        conn.execute(f"INSERT INTO staged_apks_new ({cols}) SELECT {cols} FROM staged_apks")
+        conn.execute(f"INSERT INTO staged_apks_new ({cols}) SELECT {cols} FROM staged_apks")  # nosec B608
         conn.execute("DROP TABLE staged_apks")
         conn.execute("ALTER TABLE staged_apks_new RENAME TO staged_apks")
         if conn.execute("PRAGMA foreign_key_check").fetchall():
@@ -439,7 +442,8 @@ def insert_staged_apk(
 
 
 # Uploads have no repo: LEFT JOIN so they aren't silently dropped, and give
-# every row one display label instead of owner/repo.
+# every row one display label instead of owner/repo. A constant: the queries
+# that interpolate it (marked nosec B608) interpolate nothing else.
 _SOURCE_LABEL = "COALESCE(repos.owner || '/' || repos.repo, 'Manual upload') AS source_label"
 
 
@@ -450,14 +454,14 @@ def list_staged_apks(repo_id: int | None = None) -> list[sqlite3.Row]:
                 f"""SELECT staged_apks.*, repos.owner, repos.repo, {_SOURCE_LABEL}
                    FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
                    WHERE repo_id = ? AND pruned_at IS NULL
-                   ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC""",
+                   ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC""",  # nosec B608
                 (repo_id,),
             ).fetchall()
         return conn.execute(
             f"""SELECT staged_apks.*, repos.owner, repos.repo, {_SOURCE_LABEL}
                FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
                WHERE pruned_at IS NULL
-               ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC"""
+               ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC"""  # nosec B608
         ).fetchall()
 
 
@@ -486,7 +490,7 @@ def list_latest_variants() -> list[sqlite3.Row]:
                    SELECT tag FROM staged_apks WHERE repo_id = s.repo_id AND pruned_at IS NULL
                    ORDER BY COALESCE(released_at, downloaded_at) DESC, id DESC LIMIT 1
                )
-               ORDER BY repos.owner, repos.repo, s.filename"""
+               ORDER BY repos.owner, repos.repo, s.filename"""  # nosec B608
         ).fetchall()
 
 
@@ -501,7 +505,7 @@ def get_staged_apk(apk_id: int) -> sqlite3.Row | None:
         return conn.execute(
             f"""SELECT staged_apks.*, repos.owner, repos.repo, {_SOURCE_LABEL}
                FROM staged_apks LEFT JOIN repos ON repos.id = staged_apks.repo_id
-               WHERE staged_apks.id = ?""",
+               WHERE staged_apks.id = ?""",  # nosec B608
             (apk_id,),
         ).fetchone()
 
@@ -601,8 +605,8 @@ def rename_device(old: str, new: str) -> bool:
         # The children are updated after the parent, inside one transaction.
         conn.execute("PRAGMA defer_foreign_keys = ON")
         conn.execute("UPDATE devices SET serial = ? WHERE serial = ?", (new, old))
-        for table in ("device_packages", "device_follows", "installs"):
-            conn.execute(f"UPDATE {table} SET device_serial = ? WHERE device_serial = ?", (new, old))  # nosec B608 - fixed table names
+        for table in ("device_packages", "device_follows", "installs"):  # fixed names (nosec B608)
+            conn.execute(f"UPDATE {table} SET device_serial = ? WHERE device_serial = ?", (new, old))  # nosec B608
         return True
 
 
@@ -656,7 +660,7 @@ _INSTALL_SELECT = f"""
     JOIN devices ON devices.serial = installs.device_serial
     JOIN staged_apks ON staged_apks.id = installs.apk_id
     LEFT JOIN repos ON repos.id = staged_apks.repo_id
-"""
+"""  # nosec B608
 
 
 def get_install(install_id: int) -> sqlite3.Row | None:

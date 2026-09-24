@@ -28,9 +28,12 @@
   glob, or (with a token) an artifact whose zip lists an `.apk`, checked from
   the zip's file list without downloading it.
 - Added: **unsigned builds, by opt-in**: per repo (on Builds) or per upload,
-  with an explanation, the server signs an unsigned build with its own key
-  and marks it **signed by this server**. Without the opt-in an unsigned
-  build is refused with the reason. Adds `zipalign` to the image.
+  with an explanation, the server signs an unsigned build and marks it
+  **signed by this server**. Each source gets its own key (one per watched
+  repo, kept by its GitHub ID, and one for uploads), so one source's build
+  can never pass as an update to another source's app. Settings → Security
+  lists each key's fingerprint. Without the opt-in an unsigned build is
+  refused with the reason. Adds `zipalign` to the image.
 - Changed: **Check now** reloads the page until the check is done and says
   what it found; a repo with no release yet is "no release yet", not an
   error.
@@ -84,6 +87,29 @@
   `cryptography` dependency.
 - Docs: `GITHUB_TOKEN` waives the rate limit for unchanged repos only when
   set; the README said this happened without a token too.
+- Security: **failed sign-ins from IPv6 are counted per /64**, so rotating
+  through one network's addresses no longer buys more guesses. Behind a
+  reverse proxy, the new `FORWARDED_ALLOW_IPS` setting names the proxy, so
+  each browser is counted by its own address: before, every sign-in seemed to
+  come from the proxy, and a few wrong passwords from anyone locked everyone
+  out for 5 minutes.
+- Security: a `SECRET_KEY` under 32 characters or an `APP_PASSWORD` under 12
+  is now logged at startup and warned about on every page. The app still
+  starts with them.
+- Fixed: the audit log dropped "trusted for 30 days" from a sign-in with a
+  recovery code.
+- Security: Python dependencies are installed from a lockfile that pins every
+  package, direct and transitive, with its hashes (`app/requirements.in` →
+  `app/requirements.txt`), so the image holds exactly the tree CI audited.
+  CI also runs `bandit` now.
+- Changed: both images build on Debian 13 (trixie); the adb server image and
+  the tool-fetching stage were still on Debian 12.
+- Docs: `.env.example` pointed at Settings → Artifacts (now Settings →
+  GitHub) and left `token_expiring` out of the notification events; the
+  README still said the TOTP secret and notification URLs weren't encrypted.
+- Internal: `main.py` is split into one module per area
+  (`routes_*.py`), with shared page helpers in `web.py` and upload staging in
+  `uploads.py`. No route changed.
 
 ## 3.2.0 — 2026-09-24
 

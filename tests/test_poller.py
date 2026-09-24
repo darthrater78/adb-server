@@ -244,7 +244,7 @@ def test_debug_signed_release_is_refused_and_not_pinned(upstream):
 def test_an_unsigned_release_is_refused_unless_the_repo_opted_in(upstream, monkeypatch):
     monkeypatch.setattr(apk_verify, "is_unsigned", lambda path: True)
     signed = []
-    monkeypatch.setattr(poller.signing, "sign_in_place", lambda path: signed.append(path))
+    monkeypatch.setattr(poller.signing, "sign_in_place", lambda path, source: signed.append(source))
     rid = db.create_repo("o", "r", "*.apk", github_id=1, owner_id=10, owner_type="User")
     _poll(rid)
     repo = db.get_repo(rid)
@@ -253,4 +253,5 @@ def test_an_unsigned_release_is_refused_unless_the_repo_opted_in(upstream, monke
     upstream.tag = "v2"
     _poll(rid)
     [apk] = db.list_staged_apks()
-    assert apk["tag"] == "v2" and apk["server_signed"] == 1 and len(signed) == 1
+    # With the repo's own key (by GitHub ID), not one shared by every source.
+    assert apk["tag"] == "v2" and apk["server_signed"] == 1 and signed == ["github-1"]

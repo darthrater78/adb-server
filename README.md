@@ -100,8 +100,8 @@ Check the `ALLOWED_HOSTS` line it printed. What each setting does:
 
 | Setting | What it's for |
 |---|---|
-| `SECRET_KEY` | Signs the session cookies. Changing it signs everyone out. |
-| `APP_USERNAME`, `APP_PASSWORD` | Your sign-in. Placeholders like `admin` or `changeme` are refused as passwords. Don't use `'` in the password. |
+| `SECRET_KEY` | Signs the session cookies and encrypts the secrets kept in the database. Changing it signs everyone out, and those secrets must be entered again. Use at least 32 characters (the block above generates 64); anything shorter is warned about on every page. |
+| `APP_USERNAME`, `APP_PASSWORD` | Your sign-in. Placeholders like `admin` or `changeme` are refused as passwords, and one shorter than 12 characters is warned about on every page. Don't use `'` in the password. |
 | `ALLOWED_HOSTS` | Every name or IP you'll type in the address bar, without `http://` or a port. If yours isn't listed, every page shows only **Invalid host header**. Add any other name, such as `adb.home.lan`, with a comma. |
 | `COOKIE_SECURE` | `false` for plain `http://<IP>:8080`, or the browser drops the session cookie and sign-in silently fails. Behind a TLS proxy, set it to `true` and add `ALLOWED_ORIGIN=https://<your-name>`. |
 
@@ -196,8 +196,11 @@ Then turn on two-factor sign-in under **Settings → Security**.
 > won't send `Secure` cookies over plain HTTP to anything but `localhost`, so
 > for `http://<LAN-IP>:8080` set `COOKIE_SECURE=false`. The better setup is
 > TLS: put a reverse proxy (Caddy, Tailscale Serve, …) in front, keep
-> `COOKIE_SECURE=true`, set `ALLOWED_ORIGIN=https://<your-name>`, and bind the
-> app to `127.0.0.1:8080` in `compose.yaml`.
+> `COOKIE_SECURE=true`, set `ALLOWED_ORIGIN=https://<your-name>`, set
+> `FORWARDED_ALLOW_IPS` to the proxy's IP address, and bind the app to
+> `127.0.0.1:8080` in `compose.yaml`. Without `FORWARDED_ALLOW_IPS`, every
+> sign-in seems to come from the proxy, so a few wrong passwords from anyone
+> lock everyone out for 5 minutes.
 
 <img src="docs/screenshots/login.png" alt="Sign-in page" width="640">
 
@@ -287,11 +290,14 @@ but no release yet shows **no release yet**, not an error.
 **Unsigned builds** can't be installed on Android at all. They're refused
 unless you opt in for that source: **Sign unsigned builds from this repo** on
 its Builds page (releases and test builds), or the **sign it with this
-server's key** box on an upload. The server then signs the build with its
-own key, created on first use and kept next to the database, with its password
-encrypted. It's marked **signed by this server**, and the phone will only
-accept updates to that app signed by the same key, until the app is
-uninstalled. Back up the data directory and `.env` together. A build whose
+server's key** box on an upload. The server then signs the build with a key
+it keeps for that source alone: one per watched repo (by its GitHub ID, so
+removing and re-adding the repo keeps it) and one for uploads, each created on
+first use and kept next to the database, with its password encrypted. It's
+marked **signed by this server**, and the phone will only accept updates to
+that app signed by the same key, until the app is uninstalled. Because no two
+sources share a key, one source's build can never pass as an update to
+another source's app. Settings → Security lists each key's fingerprint. Back up the data directory and `.env` together. A build whose
 signature is present but doesn't verify is always refused, and a release
 signed with the Android debug certificate is refused either way.
 
@@ -559,7 +565,7 @@ It's designed for **one operator on a home or small-office network**.
 | A compromised or malicious upstream: a hijacked GitHub account, a tampered release asset | Package and signer pinning, signature verification, reviewed key rotation ([Release verification](#release-verification)) |
 | A look-alike or re-registered repo name, a release asset uploaded by someone else | Review before watching, GitHub-ID and owner pinning, uploader checks ([Source verification](#source-verification)) |
 | Someone on the LAN trying to reach your phones' ADB | The adb server's port is never published. Only the app can talk to it. |
-| Password guessing, stolen passwords | Per-IP rate limiting, TOTP two-factor sign-in, a global lockout on wrong codes |
+| Password guessing, stolen passwords | Per-client rate limiting (IPv6 by /64), TOTP two-factor sign-in, a global lockout on wrong codes |
 | Cross-site attacks from other tabs or sites | CSRF tokens, Origin checks, `SameSite=Strict` cookies, a strict CSP with no JavaScript at all |
 | DNS rebinding | A Host-header allowlist (`ALLOWED_HOSTS`) |
 | Stolen session cookies | 12-hour expiry, and logout revokes every session |
@@ -578,9 +584,16 @@ below).
   `changeme`.
 - **Constant-time credential checks.** The username and password are both
   compared every time, so response timing doesn't reveal which one was wrong.
-- **Rate limiting.** 5 failed attempts per client IP in 5 minutes, for both the
-  password and the code step. The tracking table is swept and capped, so a
-  flood of addresses can't grow it without bound.
+- **Rate limiting.** 5 failed attempts per client in 5 minutes, for both the
+  password and the code step. A client is its IPv4 address, or its IPv6 /64,
+  so rotating through one network's IPv6 addresses doesn't buy more guesses.
+  Behind a reverse proxy, set `FORWARDED_ALLOW_IPS` to the proxy's address so
+  each browser is counted by its own address rather than the proxy's. The
+  tracking table is swept and capped, so a flood of addresses can't grow it
+  without bound.
+- **Short secrets are flagged.** A `SECRET_KEY` under 32 characters or an
+  `APP_PASSWORD` under 12 is logged at startup and shown as a warning on every
+  page. The app still starts, so an upgrade never locks you out.
 - **Two-factor sign-in (TOTP, RFC 6238).** The implementation uses only the
   standard library (HMAC-SHA1, 30-second steps, ±1 step for clock drift), so
   there's no third-party dependency to trust. The password alone only yields
@@ -704,7 +717,7 @@ below).
 | Database: repos, devices, audit log, settings | `/opt/docker/adb-server/appdata` (`app.db`) | Only `app` mounts it |
 | TOTP secret, notification service URLs, GitHub token saved in Settings | In the database | **Encrypted** (Fernet: AES-128-CBC + HMAC-SHA256) with a key derived from `SECRET_KEY` by HKDF. The key is never stored, so the database or a backup of it reveals none of them without `.env`. |
 | Recovery codes, trusted-browser tokens | In the database | SHA-256 hashes only |
-| This server's APK signing key (only if you opted in to signing unsigned builds) | `appdata/signing/server-key.p12` | A PKCS#12 keystore, mode 600. Its password is encrypted in the database, like the secrets above |
+| This server's APK signing keys, one per source (only for sources you opted in to signing unsigned builds) | `appdata/signing/github-<repo ID>.p12`, `appdata/signing/uploads.p12` | PKCS#12 keystores, mode 600. Their passwords are encrypted in the database, like the secrets above |
 | `SECRET_KEY`, password, `GITHUB_TOKEN` | `.env` | Keep it `chmod 600`. It's gitignored and excluded from image builds. |
 
 Anyone who can read the `adbkeys` directory, or `appdata` *and* `.env`, can act as
@@ -730,11 +743,11 @@ two-factor sign-in stays on but refuses every code until you reset it with
 ### Recommended hardening checklist
 
 - [ ] Serve it over **TLS** (reverse proxy), keep `COOKIE_SECURE=true`, set
-      `ALLOWED_ORIGIN`, and bind the app port to `127.0.0.1`.
+      `ALLOWED_ORIGIN` and `FORWARDED_ALLOW_IPS`, and bind the app port to `127.0.0.1`.
 - [ ] **Never expose port 8080 to the internet.** Use a VPN such as Tailscale
       for remote access.
 - [ ] Set `ALLOWED_HOSTS` to exactly the names you browse to.
-- [ ] Use a long, random `APP_PASSWORD` and `SECRET_KEY`.
+- [ ] Use a long, random `APP_PASSWORD` (12+ characters) and `SECRET_KEY` (32+).
 - [ ] Turn on **two-factor sign-in**, and store the recovery codes offline.
 - [ ] `chmod 600 .env`.
 - [ ] Use a fine-grained, read-only `GITHUB_TOKEN`, or none for public repos.
@@ -753,8 +766,10 @@ two-factor sign-in stays on but refuses every code until you reset it with
 - **The two-factor lockout is global.** Someone who already has your password
   can keep the second step locked. Recovery codes and `mfa_admin.py unlock`
   get you back in.
-- **No encryption at rest** for the TOTP secret or notification URLs (see
-  above).
+- **Not everything at rest is encrypted.** The secrets in the database are
+  (see [Data at rest](#data-at-rest)), but the rest of it (repos, devices, the
+  audit log) and the staged APKs are not. They're protected by file
+  permissions and by being mounted only into `app`.
 
 ### Reporting a vulnerability
 
@@ -780,16 +795,17 @@ Quickstart step 2 creates it with the required ones; [`.env.example`](.env.examp
 
 | Variable | Default | What it does |
 |---|---|---|
-| `SECRET_KEY` | *(required)* | Signs cookies. `openssl rand -hex 32`. Changing it signs everyone out. |
+| `SECRET_KEY` | *(required)* | Signs cookies and encrypts the database's secrets. `openssl rand -hex 32`; under 32 characters is warned about. Changing it signs everyone out. |
 | `APP_USERNAME`, `APP_PASSWORD` | *(required)* | The single operator account. |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Host names the app answers to (DNS-rebinding protection). |
 | `ALLOWED_ORIGIN` | *(blank: same origin)* | Exact `scheme://host[:port]` forms may come from. Set it behind a TLS proxy. |
+| `FORWARDED_ALLOW_IPS` | *(blank: none)* | Your reverse proxy's IP address(es). The app then takes each browser's address from `X-Forwarded-For`, for rate limiting and the audit log. Name only the proxy. |
 | `COOKIE_SECURE` | `true` | `false` only for plain-HTTP access to anything but localhost. |
 | `GITHUB_TOKEN` | *(blank)* | Fine-grained, read-only PAT (Contents: read; Actions: read for artifacts), for private repos, artifacts or higher rate limits. A token saved in Settings → GitHub takes precedence. |
 | `POLL_INTERVAL_MINUTES` | `10` | How often repos are polled. |
 | `KEEP_RELEASES_PER_REPO` | `3` | Staged releases kept on disk per repo. |
 | `APPRISE_URLS` | *(blank)* | Notification services (space- or comma-separated). |
-| `NOTIFY_EVENTS` | *(all)* | `staged,rejected,install_success,install_failed` |
+| `NOTIFY_EVENTS` | *(all)* | `staged,rejected,install_success,install_failed,token_expiring` |
 | `ADB_SCAN_PORTS` | `30000-49999` | Port range scanned to find a device whose port changed. |
 | `DB_PATH`, `STAGING_ROOT` | `/data/app.db`, `/data/staging` | Storage locations inside the app container. |
 | `ADB_HOST`, `ADB_PORT` | `adb-server`, `5037` | Where the adb server is. |
@@ -800,6 +816,17 @@ Quickstart step 2 creates it with the required ones; [`.env.example`](.env.examp
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
 bash scripts/test.sh
+```
+
+Dependencies are pinned in lockfiles with a hash for every package, direct
+and transitive, and the image installs with `--require-hashes`. Edit the
+direct pins in `app/requirements.in` (or `requirements-dev.in` for test tools),
+then regenerate both lockfiles with `pip-tools`, the app's first:
+
+```bash
+pip install pip-tools
+(cd app && pip-compile --generate-hashes --allow-unsafe --strip-extras requirements.in)
+pip-compile --generate-hashes --allow-unsafe --strip-extras requirements-dev.in
 ```
 
 The screenshots in this README come from invented data, with GitHub mocked:
@@ -818,7 +845,8 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 
 CI (`.github/workflows/ci.yml`) runs on every push and PR. It runs the same
 test script, checks that `VERSION` matches `CHANGELOG.md`, validates the
-compose file, audits the dependencies and builds both images. Pushing a
+compose file, checks that the two lockfiles agree, audits the dependencies,
+runs `bandit` (Medium and up fails the build) and builds both images. Pushing a
 `v*` tag on the default branch runs `release.yml`, which publishes the images
 to `ghcr.io/darthrater78/adb-server/{app,adb-server}` and creates the
 GitHub release, but only for a commit CI already passed.

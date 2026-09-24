@@ -108,10 +108,10 @@ def test_rate_limit_forgets_expired_clients(client, monkeypatch):
 
 
 def test_header_links_to_the_repo_and_this_versions_release_notes(authed):
-    import main
+    import web
 
     page = authed.get("/status").text
     header = page[page.index("<header"):page.index("</header>")]
     assert 'href="https://github.com/darthrater78/adb-server"' in header
-    assert f'href="https://github.com/darthrater78/adb-server/releases/tag/v{main.APP_VERSION}"' in header
-    assert main.APP_VERSION != "unknown"
+    assert f'href="https://github.com/darthrater78/adb-server/releases/tag/v{web.APP_VERSION}"' in header
+    assert web.APP_VERSION != "unknown"

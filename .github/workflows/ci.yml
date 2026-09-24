@@ -50,14 +50,37 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
 
+      - name: Dev lockfile pins what the app image installs
+        run: |
+          set -euo pipefail
+          # requirements-dev.in is constrained to app/requirements.txt, so every
+          # package the image installs is pinned identically in the dev lockfile
+          # that tests and the audit below use.
+          pins() { grep -E '^[A-Za-z0-9]' "$1" | cut -d' ' -f1 | sort; }
+          missing="$(comm -23 <(pins app/requirements.txt) <(pins requirements-dev.txt))"
+          if [ -n "$missing" ]; then
+            echo "::error::requirements-dev.txt doesn't pin these as app/requirements.txt does (re-run pip-compile):"
+            printf '%s\n' "$missing"
+            exit 1
+          fi
+
       - name: Audit Python dependencies
         run: |
           set -euo pipefail
           # A venv: the runner's system python is externally managed (PEP 668).
           python3 -m venv /tmp/audit
           /tmp/audit/bin/pip install --quiet --disable-pip-version-check pip-audit==2.10.1
-          # requirements-dev.txt includes app/requirements.txt.
-          /tmp/audit/bin/pip-audit --requirement requirements-dev.txt --strict
+          # The dev lockfile holds every package the app image installs, plus pytest.
+          /tmp/audit/bin/pip-audit --requirement requirements-dev.txt --require-hashes --strict
+
+      - name: Static analysis (bandit)
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/bandit
+          /tmp/bandit/bin/pip install --quiet --disable-pip-version-check bandit==1.9.4
+          # Medium severity and up fails the build. Reviewed exceptions carry a
+          # `# nosec <test> - <reason>` comment at the line bandit reports.
+          /tmp/bandit/bin/bandit -q -r app -ll
 
   test:
     runs-on: ubuntu-latest

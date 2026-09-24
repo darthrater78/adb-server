@@ -21,6 +21,15 @@ class ApkVerifyError(Exception):
     pass
 
 
+def sha256_file(path: str) -> str:
+    """SHA-256 of a file, read in chunks so a large APK never sits in memory."""
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1024 * 1024):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def assert_apk_container(apk_path: str) -> None:
     """Cheap structural check before handing a file to apksigner: it must be a
     zip, and it must carry an AndroidManifest.xml. Shared by the poller and by

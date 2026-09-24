@@ -45,6 +45,7 @@
   {% endif %}
 
   <main>
+    {% if csrf_token is defined %}{% for w in weak_settings %}<p class="flash flash-warn">{{ w }}</p>{% endfor %}{% endif %}
     {% block flashes %}
     {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
     {% if ok %}<p class="flash flash-ok">{{ ok }}</p>{% endif %}
