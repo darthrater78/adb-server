@@ -142,7 +142,7 @@ def test_check_now_responds_before_checking(authed, monkeypatch):
         started.append(row["id"])
     monkeypatch.setattr(poller, "check_repo", fake_check)
     r = authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF}, follow_redirects=False)
-    assert "Check%20started" in r.headers["location"]
+    assert f"checking={rid}" in r.headers["location"]
     assert started == [rid]  # TestClient runs background tasks before returning
 
 

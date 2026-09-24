@@ -1,3 +1,5 @@
+import ipaddress
+import logging
 import os
 import secrets
 import time
@@ -33,6 +35,33 @@ if not APP_USERNAME or not APP_PASSWORD:
 if APP_PASSWORD.lower() in ("change_me", "changeme", "password", "admin"):
     raise RuntimeError("APP_PASSWORD is still a placeholder value — set a real password")
 
+# Short values are warned about, not refused: refusing would break existing
+# installs on upgrade, and a new SECRET_KEY means re-entering every secret
+# sealed with the old one. SECRET_KEY both signs sessions and derives the
+# at-rest key, so a guessable one lets a copy of the database be turned into
+# a forged session cookie.
+MIN_SECRET_KEY_LENGTH = 32
+MIN_PASSWORD_LENGTH = 12
+
+
+def weak_settings() -> list[str]:
+    """Operator-facing warnings about login secrets that are too short."""
+    warnings = []
+    if len(SECRET_KEY) < MIN_SECRET_KEY_LENGTH:
+        warnings.append(f"SECRET_KEY is shorter than {MIN_SECRET_KEY_LENGTH} characters, so it could be guessed "
+                        "from a copy of the database. Set a new one in .env (openssl rand -hex 32) and restart; "
+                        "then add the GitHub token and notification services again, and reset two-factor sign-in "
+                        "with mfa_admin.py reset.")
+    if len(APP_PASSWORD) < MIN_PASSWORD_LENGTH:
+        warnings.append(f"APP_PASSWORD is shorter than {MIN_PASSWORD_LENGTH} characters. Set a longer one in .env "
+                        "and restart.")
+    return warnings
+
+
+WEAK_SETTINGS = weak_settings()
+for _warning in WEAK_SETTINGS:
+    logging.getLogger("auth").warning(_warning)
+
 _serializer = URLSafeTimedSerializer(SECRET_KEY, salt="adb-server-session")
 _mfa_pending_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="adb-server-mfa-pending")
 _mfa_trust_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="adb-server-mfa-trust")
@@ -48,7 +77,21 @@ MAX_TRACKED_CLIENTS = 4096
 
 
 def _client_key(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    """Who a failed attempt is counted against. An IPv6 client is counted by
+    its /64, which one household or server is handed whole — otherwise
+    rotating through its addresses would mean unlimited guesses. Behind a
+    reverse proxy this is the proxy's address unless FORWARDED_ALLOW_IPS names
+    it (uvicorn then takes the client from X-Forwarded-For)."""
+    host = request.client.host if request.client else "unknown"
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if ip.version == 6:
+        if ip.ipv4_mapped:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
 
 
 def _sweep(now: float) -> None:

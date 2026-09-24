@@ -31,7 +31,7 @@
 <table>
   <thead>
     <tr>
-      <th>Device</th><th>Serial</th><th>CPU</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
+      <th>Device</th><th>Model</th><th>Serial</th><th>CPU</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -44,6 +44,7 @@
           <button type="submit" class="secondary">Save</button>
         </form>
       </td>
+      <td data-label="Model">{{ d.model or "—" }}</td>
       <td data-label="Serial" class="mono small">{{ d.serial }}</td>
       <td data-label="CPU" class="mono small">{{ d.abis.split()[0] if d.abis else "—" }}</td>
       <td data-label="Trusted">
@@ -83,7 +84,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="empty-state">No devices yet. Add one above.</td></tr>
+    <tr><td colspan="8" class="empty-state">No devices yet. Add one above.</td></tr>
     {% endfor %}
   </tbody>
 </table>

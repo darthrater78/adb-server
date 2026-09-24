@@ -57,7 +57,7 @@ def test_old_pages_still_need_a_login(client):
 def test_activity_pages_sit_under_settings(authed, path):
     page = authed.get(path).text
     assert 'href="/settings" class="active"' in _nav(page)
-    assert 'href="/settings#activity"' in page
+    assert '<a href="/settings">Settings</a>' in page
     assert f'href="{path}"' in authed.get("/settings").text
 
 

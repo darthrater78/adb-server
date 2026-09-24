@@ -1,7 +1,7 @@
 # Builds `adb` from Google's official, checksum-verified platform-tools release
 # rather than trusting a third-party pre-built image with the private key that
 # will end up holding every paired device's trust relationship.
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS fetch
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS fetch
 
 # Google's repository manifest publishes only SHA-1. These SHA-256 pins were
 # computed from downloads that matched those SHA-1s (70954e99…, 477254aa…),
@@ -18,7 +18,7 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
     && unzip -q /tmp/platform-tools.zip -d /opt \
     && rm /tmp/platform-tools.zip
 
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin adb
 

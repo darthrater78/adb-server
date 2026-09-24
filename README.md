@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.2.0](https://github.com/darthrater78/adb-server/releases/tag/v3.2.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.3.0](https://github.com/darthrater78/adb-server/releases/tag/v3.3.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -100,8 +100,8 @@ Check the `ALLOWED_HOSTS` line it printed. What each setting does:
 
 | Setting | What it's for |
 |---|---|
-| `SECRET_KEY` | Signs the session cookies. Changing it signs everyone out. |
-| `APP_USERNAME`, `APP_PASSWORD` | Your sign-in. Placeholders like `admin` or `changeme` are refused as passwords. Don't use `'` in the password. |
+| `SECRET_KEY` | Signs the session cookies and encrypts the secrets kept in the database. Changing it signs everyone out, and those secrets must be entered again. Use at least 32 characters (the block above generates 64); anything shorter is warned about on every page. |
+| `APP_USERNAME`, `APP_PASSWORD` | Your sign-in. Placeholders like `admin` or `changeme` are refused as passwords, and one shorter than 12 characters is warned about on every page. Don't use `'` in the password. |
 | `ALLOWED_HOSTS` | Every name or IP you'll type in the address bar, without `http://` or a port. If yours isn't listed, every page shows only **Invalid host header**. Add any other name, such as `adb.home.lan`, with a comma. |
 | `COOKIE_SECURE` | `false` for plain `http://<IP>:8080`, or the browser drops the session cookie and sign-in silently fails. Behind a TLS proxy, set it to `true` and add `ALLOWED_ORIGIN=https://<your-name>`. |
 
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.2.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.3.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -136,7 +136,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.2.0
+    image: ghcr.io/darthrater78/adb-server/app:3.3.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -166,7 +166,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.2.0), updated with every release
+# image: both pinned to this release (3.3.0), updated with every release
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -196,8 +196,11 @@ Then turn on two-factor sign-in under **Settings → Security**.
 > won't send `Secure` cookies over plain HTTP to anything but `localhost`, so
 > for `http://<LAN-IP>:8080` set `COOKIE_SECURE=false`. The better setup is
 > TLS: put a reverse proxy (Caddy, Tailscale Serve, …) in front, keep
-> `COOKIE_SECURE=true`, set `ALLOWED_ORIGIN=https://<your-name>`, and bind the
-> app to `127.0.0.1:8080` in `compose.yaml`.
+> `COOKIE_SECURE=true`, set `ALLOWED_ORIGIN=https://<your-name>`, set
+> `FORWARDED_ALLOW_IPS` to the proxy's IP address, and bind the app to
+> `127.0.0.1:8080` in `compose.yaml`. Without `FORWARDED_ALLOW_IPS`, every
+> sign-in seems to come from the proxy, so a few wrong passwords from anyone
+> lock everyone out for 5 minutes.
 
 <img src="docs/screenshots/login.png" alt="Sign-in page" width="640">
 
@@ -230,13 +233,73 @@ page shows a setup checklist instead.
 Everything APKs come from, on one page.
 
 **Watch a GitHub repo** as a URL, `owner/repo` or an SSH remote, plus an asset
-glob (default `*.apk`). Repos are polled every `POLL_INTERVAL_MINUTES`
-(default 10). **Check now** checks immediately, in the background.
+glob (default `*.apk`). **Look up repo** first shows what GitHub says it is:
+owner (user or organization), description, created date, stars and its
+GitHub ID, with a warning if it's a fork, archived, under 30 days old, or has
+no release yet. Nothing is watched until you confirm it's the repo you meant
+(see [Source verification](#source-verification)).
+
+<img src="docs/screenshots/repo-review.png" alt="Reviewing a repo before watching it: a days-old fork is flagged" width="640">
+
+Repos are polled every `POLL_INTERVAL_MINUTES`
+(default 10). **Check now** checks immediately, in the background: the page
+reloads itself until the check is done, then says what it found.
 Pre-releases are ignored unless you turn **Pre-releases** on for that repo.
-Polls use conditional requests (ETags), so an unchanged repo doesn't use up
-GitHub's rate limit. When a release is signed by a different certificate than
+Polls use conditional requests (ETags); with `GITHUB_TOKEN` set, an unchanged
+repo doesn't use up GitHub's rate limit (GitHub only waives it for
+authenticated requests). When a release is signed by a different certificate than
 the pinned one, a **Signing change** panel shows both certificates and whether
 the new APK proves the rotation (see [Release verification](#release-verification)).
+
+**Builds** on a watched repo has two lists:
+
+- **Releases**: its published releases. **Stage** an older one and it goes
+  through every release check (uploader, signature, the pin, no debug
+  builds). It doesn't become "latest": auto-update and **Push latest** go by
+  release date, so they keep using the newest release.
+- **Test builds from workflow artifacts**: builds from its recent workflow
+  runs, grouped by commit, each commit with its message. **Stage** treats
+  one exactly like an uploaded zip (below) and records the repo, run, branch
+  and commit it came from. Its **build notes** on Install stand in for
+  release notes: the run, the pull request's description if it was built for
+  one, and the full commit message. Each build is badged by how it's signed
+  (**signed · same key as releases**, **signed · different key**, **debug
+  build** or **unsigned**) with a note on which to pick: only a build signed
+  with the releases' key updates the app a phone got from them. That's only
+  known once a build is downloaded, so **Check signing** downloads it, checks
+  it and deletes it; staging one records it too. Only builds from the repo's own branches
+  are listed: never one from a pull request opened from a fork, and never a
+  release's own build (its tag's run, or its tagged commit), which is under
+  Releases.
+
+![Builds: past releases, and test builds grouped by commit](docs/screenshots/builds.png)
+
+**Refresh from GitHub** fetches both lists fresh. Test builds need a token with
+**Actions: read** on that repo, saved under **Settings → GitHub** (or
+`GITHUB_TOKEN` in `.env`): GitHub serves artifact downloads only to an
+authenticated caller, even for a public repo. Settings → GitHub can also hide
+Docker build records (`*.dockerbuild`, on by default) and limit the list to a
+name pattern.
+
+**Only repos with APKs can be added.** The review refuses a repo unless one
+of its releases has an asset matching the glob, or (with a token) one of its
+recent workflow artifacts holds an `.apk`. That artifact is checked by
+reading only its zip's file list, not by downloading it. A repo with builds
+but no release yet shows **no release yet**, not an error.
+
+**Unsigned builds** can't be installed on Android at all. They're refused
+unless you opt in for that source: **Sign unsigned builds from this repo** on
+its Builds page (releases and test builds), or the **sign it with this
+server's key** box on an upload. The server then signs the build with a key
+it keeps for that source alone: one per watched repo (by its GitHub ID, so
+removing and re-adding the repo keeps it) and one for uploads, each created on
+first use and kept next to the database, with its password encrypted. It's
+marked **signed by this server**, and the phone will only accept updates to
+that app signed by the same key, until the app is uninstalled. Because no two
+sources share a key, one source's build can never pass as an update to
+another source's app. Settings → Security lists each key's fingerprint. Back up the data directory and `.env` together. A build whose
+signature is present but doesn't verify is always refused, and a release
+signed with the Android debug certificate is refused either way.
 
 **Upload an APK** (up to 500 MB) for builds that aren't published as GitHub
 releases, either the APK itself or a zip holding exactly one APK, such as a
@@ -248,7 +311,13 @@ upload's package matches a watched repo but its signer doesn't, you're warned
 that Android will refuse one over the other. Re-uploading a file that's
 already staged is refused.
 
-![Sources: add a repo or upload an APK, with a signing-key change awaiting review](docs/screenshots/sources.png)
+Every staged build is badged by how it's signed: **signed** (the developer's
+own key), **debug build**, or **signed by this server**. A debug-signed test
+build whose commit also produced other builds is flagged **Better not install
+this debug build**, with a button to stage the other one instead: a phone with
+the signed app refuses a debug build as an update.
+
+![Sources: repos, a signing-key change awaiting review, and uploads and test builds with their signing badges](docs/screenshots/sources.png)
 
 ### Devices
 
@@ -277,6 +346,13 @@ builds such as `arm64-v8a`, `armeabi-v7a` or universal), all of them are
 staged, up to 6. Release notes open under the card. **All builds and older
 versions** lists every staged file, to push a specific one or delete it.
 
+Cards are grouped as **Releases**, **Test builds from workflow artifacts** and
+**Uploads**. A test build is marked **Artifact · test build**, with its branch
+and commit linked to the workflow run, so it can't be mistaken for a release.
+The device picker names each phone by its nickname, else its model and the
+end of its serial (e.g. `Google Pixel 8 · …005KT`), read when the app first
+talks to it.
+
 Only the newest `KEEP_RELEASES_PER_REPO` releases per repo (default 3) are
 kept on disk. Older ones are deleted automatically. Install history is kept
 either way.
@@ -288,9 +364,45 @@ page that refreshes until the install finishes, including `adb`'s own output.
 
 ![A failed push, with adb's output](docs/screenshots/install-status.png)
 
+### Settings
+
+**Settings** opens on an overview: one card per area (General, Security,
+Notifications, GitHub, Appearance) showing its current state, such as whether
+two-factor is on, how many notification services there are, and whether the
+GitHub token is set and when it expires. Each card opens that area's page.
+
+![Settings overview](docs/screenshots/settings.png)
+
+**Settings → General** sets the time zone every date and time is shown in, and
+a 12-hour (1:05 PM, the default) or 24-hour clock, for everyone who signs in.
+Times are stored in UTC, and hovering one shows it exactly. Until a zone is
+saved there, `TZ` from the environment is used, else UTC.
+
+### GitHub token
+
+**Settings → GitHub** gets you a token in two steps:
+
+1. **Create a token on GitHub** opens GitHub's fine-grained token page with
+   everything filled in: read-only **Contents**, **Actions** and **Metadata**,
+   a 90-day expiry, named for this server. The one thing GitHub can't
+   pre-fill is which repos it covers: pick the ones you watch, then
+   **Generate token**.
+2. Paste it back. It's checked with GitHub before it's saved, then stored
+   encrypted and never shown again.
+
+The page then shows when the token expires (you're notified a week before,
+if the **token expiring** event is on), and an **Access** table that checks
+each watched repo for real: whether the token can read it, and whether it can
+download its artifacts. A public repo is readable with any token, so only
+asking GitHub for an artifact's download link, which it hands out only when
+the token may download it, proves the repo was included. A token in
+`GITHUB_TOKEN` in `.env` still works; one saved here takes precedence.
+
+![Settings: GitHub token and access](docs/screenshots/settings-github.png)
+
 ### Activity: install history and audit log
 
-Both are under **Settings → Activity**. **Install history** keeps every push
+Both are linked from the **Settings** overview. **Install history** keeps every push
 and its log.
 
 **Audit log**: logins (including failed ones and how the second step was
@@ -309,7 +421,8 @@ written to it.
 Notifications go through [Apprise](https://github.com/caronc/apprise/wiki),
 which covers ntfy, Gotify, Home Assistant, Discord, Telegram, email, plain JSON
 webhooks and about 100 more services, one URL each. You can be told when a
-release is staged or rejected, and when a push succeeds or fails.
+release is staged or rejected, when a push succeeds or fails, and when the
+GitHub token saved in Settings is about to expire.
 
 On **Settings → Notifications** you can:
 
@@ -328,7 +441,7 @@ and `NOTIFY_EVENTS` in `.env` also work: those services appear marked `.env`
 and can only be changed there. Events saved on the page override
 `NOTIFY_EVENTS`.
 
-![Settings: notifications and appearance](docs/screenshots/settings.png)
+![Settings: notifications](docs/screenshots/settings-notifications.png)
 
 ### Appearance
 
@@ -380,6 +493,35 @@ an accepted host, so the check works whatever `ALLOWED_HOSTS` says. If the UI
 answers a bare "Invalid host header", the name you browsed to isn't in
 `ALLOWED_HOSTS`. The app logs the accepted list at startup.
 
+## Source verification
+
+Checks that a watched repo is the real source before anything from it is
+trusted. They run before [Release verification](#release-verification).
+
+- **Reviewed before it's watched.** Adding a repo is two steps: look it up,
+  then confirm. The review page shows GitHub's own account of the repo and
+  warns about the signs of a look-alike: a fork, an archived repo, one under
+  30 days old, one with no release. Confirming re-checks that the name still
+  points at the repo you reviewed.
+- **Pinned by GitHub ID.** GitHub never reuses a repo or account ID, but a
+  name can be re-registered by someone else after a rename or deletion. The
+  repo's ID and its owner's ID are pinned when you confirm it (repos added
+  before 3.3.0 are pinned on their first poll). Before anything new is
+  downloaded, the name must still resolve to the pinned repo and owner. A
+  different repo under the name, a transfer to another owner, or a rename
+  stops that repo, with a notification, until you remove and re-add it.
+- **Assets from the owner or a workflow.** Each release asset records who
+  uploaded it. For a user's repo it must be the owner or
+  `github-actions[bot]`, which only the repo's own workflows can act as. For
+  an organization's repo it must be `github-actions[bot]`: members'
+  access can't be checked from here, so assets must come from a workflow.
+  Anything else rejects the release before it is downloaded.
+- **Artifacts from the repo's own runs.** A pull request from a fork runs
+  its workflows in the base repo and its artifacts are listed there, but
+  anyone on GitHub can open one. Only artifacts whose run was built from the
+  repo itself are listed or staged. Artifacts are test builds: like uploads,
+  they may be debug-signed and don't read or change the release pin.
+
 ## Release verification
 
 - **Trust on first use, then pinned.** The first release staged for a repo
@@ -390,8 +532,9 @@ answers a bare "Invalid host header", the name you browsed to isn't in
   else's release, from reaching your devices unnoticed.
 - **Every signer counts.** All of an APK's signers are checked and pinned,
   not just the first.
-- **Unsigned APKs are always rejected**, and so is a **debug-signed polled
-  release**. The default Android debug certificate is generated per machine
+- **Unsigned APKs are rejected** unless the repo opted in to having this
+  server sign them (see [Sources](#sources-repos-and-uploads)), and a
+  **debug-signed release** is always rejected. The default Android debug certificate is generated per machine
   and identifies nobody, and nobody is watching when the poller runs. A
   debug-signed release never becomes a pin.
 - **One release, one identity.** Every APK in a release must share the same
@@ -420,8 +563,9 @@ It's designed for **one operator on a home or small-office network**.
 | It defends against | How |
 |---|---|
 | A compromised or malicious upstream: a hijacked GitHub account, a tampered release asset | Package and signer pinning, signature verification, reviewed key rotation ([Release verification](#release-verification)) |
+| A look-alike or re-registered repo name, a release asset uploaded by someone else | Review before watching, GitHub-ID and owner pinning, uploader checks ([Source verification](#source-verification)) |
 | Someone on the LAN trying to reach your phones' ADB | The adb server's port is never published. Only the app can talk to it. |
-| Password guessing, stolen passwords | Per-IP rate limiting, TOTP two-factor sign-in, a global lockout on wrong codes |
+| Password guessing, stolen passwords | Per-client rate limiting (IPv6 by /64), TOTP two-factor sign-in, a global lockout on wrong codes |
 | Cross-site attacks from other tabs or sites | CSRF tokens, Origin checks, `SameSite=Strict` cookies, a strict CSP with no JavaScript at all |
 | DNS rebinding | A Host-header allowlist (`ALLOWED_HOSTS`) |
 | Stolen session cookies | 12-hour expiry, and logout revokes every session |
@@ -440,9 +584,16 @@ below).
   `changeme`.
 - **Constant-time credential checks.** The username and password are both
   compared every time, so response timing doesn't reveal which one was wrong.
-- **Rate limiting.** 5 failed attempts per client IP in 5 minutes, for both the
-  password and the code step. The tracking table is swept and capped, so a
-  flood of addresses can't grow it without bound.
+- **Rate limiting.** 5 failed attempts per client in 5 minutes, for both the
+  password and the code step. A client is its IPv4 address, or its IPv6 /64,
+  so rotating through one network's IPv6 addresses doesn't buy more guesses.
+  Behind a reverse proxy, set `FORWARDED_ALLOW_IPS` to the proxy's address so
+  each browser is counted by its own address rather than the proxy's. The
+  tracking table is swept and capped, so a flood of addresses can't grow it
+  without bound.
+- **Short secrets are flagged.** A `SECRET_KEY` under 32 characters or an
+  `APP_PASSWORD` under 12 is logged at startup and shown as a warning on every
+  page. The app still starts, so an upgrade never locks you out.
 - **Two-factor sign-in (TOTP, RFC 6238).** The implementation uses only the
   standard library (HMAC-SHA1, 30-second steps, ±1 step for clock drift), so
   there's no third-party dependency to trust. The password alone only yields
@@ -530,11 +681,15 @@ below).
 
 ### GitHub access
 
-- `GITHUB_TOKEN` is optional. When set, it should be a fine-grained,
-  read-only token scoped to the repos you watch.
+- A GitHub token is optional: saved in **Settings → GitHub** (checked
+  with GitHub first, stored encrypted, never shown again), or `GITHUB_TOKEN`
+  in `.env`. Either way it should be a fine-grained,
+  read-only token scoped to the repos you watch: **Contents: read** for
+  releases, plus **Actions: read** to stage workflow artifacts.
 - The token is sent **only to `api.github.com`**. Asset downloads follow
   GitHub's redirect manually, without the `Authorization` header, only over
-  HTTPS, and only to GitHub's own hosts.
+  HTTPS, and only to GitHub's own hosts (and, for workflow artifacts, the
+  Azure blob storage GitHub serves them from).
 - Owner and repo names are validated against a strict pattern. File paths are
   never built from tag or asset names, which are upstream-controlled.
 
@@ -560,12 +715,19 @@ below).
 |---|---|---|
 | adb private key (every paired phone trusts it) | `/opt/docker/adb-server/adbkeys` | Only `adb-server` mounts it |
 | Database: repos, devices, audit log, settings | `/opt/docker/adb-server/appdata` (`app.db`) | Only `app` mounts it |
-| TOTP secret, notification service URLs | In the database | **Not encrypted.** Same protection as `.env` and the data directory. |
+| TOTP secret, notification service URLs, GitHub token saved in Settings | In the database | **Encrypted** (Fernet: AES-128-CBC + HMAC-SHA256) with a key derived from `SECRET_KEY` by HKDF. The key is never stored, so the database or a backup of it reveals none of them without `.env`. |
 | Recovery codes, trusted-browser tokens | In the database | SHA-256 hashes only |
+| This server's APK signing keys, one per source (only for sources you opted in to signing unsigned builds) | `appdata/signing/github-<repo ID>.p12`, `appdata/signing/uploads.p12` | PKCS#12 keystores, mode 600. Their passwords are encrypted in the database, like the secrets above |
 | `SECRET_KEY`, password, `GITHUB_TOKEN` | `.env` | Keep it `chmod 600`. It's gitignored and excluded from image builds. |
 
-Anyone who can read the `appdata` or `adbkeys` directories, or `.env`, can act as
+Anyone who can read the `adbkeys` directory, or `appdata` *and* `.env`, can act as
 this server. Back those up, and protect the backups the same way.
+
+**Changing `SECRET_KEY`** signs everyone out and makes the encrypted values
+unreadable. Nothing is silently dropped: the GitHub token and each
+notification service show as unreadable in Settings, to be entered again, and
+two-factor sign-in stays on but refuses every code until you reset it with
+`docker exec -it adb-server-app python mfa_admin.py reset`.
 
 ### Supply chain and CI
 
@@ -581,16 +743,16 @@ this server. Back those up, and protect the backups the same way.
 ### Recommended hardening checklist
 
 - [ ] Serve it over **TLS** (reverse proxy), keep `COOKIE_SECURE=true`, set
-      `ALLOWED_ORIGIN`, and bind the app port to `127.0.0.1`.
+      `ALLOWED_ORIGIN` and `FORWARDED_ALLOW_IPS`, and bind the app port to `127.0.0.1`.
 - [ ] **Never expose port 8080 to the internet.** Use a VPN such as Tailscale
       for remote access.
 - [ ] Set `ALLOWED_HOSTS` to exactly the names you browse to.
-- [ ] Use a long, random `APP_PASSWORD` and `SECRET_KEY`.
+- [ ] Use a long, random `APP_PASSWORD` (12+ characters) and `SECRET_KEY` (32+).
 - [ ] Turn on **two-factor sign-in**, and store the recovery codes offline.
 - [ ] `chmod 600 .env`.
 - [ ] Use a fine-grained, read-only `GITHUB_TOKEN`, or none for public repos.
 - [ ] Back up the `appdata` and `adbkeys` directories, and protect the backups.
-- [ ] Review the **Audit log** (Settings → Activity) from time to time, and Sources whenever
+- [ ] Review the **Audit log** (linked from Settings) from time to time, and Sources whenever
       a signing change is flagged.
 
 ### Known limitations and accepted risks
@@ -604,8 +766,10 @@ this server. Back those up, and protect the backups the same way.
 - **The two-factor lockout is global.** Someone who already has your password
   can keep the second step locked. Recovery codes and `mfa_admin.py unlock`
   get you back in.
-- **No encryption at rest** for the TOTP secret or notification URLs (see
-  above).
+- **Not everything at rest is encrypted.** The secrets in the database are
+  (see [Data at rest](#data-at-rest)), but the rest of it (repos, devices, the
+  audit log) and the staged APKs are not. They're protected by file
+  permissions and by being mounted only into `app`.
 
 ### Reporting a vulnerability
 
@@ -631,16 +795,17 @@ Quickstart step 2 creates it with the required ones; [`.env.example`](.env.examp
 
 | Variable | Default | What it does |
 |---|---|---|
-| `SECRET_KEY` | *(required)* | Signs cookies. `openssl rand -hex 32`. Changing it signs everyone out. |
+| `SECRET_KEY` | *(required)* | Signs cookies and encrypts the database's secrets. `openssl rand -hex 32`; under 32 characters is warned about. Changing it signs everyone out. |
 | `APP_USERNAME`, `APP_PASSWORD` | *(required)* | The single operator account. |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` | Host names the app answers to (DNS-rebinding protection). |
 | `ALLOWED_ORIGIN` | *(blank: same origin)* | Exact `scheme://host[:port]` forms may come from. Set it behind a TLS proxy. |
+| `FORWARDED_ALLOW_IPS` | *(blank: none)* | Your reverse proxy's IP address(es). The app then takes each browser's address from `X-Forwarded-For`, for rate limiting and the audit log. Name only the proxy. |
 | `COOKIE_SECURE` | `true` | `false` only for plain-HTTP access to anything but localhost. |
-| `GITHUB_TOKEN` | *(blank)* | Fine-grained, read-only PAT, for private repos or higher rate limits. |
+| `GITHUB_TOKEN` | *(blank)* | Fine-grained, read-only PAT (Contents: read; Actions: read for artifacts), for private repos, artifacts or higher rate limits. A token saved in Settings → GitHub takes precedence. |
 | `POLL_INTERVAL_MINUTES` | `10` | How often repos are polled. |
 | `KEEP_RELEASES_PER_REPO` | `3` | Staged releases kept on disk per repo. |
 | `APPRISE_URLS` | *(blank)* | Notification services (space- or comma-separated). |
-| `NOTIFY_EVENTS` | *(all)* | `staged,rejected,install_success,install_failed` |
+| `NOTIFY_EVENTS` | *(all)* | `staged,rejected,install_success,install_failed,token_expiring` |
 | `ADB_SCAN_PORTS` | `30000-49999` | Port range scanned to find a device whose port changed. |
 | `DB_PATH`, `STAGING_ROOT` | `/data/app.db`, `/data/staging` | Storage locations inside the app container. |
 | `ADB_HOST`, `ADB_PORT` | `adb-server`, `5037` | Where the adb server is. |
@@ -652,6 +817,21 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
 bash scripts/test.sh
 ```
+
+Dependencies are pinned in lockfiles with a hash for every package, direct
+and transitive, and the image installs with `--require-hashes`. Edit the
+direct pins in `app/requirements.in` (or `requirements-dev.in` for test tools),
+then regenerate both lockfiles with `pip-tools`, the app's first:
+
+```bash
+pip install pip-tools
+(cd app && pip-compile --generate-hashes --allow-unsafe --strip-extras requirements.in)
+pip-compile --generate-hashes --allow-unsafe --strip-extras requirements-dev.in
+```
+
+The screenshots in this README come from invented data, with GitHub mocked:
+`bash scripts/screenshots/run.sh <host-ip>` builds the app from the checkout,
+seeds it and retakes every one in `docs/screenshots/`.
 
 The tests stub out GitHub, `adb`, `apksigner` and `aapt2`, so they need no
 Android tooling and no device.
@@ -665,7 +845,8 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 
 CI (`.github/workflows/ci.yml`) runs on every push and PR. It runs the same
 test script, checks that `VERSION` matches `CHANGELOG.md`, validates the
-compose file, audits the dependencies and builds both images. Pushing a
+compose file, checks that the two lockfiles agree, audits the dependencies,
+runs `bandit` (Medium and up fails the build) and builds both images. Pushing a
 `v*` tag on the default branch runs `release.yml`, which publishes the images
 to `ghcr.io/darthrater78/adb-server/{app,adb-server}` and creates the
 GitHub release, but only for a commit CI already passed.

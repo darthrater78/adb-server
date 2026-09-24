@@ -214,3 +214,59 @@ def test_network_errors_become_github_errors(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", Boom)
     with pytest.raises(github_client.GithubError, match="Could not reach GitHub"):
         asyncio.run(github_client.get_latest_release("o", "r", None))
+
+
+def test_httpx_request_urls_are_not_logged():
+    # Download redirects carry signed URLs that work as read tokens.
+    import logging
+
+    import main  # noqa: F401 — importing it sets the level
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
+# ---- login rate limit: who a failure counts against ----
+
+class _Req:
+    def __init__(self, host):
+        self.client = type("C", (), {"host": host})()
+
+
+@pytest.mark.parametrize("host,key", [
+    ("192.0.2.7", "192.0.2.7"),
+    ("2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"),
+    ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),  # same /64: same budget
+    ("::ffff:192.0.2.7", "192.0.2.7"),  # IPv4-mapped counts as the IPv4 address
+    ("testclient", "testclient"),
+])
+def test_rate_limit_key(host, key):
+    assert auth._client_key(_Req(host)) == key
+
+
+def test_rotating_ipv6_addresses_in_one_64_shares_one_budget(monkeypatch):
+    monkeypatch.setattr(auth, "_failed_attempts", {})
+    for n in range(auth.MAX_ATTEMPTS):
+        auth.record_failed_attempt(_Req(f"2001:db8::{n + 1:x}"))
+    with pytest.raises(auth.HTTPException) as exc:
+        auth.check_rate_limit(_Req("2001:db8::ffff"))
+    assert exc.value.status_code == 429
+
+
+# ---- short login secrets are warned about, not refused ----
+
+@pytest.mark.parametrize("key,password,expected", [
+    ("k" * 32, "p" * 12, []),
+    ("k" * 31, "p" * 12, ["SECRET_KEY"]),
+    ("k" * 64, "p" * 11, ["APP_PASSWORD"]),
+    ("short", "short", ["SECRET_KEY", "APP_PASSWORD"]),
+])
+def test_weak_settings(monkeypatch, key, password, expected):
+    monkeypatch.setattr(auth, "SECRET_KEY", key)
+    monkeypatch.setattr(auth, "APP_PASSWORD", password)
+    assert [w.split(" ", 1)[0] for w in auth.weak_settings()] == expected
+
+
+def test_weak_settings_banner_shows_only_when_signed_in(client, authed, monkeypatch):
+    monkeypatch.setattr(auth, "WEAK_SETTINGS", ["APP_PASSWORD is shorter than 12 characters."])
+    assert "APP_PASSWORD is shorter" in authed.get("/status").text
+    authed.cookies.clear()
+    assert "APP_PASSWORD is shorter" not in authed.get("/login").text

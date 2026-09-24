@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Notifications — Settings — ADB Server{% endblock %}
+{% block content %}
+{% include "_settings_nav.html" %}
+<h1>Notifications</h1>
+
+<section class="settings-section">
+  <p class="muted">
+    ADB Server sends notifications through <a href="https://github.com/caronc/apprise/wiki" rel="noopener noreferrer">Apprise</a>,
+    which reaches ntfy, Gotify, Home Assistant, Discord, Telegram, Slack, email, plain webhooks and over 100 other
+    services. Each service is one URL. Tokens and passwords in a URL are masked everywhere they're shown.
+  </p>
+
+  <h3>Services</h3>
+  <p class="muted small">Each saved service has its own <strong>Send test</strong> button. To try one before saving it,
+    fill in a form below and press <strong>Test</strong>.</p>
+  <div class="table-wrap">
+  <table class="notify-table">
+    <thead><tr><th>Service</th><th>Address</th><th>Label</th><th></th></tr></thead>
+    <tbody>
+      {% for t in targets %}
+      <tr>
+        <td data-label="Service">
+          {{ t.service }}
+          {% if t.from_env %}<span class="badge badge-muted" title="Set by APPRISE_URLS in .env — edit it there">.env</span>{% endif %}
+          {% if not t.valid %}<span class="badge badge-error">not recognised</span>{% endif %}
+        </td>
+        <td data-label="Address" class="mono small">{{ t.masked }}</td>
+        <td data-label="Label">{{ t.label or "—" }}</td>
+        <td class="actions">
+          <form method="post" action="/settings/notify/test">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="target" value="{{ t.key }}">
+            <button type="submit" class="secondary">Send test</button>
+          </form>
+          {% if not t.from_env %}
+          <form method="post" action="/settings/notify/{{ t.key }}/delete">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="danger">Remove</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="empty-state">No services yet — add one below.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {% if targets %}
+  <form method="post" action="/settings/notify/test" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="target" value="all">
+    <button type="submit">Send test to all services</button>
+  </form>
+  {% endif %}
+
+  <h3>Add a service</h3>
+  <details class="add-details"{% if draft.server %} open{% endif %}>
+    <summary>Add an Apprise server</summary>
+  <p class="muted small">If you run an <a href="https://github.com/caronc/apprise-api" rel="noopener noreferrer">Apprise
+    API server</a>, point ADB Server at it and manage the actual services there. Paste its notify URL — e.g.
+    <code>http://apprise.local:8000/notify/my-key</code> — or the address and config key separately.
+    Tags, if you use them, pick which of that config's services receive these notifications.</p>
+  <form method="post" action="/settings/notify/add-server" class="inline-form panel add-service">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Server address or notify URL
+      <input type="text" name="server" required maxlength="500" autocomplete="off" autocapitalize="none"
+             spellcheck="false" placeholder="http://apprise.local:8000/notify/my-key" size="36" value="{{ draft.server or '' }}">
+    </label>
+    <label>Config key
+      <input type="text" name="key" maxlength="128" autocomplete="off" autocapitalize="none" spellcheck="false"
+             placeholder="my-key (if not in the URL)" value="{{ draft.key or '' }}">
+    </label>
+    <label>Tags (optional)
+      <input type="text" name="tags" maxlength="400" autocomplete="off" autocapitalize="none" spellcheck="false"
+             placeholder="e.g. phone, desk" value="{{ draft.tags or '' }}">
+    </label>
+    <label>Label (optional)
+      <input type="text" name="label" maxlength="80" placeholder="e.g. home server" value="{{ draft.server_label or '' }}">
+    </label>
+    <button type="submit" class="secondary" formaction="/settings/notify/try-server">Test</button>
+    <button type="submit">Add server</button>
+  </form>
+  </details>
+
+  <details class="add-details"{% if draft.url %} open{% endif %}>
+    <summary>Add a single service by URL</summary>
+  <p class="muted small">Any single Apprise URL — see the guide below for formats.</p>
+  <form method="post" action="/settings/notify/add" class="inline-form panel add-service">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Apprise URL
+      <input type="text" name="url" required maxlength="2000" autocomplete="off" autocapitalize="none"
+             spellcheck="false" placeholder="ntfy://ntfy.sh/my-topic" size="44" value="{{ draft.url or '' }}">
+    </label>
+    <label>Label (optional)
+      <input type="text" name="label" maxlength="80" placeholder="e.g. my phone" value="{{ draft.url_label or '' }}">
+    </label>
+    <button type="submit" class="secondary" formaction="/settings/notify/try">Test</button>
+    <button type="submit">Add service</button>
+  </form>
+  </details>
+
+  <h3>Events</h3>
+  <form method="post" action="/settings/notify/events" class="events-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for key, label, on in events %}
+    <label class="check">
+      <input type="checkbox" name="events" value="{{ key }}"{% if on %} checked{% endif %}>
+      <span>{{ label }}</span>
+    </label>
+    {% endfor %}
+    <p class="muted small">
+      {% if events_from == "settings" %}Saved here.
+      {% elif events_from == "env" %}Currently from <code>NOTIFY_EVENTS</code> in .env — saving here overrides it.
+      {% else %}All events are on by default.{% endif %}
+    </p>
+    <button type="submit">Save events</button>
+  </form>
+
+  <details class="apprise-guide">
+    <summary>Apprise URL guide</summary>
+    <p>Paste the URL for your service. A few common ones:</p>
+    <table class="guide-table">
+      <thead><tr><th>Service</th><th>URL format</th></tr></thead>
+      <tbody>
+        <tr><td data-label="Service">Apprise API server</td><td data-label="Format" class="mono small">http://your-server:port/notify/your-key<br>apprise://your-server:port/your-key?tags=phone</td></tr>
+        <tr><td data-label="Service">ntfy</td><td data-label="Format" class="mono small">ntfy://ntfy.sh/your-topic<br>ntfys://user:pass@your-server/topic</td></tr>
+        <tr><td data-label="Service">Gotify</td><td data-label="Format" class="mono small">gotifys://your-server/AppToken</td></tr>
+        <tr><td data-label="Service">Home Assistant</td><td data-label="Format" class="mono small">hassios://your-ha:8123/LongLivedAccessToken</td></tr>
+        <tr><td data-label="Service">Discord</td><td data-label="Format" class="mono small">discord://WebhookID/WebhookToken</td></tr>
+        <tr><td data-label="Service">Telegram</td><td data-label="Format" class="mono small">tgram://BotToken/ChatID</td></tr>
+        <tr><td data-label="Service">Slack</td><td data-label="Format" class="mono small">slack://TokenA/TokenB/TokenC/#channel</td></tr>
+        <tr><td data-label="Service">Pushover</td><td data-label="Format" class="mono small">pover://UserKey@AppToken</td></tr>
+        <tr><td data-label="Service">Email</td><td data-label="Format" class="mono small">mailtos://user:app-password@gmail.com</td></tr>
+        <tr><td data-label="Service">Webhook (JSON POST)</td><td data-label="Format" class="mono small">jsons://your-server/path</td></tr>
+      </tbody>
+    </table>
+    <ul class="muted small">
+      <li>Every other service and all options are in the <a href="https://github.com/caronc/apprise/wiki" rel="noopener noreferrer">Apprise wiki</a>.
+        An "s" on the end of a scheme (<code>ntfys</code>, <code>gotifys</code>, <code>jsons</code>) means HTTPS — prefer it.</li>
+      <li>Services added here are stored in the app's database, encrypted with a key derived from
+        <code>SECRET_KEY</code>. Services in <code>APPRISE_URLS</code> in <code>.env</code> are shown too, but can only be
+        changed there.</li>
+      <li>This server makes the request, so a URL can point at anything this server can reach, including your LAN.</li>
+      <li>A failed notification never stops a poll or a push; it's logged and skipped.</li>
+    </ul>
+  </details>
+</section>
+{% endblock %}

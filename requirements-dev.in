@@ -1,0 +1,7 @@
+# Test dependencies on top of the app's. requirements-dev.txt is compiled from this
+# file with hashes: edit this file, then run
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras requirements-dev.in
+-r app/requirements.in
+# Exactly the versions the app image installs.
+-c app/requirements.txt
+pytest==9.1.1

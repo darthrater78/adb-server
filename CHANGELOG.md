@@ -1,5 +1,116 @@
 # Changelog
 
+## 3.3.0 — 2026-09-24
+
+- Added: **stage a test build straight from a watched repo's workflow
+  runs.** **Artifacts** on a repo lists the builds its recent runs uploaded;
+  **Stage** unwraps the zip and checks the APK like an upload, recording the
+  run, branch and commit it came from. Its **build notes** on Install take
+  the place of release notes: the run, the pull request's description if it
+  was built for one, and the full commit message. Artifacts from pull requests opened
+  from forks are never offered. Needs `GITHUB_TOKEN` with Actions: read.
+- Changed: **Install groups its cards** into Releases, Test builds from
+  workflow artifacts, and Uploads. A test build is badged **Artifact · test
+  build** and shows its branch and commit, linked to the run.
+- Changed: **devices are named by model** where they have no nickname
+  (e.g. "Google Pixel 8 · …005KT") instead of a bare serial, in the device
+  picker, on Status and on Devices. The model is read over adb alongside the
+  CPU type.
+- Added: **Builds** on a watched repo (was Artifacts) lists its past
+  releases to stage an older one, through every release check, and its test
+  builds grouped by commit with each commit's message. A release's own build
+  is no longer offered as a test build. **Refresh from GitHub** fetches both
+  fresh.
+- Changed: **"latest" means the newest release by release date**, not the
+  most recent download, so staging an older release never makes auto-update
+  or Push latest send it.
+- Added: **only repos with APKs can be added**: a release asset matching the
+  glob, or (with a token) an artifact whose zip lists an `.apk`, checked from
+  the zip's file list without downloading it.
+- Added: **unsigned builds, by opt-in**: per repo (on Builds) or per upload,
+  with an explanation, the server signs an unsigned build and marks it
+  **signed by this server**. Each source gets its own key (one per watched
+  repo, kept by its GitHub ID, and one for uploads), so one source's build
+  can never pass as an update to another source's app. Settings → Security
+  lists each key's fingerprint. Without the opt-in an unsigned build is
+  refused with the reason. Adds `zipalign` to the image.
+- Changed: **Check now** reloads the page until the check is done and says
+  what it found; a repo with no release yet is "no release yet", not an
+  error.
+- Changed: on Sources, uploads and test builds are one table, each row
+  badged **Artifact** (with branch and commit) or **Upload**.
+- Security: the HTTP client no longer logs request URLs, which for a
+  download include a signed storage link that works as a short-lived read
+  token.
+- Added: **signing badges** on every staged build: **signed**, **debug
+  build** or **signed by this server**. A debug-signed test build whose commit
+  also built something else is flagged **Better not install this debug
+  build**, with a button to stage the other one.
+- Added: **Settings → General** with the time zone and a 12-hour (default)
+  or 24-hour clock for every date and time shown (stored in UTC; `TZ` from
+  the environment is the default zone).
+- Added: on Builds, each test build is badged by how it's signed: **signed ·
+  same key as releases**, **signed · different key**, **debug build** or
+  **unsigned**, with a note on which to pick. **Check signing** downloads a
+  build to find out, then deletes it; staging records it too.
+- Docs: every screenshot retaken from invented data with GitHub mocked, plus
+  new ones for the repo review and the Builds page. `scripts/screenshots/`
+  regenerates them.
+- Added: **a repo is reviewed before it's watched.** Adding one shows what
+  GitHub says it is (owner, created date, stars, ID) and warns about the
+  signs of a look-alike: a fork, archived, under 30 days old, no release.
+- Added: **watched repos are pinned by GitHub ID and owner.** If the name
+  later points at a different repo, the repo is transferred, or it's
+  renamed, nothing more is staged from it and you're notified. Existing
+  repos are pinned on their first poll after upgrading.
+- Added: **release assets must be uploaded by the repo's owner or its
+  workflows** (`github-actions[bot]`); for an organization's repo, by its
+  workflows only. A release with an asset from anyone else is rejected before
+  it's downloaded.
+- Changed: **Settings is split into pages.** `/settings` is now an overview
+  with one card per area and its current state. Security, Notifications,
+  GitHub and Appearance each have their own page. The notification add-forms
+  fold away until needed.
+- Added: **Settings → GitHub.** **Create a token on GitHub** opens GitHub's
+  token page pre-filled with read-only Contents, Actions and Metadata and a
+  90-day expiry; paste the token back and it's checked, saved encrypted and
+  never shown again. It takes precedence over `GITHUB_TOKEN` in `.env`. The
+  page shows when it expires (with a new **token expiring** notification a
+  week before) and checks each watched repo for real: can the token read it,
+  and download its artifacts. The artifact list can hide Docker build records
+  and filter by name.
+- Security: **secrets in the database are now encrypted at rest**: the
+  GitHub token, the TOTP secret and saved notification URLs, with a key
+  derived from `SECRET_KEY`. Existing values are encrypted on first start.
+  Changing `SECRET_KEY` now also means entering the token and notification
+  services again and resetting two-factor (`mfa_admin.py reset`). Adds the
+  `cryptography` dependency.
+- Docs: `GITHUB_TOKEN` waives the rate limit for unchanged repos only when
+  set; the README said this happened without a token too.
+- Security: **failed sign-ins from IPv6 are counted per /64**, so rotating
+  through one network's addresses no longer buys more guesses. Behind a
+  reverse proxy, the new `FORWARDED_ALLOW_IPS` setting names the proxy, so
+  each browser is counted by its own address: before, every sign-in seemed to
+  come from the proxy, and a few wrong passwords from anyone locked everyone
+  out for 5 minutes.
+- Security: a `SECRET_KEY` under 32 characters or an `APP_PASSWORD` under 12
+  is now logged at startup and warned about on every page. The app still
+  starts with them.
+- Fixed: the audit log dropped "trusted for 30 days" from a sign-in with a
+  recovery code.
+- Security: Python dependencies are installed from a lockfile that pins every
+  package, direct and transitive, with its hashes (`app/requirements.in` →
+  `app/requirements.txt`), so the image holds exactly the tree CI audited.
+  CI also runs `bandit` now.
+- Changed: both images build on Debian 13 (trixie); the adb server image and
+  the tool-fetching stage were still on Debian 12.
+- Docs: `.env.example` pointed at Settings → Artifacts (now Settings →
+  GitHub) and left `token_expiring` out of the notification events; the
+  README still said the TOTP secret and notification URLs weren't encrypted.
+- Internal: `main.py` is split into one module per area
+  (`routes_*.py`), with shared page helpers in `web.py` and upload staging in
+  `uploads.py`. No route changed.
+
 ## 3.2.0 — 2026-09-24
 
 - Added: **upload a zip holding an APK**, such as the artifact a GitHub

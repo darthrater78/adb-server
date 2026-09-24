@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Security — Settings — ADB Server{% endblock %}
+{% block content %}
+{% include "_settings_nav.html" %}
+<h1>Security</h1>
+<p class="page-intro muted">Two-factor sign-in and the browsers trusted to skip it.</p>
+
+<section class="settings-section">
+  <h3>Two-factor sign-in</h3>
+  {% if not mfa_enabled %}
+  <p class="muted">After the password, also ask for a 6-digit code from an authenticator app on your phone
+    (Google Authenticator, Aegis, 1Password, Bitwarden and the like). A browser can be trusted for
+    {{ trust_days }} days so it isn't asked every time.</p>
+  <p><a href="/settings/mfa/setup" class="button-link">Set up two-factor sign-in</a></p>
+  {% else %}
+  <p><span class="badge badge-ok">On</span>
+    <span class="muted">Sign-in asks for a code from your authenticator app. {{ recovery_left }} recovery
+      code{{ '' if recovery_left == 1 else 's' }} left.</span>
+    {% if recovery_left <= 3 %}<span class="badge badge-warn">make new recovery codes</span>{% endif %}</p>
+  {% if mfa_locked %}
+  <p class="flash flash-warn">Two-factor sign-in is locked after too many wrong codes, for
+    {{ (mfa_locked / 60) | round(0, 'ceil') | int }} more minutes.</p>
+  {% endif %}
+  <form method="post" action="/settings/mfa/recovery-codes" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Current code
+      <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="20" size="10" required>
+    </label>
+    <button type="submit" class="secondary">New recovery codes</button>
+    <button type="submit" class="danger" formaction="/settings/mfa/disable">Turn off two-factor</button>
+  </form>
+  <p class="muted small">Both need a current code (or a recovery code). New recovery codes replace all the old ones.</p>
+
+  <h3>Trusted browsers</h3>
+  {% if trusted_browsers %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Browser</th><th>From</th><th>Trusted since</th><th>Last used</th><th>Until</th><th></th></tr></thead>
+    <tbody>
+      {% for b in trusted_browsers %}
+      <tr>
+        <td data-label="Browser">{{ b.label }}{% if b.token_hash == this_browser %} <span class="badge badge-muted">this one</span>{% endif %}</td>
+        <td data-label="From" class="mono small">{{ b.client or "—" }}</td>
+        <td data-label="Since">{{ b.created_at | when }}</td>
+        <td data-label="Last used">{{ b.last_used_at | when("—") }}</td>
+        <td data-label="Until">{{ b.expires_at | when }}</td>
+        <td>
+          <form method="post" action="/settings/mfa/trusted/revoke">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="browser" value="{{ b.token_hash }}">
+            <button type="submit" class="danger">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <form method="post" action="/settings/mfa/trusted/revoke">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="secondary">Revoke all</button>
+  </form>
+  {% else %}
+  <p class="muted small">None. Tick "Trust this browser" when entering a code to skip it for {{ trust_days }} days.</p>
+  {% endif %}
+
+  <details class="guide">
+    <summary>Locked out, or lost your phone?</summary>
+    <ul class="muted small">
+      <li>Sign in with one of your recovery codes, in place of the 6-digit code.</li>
+      <li>Five wrong codes lock two-factor sign-in for 15 minutes. To unlock it now, on the server:
+        <code>docker compose exec app python mfa_admin.py unlock</code></li>
+      <li>No recovery codes left: <code>docker compose exec app python mfa_admin.py reset</code> turns two-factor
+        off (and signs everyone out), so you can sign in with the password and set it up again.</li>
+    </ul>
+  </details>
+  {% endif %}
+  <h3>This server's signing keys</h3>
+  {% if signing_keys %}
+  <ul class="signing-keys">
+    {% for k in signing_keys %}
+    <li><strong>{{ k.name }}</strong> <span class="mono small">{{ "SHA-256 " ~ k.fingerprint if k.fingerprint else "can't be read (SECRET_KEY changed?)" }}</span></li>
+    {% endfor %}
+  </ul>
+  <p class="muted small">One per source (each watched repo, and uploads), so one source's build can never pass as an
+    update to another's app. Apps signed with a key only accept updates signed by it: back up the data directory
+    and <code>.env</code> (SECRET_KEY) together.</p>
+  {% else %}
+  <p class="muted small">None yet. A source's key is created the first time an unsigned build from it is signed, for a
+    source you opted in.</p>
+  {% endif %}
+</section>
+{% endblock %}

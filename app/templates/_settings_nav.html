@@ -1,0 +1,6 @@
+<nav class="settings-nav" aria-label="Settings">
+  <a href="/settings"{% if settings_page == "overview" %} aria-current="page"{% endif %}>Overview</a>
+  {% for slug, label in [("general", "General"), ("security", "Security"), ("notifications", "Notifications"), ("github", "GitHub"), ("appearance", "Appearance")] %}
+  <a href="/settings/{{ slug }}"{% if settings_page == slug %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>

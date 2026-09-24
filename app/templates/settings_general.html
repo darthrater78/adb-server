@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}General — Settings — ADB Server{% endblock %}
+{% block content %}
+{% include "_settings_nav.html" %}
+<h1>General</h1>
+<p class="page-intro muted">How dates and times are shown, for everyone who signs in.</p>
+
+<section class="settings-section">
+  <h2>Date and time</h2>
+  <form method="post" action="/settings/timezone" class="stack-form narrow-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Time zone
+      <select name="tz" aria-label="Time zone">
+        {% for z in time_zones %}<option value="{{ z }}"{% if z == time_zone %} selected{% endif %}>{{ z }}</option>{% endfor %}
+      </select>
+    </label>
+    <fieldset class="choice">
+      <legend>Clock</legend>
+      <label class="check"><input type="radio" name="clock" value="12"{% if not clock_24h %} checked{% endif %}> 12-hour (1:05 PM)</label>
+      <label class="check"><input type="radio" name="clock" value="24"{% if clock_24h %} checked{% endif %}> 24-hour (13:05)</label>
+    </fieldset>
+    <button type="submit">Save</button>
+  </form>
+  <p class="muted small">Times are stored in UTC; hover one to see it exactly. Until a time zone is saved here,
+    <code>TZ</code> from the environment is used, else UTC.</p>
+</section>
+{% endblock %}

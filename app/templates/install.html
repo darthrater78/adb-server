@@ -10,33 +10,51 @@
 {% endif %}
 
 {% macro device_select() %}
-<select name="device_serial" required aria-label="Device">
+<label class="push-to">to
+<select name="device_serial" required aria-label="Device to push to">
   {% for d in devices %}
-  <option value="{{ d.serial }}">{{ d.nickname or d.serial }}</option>
+  <option value="{{ d.serial }}">{{ d | device_name }}</option>
   {% endfor %}
 </select>
+</label>
 {% endmacro %}
 
+{% set kinds = groups | map(attribute="kind") | unique | list %}
 {% for g in groups %}
 {% set latest = g.releases[0] %}
 {% set first = latest.apks[0] %}
-<section class="panel app-card" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
+{% if kinds | length > 1 and (loop.first or loop.previtem.kind != g.kind) %}
+<h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
+{% endif %}
+<section class="panel app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
   <div class="app-card-head">
     <div>
       <h2>{{ g.label }}</h2>
+      {% if g.kind == "artifact" %}
+      <p class="artifact-origin">
+        <span class="tag-pill" title="Branch">{{ first.artifact_branch or "?" }}</span>
+        <a class="mono small" href="https://github.com/{{ first.artifact_repo }}/actions/runs/{{ first.artifact_run_id }}"
+           rel="noopener noreferrer" title="Open the workflow run on GitHub">{{ (first.artifact_sha or "")[:7] }} · run {{ first.artifact_run_id }}</a>
+      </p>
+      {% if first.artifact_subject %}<p class="commit-subject">{{ first.artifact_subject }}</p>{% endif %}
+      {% endif %}
       <p class="mono small muted">{{ first.package_name }}</p>
     </div>
     <div class="app-card-meta">
-      {% if g.repo_id %}<span class="badge badge-muted">GitHub</span>{% else %}<span class="badge badge-muted">Upload</span>{% endif %}
-      {% if first.is_debug %}<span class="badge badge-warn" title="Signed with the default Android debug certificate">debug build</span>{% endif %}
+      {% if g.kind == "release" %}<span class="badge badge-muted">GitHub release</span>
+      {% elif g.kind == "artifact" %}<span class="badge badge-artifact" title="Built by a workflow run, not a release">Artifact · test build</span>
+      {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
+      {% set a = first %}{% include "_signing_badges.html" %}
     </div>
   </div>
+
+  {% set a = first %}{% include "_debug_advice.html" %}
 
   <p class="app-card-latest">
     <span class="tag-pill">{{ first.version_name or latest.tag }}</span>
     {% if g.repo_id and first.version_name and first.version_name != latest.tag.lstrip('v') %}<span class="muted small">{{ latest.tag }}</span>{% endif %}
     <span class="muted small">
-      {{ "staged" if g.repo_id else "uploaded" }} {{ first.downloaded_at | when }}
+      {{ "uploaded" if g.kind == "upload" else "staged" }} {{ first.downloaded_at | when }}
       · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
       ({{ latest.apks | map(attribute="abis") | map("default", "any", true) | join(", ") or "any CPU" }})
     </span>
@@ -63,7 +81,7 @@
 
   {% for a in latest.apks if a.release_notes %}{% if loop.first %}
   <details>
-    <summary>Release notes for {{ first.version_name or latest.tag }}</summary>
+    <summary>{{ "Build notes" if a.source == "upload" else "Release notes" }} for {{ first.version_name or latest.tag }}</summary>
     <pre class="release-notes">{{ a.release_notes }}</pre>
   </details>
   {% endif %}{% endfor %}

@@ -3,8 +3,8 @@ which turns one URL per service — ntfy://, gotifys://, hassios://, discord://,
 mailtos://, json:// and ~100 more — into a notification.
 
 Services come from two places: APPRISE_URLS in .env (read-only here) and the
-ones added on the Settings page (stored in the database). The URLs hold
-credentials, so they are never logged or rendered whole — only Apprise's own
+ones added on the Settings page (stored in the database, encrypted by
+secretbox). The URLs hold credentials, so they are never logged or rendered whole — only Apprise's own
 privacy-masked form is shown. Sending is best effort: a failure is logged and
 swallowed, never allowed to fail a poll or a push."""
 import logging
@@ -17,12 +17,13 @@ import db
 
 logger = logging.getLogger("notify")
 
-EVENTS = ("staged", "rejected", "install_success", "install_failed")
+EVENTS = ("staged", "rejected", "install_success", "install_failed", "token_expiring")
 EVENT_LABELS = {
     "staged": "A new release was verified and staged",
     "rejected": "A release was rejected (pin mismatch or failed verification)",
     "install_success": "A push to a device succeeded",
     "install_failed": "A push to a device failed",
+    "token_expiring": "The GitHub token saved in Settings expires within a week",
 }
 MAX_TARGETS = 20
 MAX_URL_LENGTH = 2000
@@ -31,7 +32,7 @@ MAX_URL_LENGTH = 2000
 @dataclass(frozen=True)
 class Target:
     id: int | None  # None for a service from .env
-    url: str
+    url: str | None  # None: stored, but can't be decrypted
     label: str | None
 
     @property
@@ -59,8 +60,11 @@ def enabled_events() -> set[str]:
     return {e.strip() for e in raw.split(",") if e.strip()} & set(EVENTS)
 
 
-def describe(url: str) -> dict:
+def describe(url: str | None) -> dict:
     """Service name and a masked URL for display. Never returns the raw URL."""
+    if url is None:
+        return {"service": "unreadable", "masked": "can't be decrypted: SECRET_KEY changed? Remove and add again",
+                "valid": False}
     try:
         import apprise
 
@@ -146,7 +150,7 @@ def _deliver(urls: list[str], title: str, body: str) -> bool:
 def send(event: str, title: str, body: str) -> bool:
     """Blocking (network). Call from a worker thread, never the event loop.
     Returns True if at least one service accepted it."""
-    urls = [t.url for t in targets()]
+    urls = [t.url for t in targets() if t.url]  # an undecryptable one is skipped
     if not urls or event not in enabled_events():
         return False
     try:
@@ -158,6 +162,8 @@ def send(event: str, title: str, body: str) -> bool:
 
 def test(target: Target) -> tuple[bool, str]:
     """Sends a test message to one service. Blocking. Returns (ok, message)."""
+    if not target.url:
+        return False, "Its saved address can't be decrypted (SECRET_KEY changed?) — remove it and add it again"
     try:
         ok = _deliver([target.url], "test notification",
                       "This is a test from ADB Server. If you can read it, notifications work.")
