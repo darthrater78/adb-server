@@ -73,6 +73,7 @@ with sync_playwright() as p:
         phone = context(browser, phone=True).new_page()
         sign_in(phone)
         shot(phone, "/status", "phone-status", True)
+        shot(phone, "/install", "phone-install", True)
     else:
         page = context(browser).new_page()
         sign_in(page, shot_mfa=True)

@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -78,6 +79,8 @@ CREATE TABLE IF NOT EXISTS device_packages (
     version_code  INTEGER,
     version_name  TEXT,
     checked_at    TEXT NOT NULL,
+    update_time   TEXT,  -- lastUpdateTime as the device reports it (its own clock, compared as text)
+    origin        TEXT,  -- JSON: the staged APK this server last installed here (see set_package_origin)
     PRIMARY KEY (device_serial, package_name)
 );
 
@@ -191,6 +194,7 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
         _migrate(conn)
         _seal_plaintext_secrets(conn)
+        _backfill_origins(conn)
 
 
 # meta keys holding a secret: always sealed (secretbox) at rest.
@@ -278,6 +282,8 @@ _ADDED_COLUMNS = [
     ("repos", "github_id", "INTEGER"),
     ("repos", "owner_id", "INTEGER"),
     ("repos", "owner_type", "TEXT"),
+    ("device_packages", "update_time", "TEXT"),
+    ("device_packages", "origin", "TEXT"),
 ]
 
 
@@ -577,17 +583,91 @@ def set_device_model(serial: str, model: str) -> None:
 def upsert_device_package(
     serial: str, package: str, installed: bool,
     version_code: int | None = None, version_name: str | None = None,
+    update_time: str | None = None,
 ) -> None:
+    """What the device reports. An uninstalled package forgets its origin:
+    whatever installs it next, this server only knows if it pushes it."""
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO device_packages
-                   (device_serial, package_name, installed, version_code, version_name, checked_at)
-               VALUES (?, ?, ?, ?, ?, ?)
+                   (device_serial, package_name, installed, version_code, version_name, checked_at, update_time)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_serial, package_name) DO UPDATE SET
                    installed = excluded.installed, version_code = excluded.version_code,
-                   version_name = excluded.version_name, checked_at = excluded.checked_at""",
-            (serial, package, int(installed), version_code, version_name, now()),
+                   version_name = excluded.version_name, checked_at = excluded.checked_at,
+                   update_time = excluded.update_time,
+                   origin = CASE WHEN excluded.installed THEN origin END""",
+            (serial, package, int(installed), version_code, version_name, now(), update_time),
         )
+
+
+def origin_of_apk(apk) -> dict:
+    """What an origin records about a staged APK: copied, not referenced, so
+    it outlives the APK (pruned, deleted, or its repo removed)."""
+    if apk["repo_id"] is not None:
+        kind, ref = "release", apk["tag"]
+    elif apk["artifact_repo"]:
+        kind, ref = "artifact", f"{apk['artifact_branch'] or '?'} @ {(apk['artifact_sha'] or '')[:7]}"
+    else:
+        kind, ref = "upload", apk["tag"]
+    return {
+        "apk_id": apk["id"], "kind": kind, "ref": ref,
+        "repo": apk["artifact_repo"], "run_id": apk["artifact_run_id"],
+        "debug": bool(apk["is_debug"]), "server_signed": bool(apk["server_signed"]),
+        "version_code": apk["version_code"], "version_name": apk["version_name"],
+    }
+
+
+def set_package_origin(serial: str, apk, update_time: str | None) -> None:
+    """After a successful push of `apk`. If the device couldn't be asked
+    afterwards, the row takes the pushed APK's version until the next refresh."""
+    at = now()
+    origin = origin_of_apk(apk) | {"at": at, "update_time": update_time}
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO device_packages
+                   (device_serial, package_name, installed, version_code, version_name, checked_at, origin)
+               VALUES (?, ?, 1, ?, ?, ?, ?)
+               ON CONFLICT(device_serial, package_name) DO UPDATE SET installed = 1, origin = excluded.origin""",
+            (serial, apk["package_name"], apk["version_code"], apk["version_name"], at, json.dumps(origin)),
+        )
+
+
+def _backfill_origins(conn: sqlite3.Connection) -> None:
+    """Once, on the first start of 3.5.0: packages pushed before origins were
+    recorded get the last successful push whose version matches what the
+    device reported. Marked backfilled, since there's no lastUpdateTime
+    baseline to tell a later install from elsewhere."""
+    if conn.execute("SELECT 1 FROM meta WHERE key = 'origins_backfilled'").fetchone():
+        return
+    rows = conn.execute(
+        "SELECT * FROM device_packages WHERE installed = 1 AND origin IS NULL"
+    ).fetchall()
+    for row in rows:
+        apk = conn.execute(
+            """SELECT staged_apks.* FROM installs
+               JOIN staged_apks ON staged_apks.id = installs.apk_id
+               WHERE installs.device_serial = ? AND installs.status = 'success'
+                 AND staged_apks.package_name = ?
+                 AND (staged_apks.version_code = ?
+                      OR (? IS NULL AND staged_apks.version_name IS ?))
+               ORDER BY installs.finished_at DESC, installs.id DESC LIMIT 1""",
+            (row["device_serial"], row["package_name"], row["version_code"],
+             row["version_code"], row["version_name"]),
+        ).fetchone()
+        if apk is None:
+            continue
+        installed_at = conn.execute(
+            """SELECT finished_at FROM installs WHERE device_serial = ? AND apk_id = ? AND status = 'success'
+               ORDER BY finished_at DESC LIMIT 1""",
+            (row["device_serial"], apk["id"]),
+        ).fetchone()["finished_at"]
+        origin = origin_of_apk(apk) | {"at": installed_at, "update_time": None, "backfilled": True}
+        conn.execute(
+            "UPDATE device_packages SET origin = ? WHERE device_serial = ? AND package_name = ?",
+            (json.dumps(origin), row["device_serial"], row["package_name"]),
+        )
+    conn.execute("INSERT INTO meta (key, value) VALUES ('origins_backfilled', ?)", (now(),))
 
 
 def device_packages_map() -> dict[tuple[str, str], sqlite3.Row]:

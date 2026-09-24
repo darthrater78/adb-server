@@ -33,15 +33,21 @@ def refresh_abis(serial: str, addr: str) -> str:
     return " ".join(abis)
 
 
-def refresh_installed(serial: str, addr: str, package: str) -> None:
+def refresh_installed(serial: str, addr: str, package: str) -> adb_client.PackageInfo | None:
+    """Records what the device reports for `package` and returns it: None if
+    it isn't installed or the device couldn't be asked."""
     try:
-        version = adb_client.installed_version(addr, package)
+        info = adb_client.package_info(addr, package)
     except adb_client.AdbError:
-        return
-    if version is None:
+        return None
+    if info is None:
         db.upsert_device_package(serial, package, installed=False)
     else:
-        db.upsert_device_package(serial, package, installed=True, version_code=version[0], version_name=version[1])
+        db.upsert_device_package(
+            serial, package, installed=True, version_code=info.version_code,
+            version_name=info.version_name, update_time=info.update_time,
+        )
+    return info
 
 
 def create_install(device, apk) -> int:
@@ -85,7 +91,11 @@ def run_push(install_id: int, device: dict, apk: dict) -> None:
         result = adb_client.install(addr, apk["path"])
         log = ((result.stdout or "") + (result.stderr or "")).strip()[:8000]
         status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
-        refresh_installed(serial, addr, apk["package_name"])
+        info = refresh_installed(serial, addr, apk["package_name"])
+        if status == "success":
+            # lastUpdateTime pins this exact install: a later reinstall of the
+            # same version from elsewhere changes it.
+            db.set_package_origin(serial, apk, update_time=info.update_time if info else None)
     except adb_client.AdbError as exc:
         log = str(exc)
     except Exception:

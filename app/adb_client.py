@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import time
+from typing import NamedTuple
 
 ADB_HOST = os.environ.get("ADB_HOST", "adb-server")
 ADB_PORT = os.environ.get("ADB_PORT", "5037")
@@ -166,6 +167,8 @@ def list_devices() -> list[str]:
 PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 _VERSION_CODE_RE = re.compile(r"\bversionCode=(\d+)")
 _VERSION_NAME_RE = re.compile(r"\bversionName=(\S+)")
+# "lastUpdateTime=2026-09-24 21:10:45": digits and separators only, so it is safe to store and show.
+_UPDATE_TIME_RE = re.compile(r"\blastUpdateTime=(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
 _ABI_RE = re.compile(r"^[a-z0-9_-]+$")
 
 
@@ -175,9 +178,15 @@ def validate_package(package: str) -> str:
     return package
 
 
-def installed_version(addr: str, package: str) -> tuple[int | None, str | None] | None:
-    """(versionCode, versionName) of `package` on the device at `addr`, or
-    None if it isn't installed. Raises AdbError if it can't be queried."""
+class PackageInfo(NamedTuple):
+    version_code: int | None
+    version_name: str | None
+    update_time: str | None  # lastUpdateTime, in the device's own clock and format
+
+
+def package_info(addr: str, package: str) -> PackageInfo | None:
+    """What the device at `addr` reports for `package`, or None if it isn't
+    installed. Raises AdbError if it can't be queried."""
     addr = _validate_addr(addr)
     package = validate_package(package)
     result = _run("-s", addr, "shell", "dumpsys", "package", package, timeout=20)
@@ -187,7 +196,12 @@ def installed_version(addr: str, package: str) -> tuple[int | None, str | None] 
         return None
     code = _VERSION_CODE_RE.search(result.stdout)
     name = _VERSION_NAME_RE.search(result.stdout)
-    return (int(code.group(1)) if code else None, name.group(1) if name else None)
+    updated = _UPDATE_TIME_RE.search(result.stdout)
+    return PackageInfo(
+        int(code.group(1)) if code else None,
+        name.group(1) if name else None,
+        updated.group(1) if updated else None,
+    )
 
 
 _MODEL_UNSAFE = re.compile(r"[^A-Za-z0-9 ._()+/-]")

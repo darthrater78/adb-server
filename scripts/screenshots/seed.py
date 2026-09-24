@@ -72,7 +72,7 @@ def base():
           artifact={"repo": "example/weather-app", "run_id": 7001, "branch": "fix/radar-cache", "sha": "c7d21f09ab",
                     "subject": "fix(radar): keep tiles cached across rotation", "repo_id": weather,
                     "siblings": json.dumps([{"id": 52, "name": "weather-app-debug"}])})
-    stage(None, "pocket-timer-debug feature/lap-sounds@3f9c2e1", "pocket-timer-debug.apk", "com.example.pockettimer",
+    timer_debug = stage(None, "pocket-timer-debug feature/lap-sounds@3f9c2e1", "pocket-timer-debug.apk", "com.example.pockettimer",
           "0.8.0-debug", 80, "", 0.5, source="upload", is_debug=True,
           release_notes="CI (run #42, push)\nfeature/lap-sounds @ 3f9c2e1\n\nCommit 3f9c2e1:\nfeat: lap sounds with a volume slider",
           artifact={"repo": "example/pocket-timer", "run_id": 7102, "branch": "feature/lap-sounds", "sha": "3f9c2e1d88",
@@ -96,6 +96,17 @@ def base():
     db.upsert_device_package("R5CX12AB34F", "com.acmelabs.fieldnotes", True, 192, "1.9.2")
     db.upsert_device_package("3B281FDJG000QK", "com.example.weather", True, 240, "2.4.0")
     db.upsert_device_package("3B281FDJG000QK", "com.acmelabs.fieldnotes", False)
+    db.upsert_device_package("3B281FDJG000QK", "com.example.pockettimer", True, 80, "0.8.0-debug")
+    db.upsert_device_package("R5CX12AB34F", "com.example.kiosk", True, 290, "2.9.0")  # sideloaded: not from here
+    # Where each install came from: a release, a test build, and one pushed before tracking began.
+    for serial, apk, days, extra in (("R5CX12AB34F", w231, 20, {}), ("3B281FDJG000QK", w24a, 2.9, {}),
+                                     ("3B281FDJG000QK", timer_debug, 0.4, {}),
+                                     ("R5CX12AB34F", fn, 8.5, {"update_time": None, "backfilled": True})):
+        apk_row = db.get_staged_apk(apk)
+        stamp = (NOW - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        origin = db.origin_of_apk(apk_row) | {"at": ago(days), "update_time": stamp} | extra
+        sql("UPDATE device_packages SET origin = ?, update_time = ? WHERE device_serial = ? AND package_name = ?",
+            json.dumps(origin), stamp, serial, apk_row["package_name"])
     db.set_follow("3B281FDJG000QK", weather, True)
 
     ok_log = "Performing Streamed Install\nSuccess"
@@ -105,7 +116,8 @@ def base():
     for serial, apk, status, log, days in (("3B281FDJG000QK", w24a, "success", ok_log, 2.9),
                                            ("R5CX12AB34F", fn, "success", ok_log, 8.5),
                                            ("R5CX12AB34F", w231, "failed", fail_log, 1.2),
-                                           ("R5CX12AB34F", w231, "success", ok_log, 20)):
+                                           ("R5CX12AB34F", w231, "success", ok_log, 20),
+                                           ("3B281FDJG000QK", timer_debug, "success", ok_log, 0.4)):
         iid = db.insert_install(serial, apk, "running")
         db.finish_install(iid, status, log)
         sql("UPDATE installs SET started_at = ?, finished_at = ? WHERE id = ?", ago(days), ago(days - 0.001), iid)

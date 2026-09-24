@@ -1,6 +1,8 @@
 """Pure decision logic for pushes: which APK variant suits a device, and how
 an installed version compares with the latest staged one. No I/O here."""
 
+import json
+
 
 def _abis(value: str | None) -> set[str]:
     return set((value or "").split())
@@ -45,3 +47,28 @@ def update_state(installed, latest) -> str:
     if have == want:
         return "current"
     return "update" if have < want else "newer"
+
+
+def origin(package_row) -> dict | None:
+    """Where the installed version of a package came from, as far as this
+    server can tell: its recorded origin plus a "state" of
+    ours     pushed from here, and the device still has that exact install;
+    likely   pushed from here before 3.5.0 (same version, no install time to compare);
+    other    not from this server: never pushed, or replaced since.
+    None when the device doesn't have the package (or was never asked)."""
+    if package_row is None or not package_row["installed"]:
+        return None
+    raw = package_row["origin"]
+    if not raw:
+        return {"state": "other"}
+    recorded = json.loads(raw)
+    have_code, want_code = package_row["version_code"], recorded.get("version_code")
+    if have_code is not None and want_code is not None:
+        if have_code != want_code:
+            return {"state": "other"}
+    elif package_row["version_name"] != recorded.get("version_name"):
+        return {"state": "other"}
+    have_time, want_time = package_row["update_time"], recorded.get("update_time")
+    if have_time and want_time and have_time != want_time:
+        return {"state": "other"}  # reinstalled since, by something else
+    return recorded | {"state": "likely" if recorded.get("backfilled") else "ours"}

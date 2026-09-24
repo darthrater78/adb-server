@@ -2,34 +2,60 @@
 {% block title %}Install — ADB Server{% endblock %}
 {% block content %}
 <h1>Install</h1>
-<p class="page-intro muted">Every verified APK, by app. Pick a device and push. The newest release picks the
-  right build for the device's CPU. Add more apps on <a href="/sources">Sources</a>.</p>
+<p class="page-intro muted">Every verified APK, by app. The newest release picks the right build for the device's
+  CPU. Add more apps on <a href="/sources">Sources</a>.</p>
 
 {% if not devices %}
 <p class="flash flash-warn">No trusted devices yet. <a href="/devices">Pair and trust one</a> to push to it.</p>
+{% elif groups %}
+{# The one device every Push on this page targets. Links, not a form: the CSP
+   allows no JavaScript, so a dropdown of links is what switches in one click. #}
+<div class="push-target">
+  {% if devices | length > 1 %}
+  <details class="push-target-menu">
+    <summary>Pushing to <strong>{{ target | device_name }}</strong> <span aria-hidden="true">▾</span></summary>
+    <ul>
+      {% for d in devices %}
+      <li><a href="/install?to={{ d.serial | urlencode }}"{% if d.serial == target.serial %} aria-current="true"{% endif %}>{{ d | device_name }}</a></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% else %}
+  <span>Pushing to <strong>{{ target | device_name }}</strong></span>
+  {% endif %}
+</div>
 {% endif %}
 
-{% macro device_select() %}
-<label class="push-to">to
-<select name="device_serial" required aria-label="Device to push to">
-  {% for d in devices %}
-  <option value="{{ d.serial }}">{{ d | device_name }}</option>
-  {% endfor %}
-</select>
-</label>
+{% macro push_button(label, secondary=false) %}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="device_serial" value="{{ target.serial }}">
+<button type="submit"{% if secondary %} class="secondary"{% endif %}>{{ label }}</button>
 {% endmacro %}
 
 {% set kinds = groups | map(attribute="kind") | unique | list %}
 {% for g in groups %}
 {% set latest = g.releases[0] %}
 {% set first = latest.apks[0] %}
+{% set version = first.version_name or latest.tag %}
 {% if kinds | length > 1 and (loop.first or loop.previtem.kind != g.kind) %}
 <h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
 {% endif %}
 <section class="panel app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
   <div class="app-card-head">
-    <div>
+    <div class="app-card-title">
       <h2>{{ g.label }}</h2>
+      <p class="app-card-facts">
+        <span class="tag-pill">{{ version }}</span>
+        {% if g.kind == "release" %}<span class="badge badge-ok">Release</span>
+        {% elif g.kind == "artifact" %}<span class="badge badge-artifact" title="Built by a workflow run, not a release">Artifact · test build</span>
+        {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
+        {% set a = first %}{% include "_signing_badges.html" %}
+        <span class="muted small">
+          {{ "uploaded" if g.kind == "upload" else "staged" }} {{ first.downloaded_at | when }}
+          · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
+          {%- if g.on %} · on {% for d in g.on %}{{ d | device_name }}{{ ", " if not loop.last }}{% endfor %}{% endif %}
+        </span>
+      </p>
       {% if g.kind == "artifact" %}
       <p class="artifact-origin">
         <span class="tag-pill" title="Branch">{{ first.artifact_branch or "?" }}</span>
@@ -38,56 +64,37 @@
       </p>
       {% if first.artifact_subject %}<p class="commit-subject">{{ first.artifact_subject }}</p>{% endif %}
       {% endif %}
-      <p class="mono small muted">{{ first.package_name }}</p>
     </div>
-    <div class="app-card-meta">
-      {% if g.kind == "release" %}<span class="badge badge-muted">GitHub release</span>
-      {% elif g.kind == "artifact" %}<span class="badge badge-artifact" title="Built by a workflow run, not a release">Artifact · test build</span>
-      {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
-      {% set a = first %}{% include "_signing_badges.html" %}
-    </div>
+    {% if target %}
+    {% if g.repo_id %}
+    <form method="post" action="/push-latest" class="push-form">
+      <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
+      <input type="hidden" name="back" value="/install">
+      {{ push_button("Push " ~ version) }}
+    </form>
+    {% else %}
+    <form method="post" action="/push" class="push-form">
+      <input type="hidden" name="apk_id" value="{{ first.id }}">
+      {{ push_button("Push " ~ (first.version_name or "")) }}
+    </form>
+    {% endif %}
+    {% endif %}
   </div>
 
   {% set a = first %}{% include "_debug_advice.html" %}
 
-  <p class="app-card-latest">
-    <span class="tag-pill">{{ first.version_name or latest.tag }}</span>
-    {% if g.repo_id and first.version_name and first.version_name != latest.tag.lstrip('v') %}<span class="muted small">{{ latest.tag }}</span>{% endif %}
-    <span class="muted small">
-      {{ "uploaded" if g.kind == "upload" else "staged" }} {{ first.downloaded_at | when }}
-      · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
-      ({{ latest.apks | map(attribute="abis") | map("default", "any", true) | join(", ") or "any CPU" }})
-    </span>
-  </p>
+  <details class="app-card-more">
+    <summary>Details{% if g.releases | length > 1 %} · {{ g.releases | length - 1 }} older version{{ "" if g.releases | length == 2 else "s" }}{% endif %}</summary>
+    <p class="mono small muted">{{ first.package_name }}
+      {%- if g.repo_id and first.version_name and first.version_name != latest.tag.lstrip('v') %} · {{ latest.tag }}{% endif %}</p>
 
-  {% if devices %}
-  {% if g.repo_id %}
-  <form method="post" action="/push-latest" class="inline-form push-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
-    <input type="hidden" name="back" value="/install">
-    {{ device_select() }}
-    <button type="submit">Push {{ first.version_name or latest.tag }}</button>
-  </form>
-  {% else %}
-  <form method="post" action="/push" class="inline-form push-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="apk_id" value="{{ first.id }}">
-    {{ device_select() }}
-    <button type="submit">Push {{ first.version_name or "" }}</button>
-  </form>
-  {% endif %}
-  {% endif %}
+    {% for a in latest.apks if a.release_notes %}{% if loop.first %}
+    <details class="nested" open>
+      <summary>{{ "Build notes" if a.source == "upload" else "Release notes" }} for {{ version }}</summary>
+      <pre class="release-notes">{{ a.release_notes }}</pre>
+    </details>
+    {% endif %}{% endfor %}
 
-  {% for a in latest.apks if a.release_notes %}{% if loop.first %}
-  <details>
-    <summary>{{ "Build notes" if a.source == "upload" else "Release notes" }} for {{ first.version_name or latest.tag }}</summary>
-    <pre class="release-notes">{{ a.release_notes }}</pre>
-  </details>
-  {% endif %}{% endfor %}
-
-  <details>
-    <summary>{% if g.releases | length > 1 %}All builds and older versions ({{ g.releases | length - 1 }} older){% else %}Builds and details{% endif %}</summary>
     <div class="table-wrap">
     <table>
       <thead>
@@ -102,12 +109,10 @@
           <td data-label="Signer" class="mono small" title="{{ a.signer_sha256 }}">{{ a.signer_sha256[:16] }}…</td>
           <td data-label="Staged" class="small">{{ a.downloaded_at | when }}</td>
           <td><div class="actions">
-            {% if devices %}
+            {% if target %}
             <form method="post" action="/push" class="inline-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="apk_id" value="{{ a.id }}">
-              {{ device_select() }}
-              <button type="submit" class="secondary">Push this</button>
+              {{ push_button("Push this", secondary=true) }}
             </form>
             {% endif %}
             <form method="post" action="/staged/{{ a.id }}/delete">
