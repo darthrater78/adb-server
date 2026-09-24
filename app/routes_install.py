@@ -47,12 +47,25 @@ def _install_groups() -> list[dict]:
 @router.get("/install", response_class=HTMLResponse)
 def install_page(
     request: Request, session: dict = Depends(auth.require_auth),
-    error: str | None = None, ok: str | None = None, warn: str | None = None,
+    error: str | None = None, ok: str | None = None, warn: str | None = None, to: str | None = None,
 ):
+    """`to` picks the device every Push on the page targets (default: the
+    first trusted one); anything else falls back to the default."""
     trusted = [d for d in db.list_devices() if d["trusted"]]
+    target = next((d for d in trusted if d["serial"] == to), trusted[0] if trusted else None)
+    groups = _install_groups()
+    installed = db.device_packages_map()
+    for g in groups:
+        # Trusted devices that have this card's latest version right now.
+        first = g["releases"][0]["apks"][0]
+        g["on"] = [
+            d for d in trusted
+            if (row := installed.get((d["serial"], first["package_name"]))) is not None and row["installed"]
+            and row["version_code"] is not None and row["version_code"] == first["version_code"]
+        ]
     return templates.TemplateResponse(
         request, "install.html",
-        context(request, session, groups=_install_groups(), devices=trusted, error=error, ok=ok, warn=warn),
+        context(request, session, groups=groups, devices=trusted, target=target, error=error, ok=ok, warn=warn),
     )
 
 
@@ -158,11 +171,12 @@ def _device_cards() -> list[dict]:
             apps.append({
                 "repo_id": repo_id, "latest": latest, "installed": have,
                 "state": selection.update_state(have, latest),
+                "origin": selection.origin(have),
                 "fits": selection.pick_variant(variants, d["abis"]) is not None,
                 "following": (d["serial"], repo_id) in follows,
             })
         others = [
-            {"package": pkg, "label": upload_labels.get(pkg), "installed": row}
+            {"package": pkg, "label": upload_labels.get(pkg), "installed": row, "origin": selection.origin(row)}
             for (serial, pkg), row in sorted(installed.items())
             if serial == d["serial"] and row["installed"] and pkg not in repo_packages
         ]
@@ -204,6 +218,7 @@ def refresh_status(request: Request, session: dict = Depends(auth.require_auth),
     costs one quick failed connect."""
     check_csrf(request, session, csrf_token)
     packages = {r["expected_package"] for r in db.list_repos() if r["expected_package"]}
+    known = db.device_packages_map()
     unreachable = []
     for device in db.list_devices():
         if not device["trusted"]:
@@ -214,7 +229,9 @@ def refresh_status(request: Request, session: dict = Depends(auth.require_auth),
             unreachable.append(device["nickname"] or device["serial"])
             continue
         pushes.refresh_abis(serial, addr)
-        for package in packages:
+        # Plus whatever this device is known to have had (uploads), so a
+        # replaced or removed app stops showing as this server's.
+        for package in packages | {p for (s, p) in known if s == serial}:
             pushes.refresh_installed(serial, addr, package)
     if unreachable:
         return redirect("/status", error="Not reachable (try Find on the Devices page): " + ", ".join(unreachable))

@@ -38,24 +38,33 @@ DUMPSYS = """Packages:
   Package [com.example.app] (1a2b3c):
     versionCode=41 minSdk=26 targetSdk=34
     versionName=1.4.1
+    firstInstallTime=2026-09-01 08:00:00
+    lastUpdateTime=2026-09-24 21:10:45
 """
 
 
-def test_installed_version(monkeypatch):
+def test_package_info(monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc(DUMPSYS))
-    assert adb_client.installed_version("192.168.1.50:37000", "com.example.app") == (41, "1.4.1")
+    info = adb_client.package_info("192.168.1.50:37000", "com.example.app")
+    assert info == adb_client.PackageInfo(41, "1.4.1", "2026-09-24 21:10:45")
 
 
-def test_installed_version_not_installed(monkeypatch):
+def test_package_info_ignores_an_odd_update_time(monkeypatch):
+    out = DUMPSYS.replace("2026-09-24 21:10:45", "<b>soon</b>")
+    monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc(out))
+    assert adb_client.package_info("192.168.1.50:37000", "com.example.app").update_time is None
+
+
+def test_package_info_not_installed(monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: _proc("Unable to find package: com.example.app\n"))
-    assert adb_client.installed_version("192.168.1.50:37000", "com.example.app") is None
+    assert adb_client.package_info("192.168.1.50:37000", "com.example.app") is None
 
 
 @pytest.mark.parametrize("pkg", ["com.x;reboot", "com.x && rm -rf /", "$(id)", "nodots", "-flag.x", ""])
 def test_package_name_is_validated_before_reaching_the_device_shell(pkg, monkeypatch):
     monkeypatch.setattr(adb_client, "_run", lambda *a, **k: pytest.fail("adb must not run"))
     with pytest.raises(adb_client.AdbError):
-        adb_client.installed_version("192.168.1.50:37000", pkg)
+        adb_client.package_info("192.168.1.50:37000", pkg)
 
 
 def test_device_abis_filters_junk(monkeypatch):

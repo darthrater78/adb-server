@@ -1,30 +1,66 @@
-# Handoff: ADB Server (APK Pusher) — v3.3.0 shipped, v3.4.0 in progress
+# Handoff: ADB Server (APK Pusher) — v3.5.0 built (tracking + collapsible Install); next: v3.6.0 redesign
 
-**Goal:** ship v3.4.0: warn when the adb-server container and the web app are
-from different releases.
+**Goal:** two releases (user's call). **v3.5.0** (this branch,
+`feat/install-tracking`): Status shows where each installed version came from
+(Release / Test build / Upload / Not from this server, Debug flag, "likely"
+for pre-3.5.0 pushes); Install cards collapsed to essentials + Details; one
+"Pushing to ▾" picker (links, `?to=<serial>`); idempotent release step.
+**v3.6.0**: the B/C redesign below ("looks like just another vibe app",
+mobile subpar).
+
+**How tracking works:** `device_packages.origin` (JSON copy of the pushed
+staged APK: kind, ref, repo, run, debug, version, `at`, the device's
+`lastUpdateTime`) is written by `db.set_package_origin` after each successful
+push (`pushes.run_push`), cleared when the device reports the package
+uninstalled, and judged by `selection.origin()`: version or lastUpdateTime
+differ → "other". `_backfill_origins` runs once (meta `origins_backfilled`).
+
+**Design decided by the user (2026-09-24), from the mockup canvas
+https://claude.ai/artifact/MKzyu4SLxeUaUWKDUK7Tj5 (private, user's):**
+- **Desktop: direction B, "Refined cards"**: Figtree + JetBrains Mono, warm
+  neutral ground (#f6f5f2), white cards with soft 1px borders (#e4e2dc) and
+  14px radius, no colored stripes, deep teal primary (#0f766e, white text),
+  one soft pill style for source chips (Release teal, Test build blue, Upload
+  and "Not from this server" neutral, Debug amber), app rows as grid lines
+  inside a device card. See artboards `B-Status-Desktop`, `B-Install-Phone`.
+- **B also needs a dark theme** (user: "we also need a dark theme"). Not
+  mocked yet. Keep the app's existing Flashbang / Dark / OLED switch; OLED =
+  the dark palette on #000.
+- **Phones: direction C's layout** (user: "C is perfect for mobile"): bottom
+  tab bar (Status, Sources, Devices, Install, Settings with stroke icons),
+  big 44px+ touch rows with a letter avatar, a summary card on Status
+  ("1 update ready" + Update), device pill switcher, sticky "Pushing to ▾"
+  picker and filter pills on Install, expanded row inline. Artboards
+  `C-Status-Phone`, `C-Install-Phone`. C was mocked in its own fonts and
+  colors (Sora/Nunito, orange); the intent is **C's layout in B's type and
+  palette**, so the app is one design across breakpoints.
+- Still no client-side JS (CSP `script-src 'none'`): expand/collapse with
+  `<details>`, theme via the existing cookie form. Directions A (quiet flat
+  rows) was not chosen.
+
+**Before building v3.6.0:** check the canvas for four confirmation mockups
+(B dark Status + Install desktop with one row expanded; C's phone layout in
+B tokens, Status light, Install dark). Session 9 had not written them; make
+them if missing and get the user's OK first.
 
 **Current state:**
-- v3.3.0 is released (tag → 28f3d33, images on ghcr, GitHub release Latest).
-- v3.4.0 on `feat/adb-version-check`, uncommitted: `app/versions.py` (image
-  version from the `adbinfo` bind mount + adb protocol check, run every 5 min
-  by the scheduler, banner on every page, `version_mismatch` notification,
-  Settings → General "Versions"), `adb-server/entrypoint.sh` (publishes
-  VERSION into /adbinfo), adb-server built from the repo root. 546 tests pass;
-  checked in a real stack for match, old image, published-older and no-mount.
+- v3.4.0 fully shipped and verified (gate file). v3.5.0 is on
+  `feat/install-tracking` (uncommitted as of session 10's commit checkpoint):
+  gates 1–4 ✅, 574 tests pass, screenshots retaken.
+- The user's own server still needs the v3.4.0 adbinfo step if not done:
+  create `/opt/docker/adb-server/adbinfo` (10001, 700), add the two volume lines.
+- No test containers are running.
 
-**Gate status:** `.claude/dev-skills-gates.md` — VERSION ⏳ (3.4.0 awaiting the
-commit approval), BUILD ✅ (PR-head test artifact still owed), SECURITY ✅,
-DOCS ✅, RELEASE ⬜, SHIP ⬜.
+**Gate status:** `.claude/dev-skills-gates.md` — v3.5.0: 🔢✅ 🔨✅ 🔒✅ 📄✅ 📦⬜
+🚀⬜. Skill copy v2.28.0 is behind upstream v2.38.0 (user chose to continue).
 
-**Mode:** this session ran semi-autonomous on Opus 5.5 (user-approved). The
-next session asks again.
+**Mode:** session 10 ran semi-autonomous on Opus 5.5 (user-approved). The
+next session asks again (mode, model).
 
-**Next step:** show the user the v3.4.0 commit checkpoint (diff, message,
-version 3.4.0, release notes = CHANGELOG 3.4.0); on yes: commit, push, PR,
-PR-head test images, merge on green CI, then the tag block for the user.
+**Next step:** commit approval for v3.5.0 → push, PR, PR-head test images on
+10.0.0.252, merge on green → user tags v3.5.0.
 
-**Also open:** test stacks t33b (18184) and t340 (18186) still run; tear down
-when the user says. Dependabot PRs #2/#3 (python 3.14 base images).
+**Also open:** Dependabot PRs #2/#3 (python 3.14 base images).
 
 **Open questions (not blocking):**
 - CI step running `adb` inside the app image (catches the read-only
@@ -33,6 +69,12 @@ when the user says. Dependabot PRs #2/#3 (python 3.14 base images).
   CI): proposed, not built.
 
 **Lessons:**
+- After a reboot `/tmp` is empty: the test venv goes in the scratchpad,
+  `python3 -m venv <dir> && <dir>/bin/pip install -r requirements-dev.txt`,
+  then `PATH=<dir>/bin:$PATH bash scripts/test.sh`.
+- The screenshot harness mounts an `adbinfo` holding `VERSION`; without it
+  every shot carries the version-mismatch banner. Retake after a VERSION bump
+  (the header shows the version).
 - SQL comments inside the `staged_apks` CREATE statement must not contain an
   apostrophe or a `;`: `_rebuild_staged_apks_unique` re-runs that statement
   and chokes on them ("incomplete input"). Other tables are fine.
@@ -97,7 +139,3 @@ when the user says. Dependabot PRs #2/#3 (python 3.14 base images).
   is an accepted, documented default.
 
 **Shell environment:** Linux Terminal (bash).
-
-**Next step:** ask the user for the go-ahead on the v3.3.0 release sequence
-(Gate 5: push `feat/repo-legitimacy`, open the PR, then the PR-head test
-images on `10.0.0.252`).

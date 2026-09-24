@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.4.0](https://github.com/darthrater78/adb-server/releases/tag/v3.4.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.5.0](https://github.com/darthrater78/adb-server/releases/tag/v3.5.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.4.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.5.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.4.0
+    image: ghcr.io/darthrater78/adb-server/app:3.5.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.4.0), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.5.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -193,7 +193,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.4.0` and add one
+> Then, in your `compose.yaml`, set both images to `3.5.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -241,6 +241,14 @@ card also lists the device's last few installs. **Refresh installed versions**
 asks each device what it has now; versions also refresh after every push.
 Untrusted devices are shown, but offer nothing to push.
 
+Under each installed version is **where it came from**: a **Release** (and
+its tag), a **Test build** (branch @ commit, linked to its workflow run), an
+**Upload**, or **Not from this server** when it was installed some other way
+or replaced since this server last pushed it. A debug-signed build is marked
+**Debug**. The server records what it pushed, and the device's own install
+time tells a later reinstall of the same version apart. Versions pushed
+before 3.5.0 are matched by version alone and marked *(likely)*.
+
 **Auto-update** is set per app and per device. When it's on, each newly staged
 release is pushed to that device automatically. This only works for trusted
 devices, and a device that already has that version or a newer one is skipped.
@@ -249,6 +257,7 @@ Until you've added a source, trusted a device and installed something, the
 page shows a setup checklist instead.
 
 <img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
+<img src="docs/screenshots/phone-install.png" alt="Install page on a phone" width="195">
 
 ### Sources: repos and uploads
 
@@ -361,17 +370,20 @@ are all on this page. Phones list this server as `@adbserver`.
 
 ### Install
 
-Every verified APK, one card per app. Pick a trusted device and **Push**: for
-a watched repo, the newest release is pushed, in the build that fits the
-device's CPU. When a release has several APKs that match the glob (per-ABI
-builds such as `arm64-v8a`, `armeabi-v7a` or universal), all of them are
-staged, up to 6. Release notes open under the card. **All builds and older
-versions** lists every staged file, to push a specific one or delete it.
+Every verified APK, one card per app, showing just the essentials: name,
+version, where it's from, signing, when it was staged, and which devices
+already have it. **Pushing to ▾** at the top picks the device every **Push**
+on the page goes to (the most recently paired one to start). For a watched
+repo, the newest release is pushed, in the build that fits the device's CPU.
+When a release has several APKs that match the glob (per-ABI builds such as
+`arm64-v8a`, `armeabi-v7a` or universal), all of them are staged, up to 6.
+**Details** on a card opens the rest: the package name, release notes, every
+staged file (to push a specific one or delete it) and older versions.
 
 Cards are grouped as **Releases**, **Test builds from workflow artifacts** and
 **Uploads**. A test build is marked **Artifact · test build**, with its branch
 and commit linked to the workflow run, so it can't be mistaken for a release.
-The device picker names each phone by its nickname, else its model and the
+Devices are named by their nickname, else its model and the
 end of its serial (e.g. `Google Pixel 8 · …005KT`), read when the app first
 talks to it.
 

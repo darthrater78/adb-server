@@ -71,7 +71,7 @@ def test_status_refresh_records_versions(authed, trusted_device, monkeypatch):
     db.update_repo_check(rid, expected_package="com.example", signer_sha256="a" * 64)
     monkeypatch.setattr(discovery, "ensure_connected", lambda d, allow_scan=True: (d["serial"], d["last_connect_addr"]))
     monkeypatch.setattr(adb_client, "device_abis", lambda s: ["arm64-v8a"])
-    monkeypatch.setattr(adb_client, "installed_version", lambda s, p: (7, "0.7"))
+    monkeypatch.setattr(adb_client, "package_info", lambda s, p: adb_client.PackageInfo(7, "0.7", None))
     authed.post("/status/refresh", data={"csrf_token": CSRF})
     row = db.device_packages_map()[("SER", "com.example")]
     assert (row["installed"], row["version_code"], row["version_name"]) == (1, 7, "0.7")

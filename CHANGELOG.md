@@ -1,5 +1,29 @@
 # Changelog
 
+## 3.5.0 — 2026-09-24
+
+- Added: **Status shows where each installed version came from.** Under the
+  version on the device: **Release** with its tag, **Test build** with its
+  branch and commit linked to the workflow run, **Upload**, or **Not from
+  this server** when it was installed some other way or replaced since. Debug
+  builds are marked. Each successful push records what it installed along
+  with the device's own install time, so a later reinstall of the same
+  version from elsewhere is told apart. The record is kept even after the
+  staged file is pruned or its repo removed, and dropped when the app is
+  uninstalled. Pushes from before 3.5.0 are matched to what the device has by
+  version, once, on first start, and marked *(likely)*.
+- Changed: **Install cards are collapsed to the essentials**: name,
+  version, source, signing, when it was staged, which devices already have
+  it, and **Push**. **Details** opens the package name, release notes, every
+  staged file and older versions.
+- Changed: **one "Pushing to" picker at the top of Install** replaces the
+  device dropdown on every card and row. It's a menu of links, so it still
+  needs no JavaScript.
+- Changed: **Refresh installed versions also re-checks uploaded apps** a
+  device has, not only watched repos.
+- Fixed: a second release run for the same tag no longer fails at "Create
+  GitHub release"; it finds the release already made and stops.
+
 ## 3.4.0 — 2026-09-24
 
 - Added: **a warning when the two containers are from different releases.**

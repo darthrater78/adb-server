@@ -11,16 +11,20 @@ cd "$(dirname "$0")/../.."
 HERE=scripts/screenshots
 OUT=$(mktemp -d)
 chmod 777 "$OUT"
+# What a matching adb-server container would publish, so no version banner shows.
+INFO=$(mktemp -d)
+cp VERSION "$INFO/version"
+chmod 755 "$INFO" && chmod 644 "$INFO/version"
 NAME=adb-shots-$$
 PASSWORD=$(openssl rand -hex 12)
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$OUT"; }
+cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -rf "$OUT" "$INFO"; }
 trap cleanup EXIT
 
 docker build -q -t adb-server-shots/app -f app/Dockerfile . >/dev/null
 docker run -d --name "$NAME" -p "$HOST_IP:$PORT:8080" --read-only \
   --tmpfs /tmp:size=64m --tmpfs /data:uid=10001,gid=10001,size=256m \
   --tmpfs /home/appuser/.android:size=1m,uid=10001,gid=10001,mode=0700 \
-  -v "$PWD/$HERE:/shots:ro" --entrypoint python \
+  -v "$PWD/$HERE:/shots:ro" -v "$INFO:/adbinfo:ro" --entrypoint python \
   -e SECRET_KEY="$(openssl rand -hex 32)" -e APP_USERNAME=admin -e APP_PASSWORD="$PASSWORD" \
   -e COOKIE_SECURE=false -e ALLOWED_HOSTS="$HOST_IP" -e DB_PATH=/data/app.db -e STAGING_ROOT=/data/staging \
   adb-server-shots/app /shots/mock_github.py >/dev/null

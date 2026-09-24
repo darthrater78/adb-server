@@ -796,9 +796,20 @@ section { margin-bottom: 24px; }
 .app-card-head, .device-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .app-card-head h2, .device-card-head h2 { margin: 0; }
 .app-card-head p, .device-card-head p { margin: 2px 0 0; }
-.app-card-meta { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.app-card-latest { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 12px 0; }
-.push-form { margin-bottom: 12px; }
+.app-card-title { min-width: 0; }
+.app-card-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.push-form { flex-shrink: 0; margin: 0; }
+.app-card-more > summary { color: var(--muted); font-size: 0.9rem; }
+/* The one device every Push on the Install page goes to. */
+.push-target { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0; margin-bottom: 8px; }
+.push-target-menu { display: inline-block; position: relative; }
+.push-target-menu > summary { cursor: pointer; list-style: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; }
+.push-target-menu > summary::-webkit-details-marker { display: none; }
+.push-target-menu ul { position: absolute; left: 0; top: calc(100% + 4px); min-width: 100%; margin: 0; padding: 4px; list-style: none;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.15); }
+.push-target-menu a { display: block; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border-radius: 6px; text-decoration: none; color: inherit; white-space: nowrap; }
+.push-target-menu a:hover, .push-target-menu a:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.push-target-menu a[aria-current="true"] { font-weight: 600; }
 .app-card details { margin-top: 10px; }
 .app-card details table { margin-top: 8px; }
 details.nested { margin-left: 12px; }
@@ -820,14 +831,14 @@ details.nested { margin-left: 12px; }
 .device-card h3 { font-size: 0.95rem; margin: 16px 0 6px; }
 .device-card table { width: 100%; }
 .inventory { margin-top: 10px; }
+.origin { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .recent-installs { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 0.9rem; }
 .signing-keys { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .recent-installs li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 
 @media (max-width: 960px) {
   .app-card-head, .device-card-head { flex-direction: column; }
-  .app-card-meta { justify-content: flex-start; }
-  .push-form select { width: 100%; }
+  .push-form, .push-form button { width: 100%; }
   /* The cell already draws the divider; its action group doesn't repeat it. */
   td > .actions { border-top: none; padding-top: 0; margin-top: 0; }
 }
@@ -855,7 +866,6 @@ details.add-details[open] > form { margin-top: 10px; }
 .badge-artifact { background: var(--accent-2); color: var(--on-accent-2); }
 .app-card-artifact { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 7%, transparent); }
 .artifact-origin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 2px; }
-.push-to { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; color: var(--muted); font-size: 0.9rem; }
 .row-artifact td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .commit-group { margin: 10px 0 14px; }
 .commit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -863,7 +873,7 @@ details.add-details[open] > form { margin-top: 10px; }
 .commit-group table { margin-top: 6px; }
 .commit-head .tag-pill, .artifact-origin .tag-pill { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 .debug-advice { margin: 8px 0; font-size: 0.9rem; white-space: normal; } .debug-advice .actions { margin-top: 8px; }
-.push-to select { width: auto; } .advice-row td { padding-top: 0; } .advice-row .debug-advice { margin: 0 0 8px; }
+.advice-row td { padding-top: 0; } .advice-row .debug-advice { margin: 0 0 8px; }
 .narrow-form { max-width: 26rem; }
 fieldset.choice { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 fieldset.choice legend { font-size: 0.85rem; color: var(--muted); margin-bottom: 4px; }

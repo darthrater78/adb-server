@@ -228,9 +228,16 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # One tag push can start two runs (seen on v3.4.0); the concurrency
+          # group queues the second, which then finds the release made.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+            exit 0
+          fi
           # The tag name arrives as a variable, never spliced into this script.
           args=()
           case "${TAG#v}" in *-*) args+=(--prerelease) ;; esac

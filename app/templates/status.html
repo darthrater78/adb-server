@@ -1,5 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Status — ADB Server{% endblock %}
+{% macro origin_line(o) %}
+{% if o %}
+<div class="origin small">
+  {% if o.state == "other" %}
+  <span class="badge badge-muted" title="Installed some other way, or replaced since this server last pushed it">Not from this server</span>
+  {% else %}
+    {% if o.kind == "release" %}<span class="badge badge-ok">Release</span> <span class="muted">{{ o.ref }}</span>
+    {% elif o.kind == "artifact" %}<span class="badge badge-update">Test build</span> <span class="mono muted">{{ o.ref }}</span>
+      {% if o.repo and o.run_id %}<a href="https://github.com/{{ o.repo }}/actions/runs/{{ o.run_id }}">run</a>{% endif %}
+    {% else %}<span class="badge badge-muted">Upload</span> <span class="muted">{{ o.ref }}</span>{% endif %}
+    {% if o.debug %}<span class="badge badge-warn">Debug</span>{% endif %}
+    <span class="muted">pushed {{ o.at | when }}{% if o.state == "likely" %} <span title="Pushed before install tracking; matched by version only">(likely)</span>{% endif %}</span>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
 {% block content %}
 <h1>Status</h1>
 
@@ -70,6 +86,7 @@
           {% else %}
             <span class="badge badge-muted" title="Use Refresh installed versions">unknown</span>
           {% endif %}
+          {{ origin_line(app.origin) }}
         </td>
         <td data-label="Latest">
           <span class="tag-pill">{{ latest.version_name or latest.tag }}</span>
@@ -121,7 +138,7 @@
       {% for o in card.others %}
       <tr>
         <td data-label="App">{{ o.label or o.package }} <span class="mono small muted">{{ o.package if o.label else "" }}</span></td>
-        <td data-label="On device"><span class="badge badge-ok">{{ o.installed.version_name or "installed" }}</span></td>
+        <td data-label="On device"><span class="badge badge-ok">{{ o.installed.version_name or "installed" }}</span>{{ origin_line(o.origin) }}</td>
         <td data-label="Latest"><span class="muted small">uploaded</span></td>
         <td></td>
       </tr>
