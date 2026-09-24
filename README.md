@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.3.0](https://github.com/darthrater78/adb-server/releases/tag/v3.3.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.4.0](https://github.com/darthrater78/adb-server/releases/tag/v3.4.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -58,18 +58,18 @@ The stack uses two places, which are often in different directories:
 | Where | What's in it | Example |
 |---|---|---|
 | **Stack directory** | `compose.yaml` and `.env`, always side by side | Wherever you keep compose files, e.g. `~/stacks/adb-server` |
-| **Data directory** | `adbkeys/` (the adb key every paired phone trusts) and `appdata/` (the database and staged APKs) | `/opt/docker/adb-server`, as in the `volumes:` lines below |
+| **Data directory** | `adbkeys/` (the adb key every paired phone trusts), `appdata/` (the database and staged APKs) and `adbinfo/` (the adb-server image's version, for the app to check) | `/opt/docker/adb-server`, as in the `volumes:` lines below |
 
 `compose.yaml` reads `.env` from its own directory, so `.env` goes wherever
 `compose.yaml` goes, never into the data directory. To keep the data somewhere
-other than `/opt/docker/adb-server`, change the left side of both `volumes:`
-lines.
+other than `/opt/docker/adb-server`, change the left side of every `volumes:`
+line.
 
 **1. Create the data directories.** They belong to uid 10001, the user the
 containers run as:
 
 ```bash
-sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata} && sudo chown 10001:10001 /opt/docker/adb-server/{adbkeys,appdata} && sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata}
+sudo mkdir -p /opt/docker/adb-server/{adbkeys,appdata,adbinfo} && sudo chown 10001:10001 /opt/docker/adb-server/{adbkeys,appdata,adbinfo} && sudo chmod 700 /opt/docker/adb-server/{adbkeys,appdata,adbinfo}
 ```
 
 **2. Create `.env` in the stack directory.** `cd` into it first (create it if
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.3.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.4.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -122,6 +122,7 @@ services:
       - internal
     volumes:
       - /opt/docker/adb-server/adbkeys:/home/adb/.android
+      - /opt/docker/adb-server/adbinfo:/adbinfo
     read_only: true
     tmpfs:
       - /tmp
@@ -136,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.3.0
+    image: ghcr.io/darthrater78/adb-server/app:3.4.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -148,6 +149,7 @@ services:
       - internal
     volumes:
       - /opt/docker/adb-server/appdata:/data
+      - /opt/docker/adb-server/adbinfo:/adbinfo:ro
     read_only: true
     tmpfs:
       - /tmp:size=64m
@@ -166,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.3.0), updated with every release
+# image: both pinned to this release (3.4.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -174,12 +176,32 @@ networks:
 # ports: 8080 is the web UI over plain HTTP. Behind a TLS proxy, bind "127.0.0.1:8080:8080"
 # /opt/docker/adb-server/adbkeys: the adb key every paired phone trusts. Back it up, keep it private
 # /opt/docker/adb-server/appdata: the database and staged APKs. Back this directory up
-# adbkeys and appdata must be owned by uid 10001 (the containers' user), or they can't write to them
+# /opt/docker/adb-server/adbinfo: adb-server writes its version there, app reads it (read-only). No secrets
+# adbkeys, appdata and adbinfo must be owned by uid 10001 (the containers' user), or they can't write to them
 # read_only + tmpfs: /tmp is scratch for apksigner; ~/.android is needed by the adb client, holds no keys
 ```
 
 **4. Start it:** `docker compose up -d` from the stack directory. To build the
 images yourself instead, see [Development](#development).
+
+> **Upgrading from 3.3.0 or earlier?** 3.4.0 adds a third data directory,
+> `adbinfo/`, where the adb-server container publishes its version for the app
+> to check ([Both containers on one release](#both-containers-on-one-release)).
+> Create it:
+>
+> ```bash
+> sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
+> ```
+>
+> Then, in your `compose.yaml`, set both images to `3.4.0` and add one
+> `volumes:` line to each service, as in the file above:
+>
+> - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
+> - `app`: `- /opt/docker/adb-server/adbinfo:/adbinfo:ro`
+>
+> and run `docker compose pull && docker compose up -d`. Until the directory
+> is mounted into both, every page warns that the app can't tell which
+> version adb-server runs.
 
 Then open `http://<server>:8080` and sign in. The home page walks you through
 the rest:
@@ -421,8 +443,9 @@ written to it.
 Notifications go through [Apprise](https://github.com/caronc/apprise/wiki),
 which covers ntfy, Gotify, Home Assistant, Discord, Telegram, email, plain JSON
 webhooks and about 100 more services, one URL each. You can be told when a
-release is staged or rejected, when a push succeeds or fails, and when the
-GitHub token saved in Settings is about to expire.
+release is staged or rejected, when a push succeeds or fails, when the
+GitHub token saved in Settings is about to expire, and when the two containers
+are from different releases (see [Both containers on one release](#both-containers-on-one-release)).
 
 On **Settings → Notifications** you can:
 
@@ -442,6 +465,24 @@ and can only be changed there. Events saved on the page override
 `NOTIFY_EVENTS`.
 
 ![Settings: notifications](docs/screenshots/settings-notifications.png)
+
+### Both containers on one release
+
+The web app and the adb server are two images from the same release, but
+they're pulled and recreated separately, so one can be left behind. The app
+checks both ways, when it starts and every 5 minutes:
+
+- **Image version.** On start, the adb-server container writes its version
+  into `adbinfo/`, which the app mounts read-only, and the app compares it
+  with its own.
+- **adb protocol.** The app asks the adb server which protocol it speaks and
+  compares that with its own adb client, since a mismatch there breaks
+  pairing and installs outright.
+
+If either differs, or `adbinfo/` isn't mounted into both containers, every
+page shows a warning with the fix (`docker compose pull && docker compose up
+-d`), and the **version mismatch** notification is sent once. Settings →
+General shows both versions.
 
 ### Appearance
 
@@ -715,6 +756,7 @@ below).
 |---|---|---|
 | adb private key (every paired phone trusts it) | `/opt/docker/adb-server/adbkeys` | Only `adb-server` mounts it |
 | Database: repos, devices, audit log, settings | `/opt/docker/adb-server/appdata` (`app.db`) | Only `app` mounts it |
+| The adb-server image's version | `/opt/docker/adb-server/adbinfo` (`version`) | No secret. `adb-server` writes it, `app` mounts it read-only and accepts only a version string from it |
 | TOTP secret, notification service URLs, GitHub token saved in Settings | In the database | **Encrypted** (Fernet: AES-128-CBC + HMAC-SHA256) with a key derived from `SECRET_KEY` by HKDF. The key is never stored, so the database or a backup of it reveals none of them without `.env`. |
 | Recovery codes, trusted-browser tokens | In the database | SHA-256 hashes only |
 | This server's APK signing keys, one per source (only for sources you opted in to signing unsigned builds) | `appdata/signing/github-<repo ID>.p12`, `appdata/signing/uploads.p12` | PKCS#12 keystores, mode 600. Their passwords are encrypted in the database, like the secrets above |
@@ -805,7 +847,7 @@ Quickstart step 2 creates it with the required ones; [`.env.example`](.env.examp
 | `POLL_INTERVAL_MINUTES` | `10` | How often repos are polled. |
 | `KEEP_RELEASES_PER_REPO` | `3` | Staged releases kept on disk per repo. |
 | `APPRISE_URLS` | *(blank)* | Notification services (space- or comma-separated). |
-| `NOTIFY_EVENTS` | *(all)* | `staged,rejected,install_success,install_failed,token_expiring` |
+| `NOTIFY_EVENTS` | *(all)* | `staged,rejected,install_success,install_failed,token_expiring,version_mismatch` |
 | `ADB_SCAN_PORTS` | `30000-49999` | Port range scanned to find a device whose port changed. |
 | `DB_PATH`, `STAGING_ROOT` | `/data/app.db`, `/data/staging` | Storage locations inside the app container. |
 | `ADB_HOST`, `ADB_PORT` | `adb-server`, `5037` | Where the adb server is. |

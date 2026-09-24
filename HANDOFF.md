@@ -1,66 +1,30 @@
-# Handoff: ADB Server (APK Pusher) — v3.3.0 committed, not yet shipped
+# Handoff: ADB Server (APK Pusher) — v3.3.0 shipped, v3.4.0 in progress
 
-**Goal:** ship v3.3.0: source verification, workflow-artifact test builds,
-secrets encrypted at rest, and the Settings/Install/Sources rework. Everything
-is built, tested and committed on `feat/repo-legitimacy`; the release
-sequence (push, PR, test images, merge, tag) hasn't started.
+**Goal:** ship v3.4.0: warn when the adb-server container and the web app are
+from different releases.
 
-**Current state (2026-09-24, end of session 7):**
-- Shipped this session: **v3.2.0** (artifact-zip upload, `aapt` → `aapt2`),
-  tag `v3.2.0` → `1ddd87f`, release published, ghcr images pullable.
-- `feat/repo-legitimacy` (local only, **not pushed**) holds one commit with
-  all of v3.3.0: VERSION, `compose.yaml`, README and CHANGELOG are at 3.3.0.
-  The CHANGELOG 3.3.0 section is the release notes.
-- 498 tests pass (`bash scripts/test.sh` in a `python:3.13-slim` container).
-  bandit: only the 6 known B608 in `db.py`; `pip-audit --strict` clean.
-  New dependency: `cryptography==50.0.1`. The image also gains `zipalign`
-  and `lib64/libc++.so`.
-- Screenshots: all 16 retaken from invented data with GitHub mocked
-  (`scripts/screenshots/run.sh 10.0.0.252`).
-- A test stack is running for the user: `t330-app` + `t330-adb` on network
-  `zip330_net`, http://10.0.0.252:18183, throwaway creds (in-memory data,
-  the user's `gh` token in its env and saved in its Settings). Remove it when
-  the user is done: `docker rm -f t330-app t330-adb; docker network rm zip330_net`.
+**Current state:**
+- v3.3.0 is released (tag → 28f3d33, images on ghcr, GitHub release Latest).
+- v3.4.0 on `feat/adb-version-check`, uncommitted: `app/versions.py` (image
+  version from the `adbinfo` bind mount + adb protocol check, run every 5 min
+  by the scheduler, banner on every page, `version_mismatch` notification,
+  Settings → General "Versions"), `adb-server/entrypoint.sh` (publishes
+  VERSION into /adbinfo), adb-server built from the repo root. 546 tests pass;
+  checked in a real stack for match, old image, published-older and no-mount.
 
-**Gate status (`.claude/dev-skills-gates.md`):** 🔢 ⏳ 3.3.0 set, bump
-confirmed by the commit approval · 🔨 ✅ (working tree; the **test artifact
-from the PR head is still owed before merge**) · 🔒 ✅ 0 open · 📄 ✅ ·
-📦 ⏳ commit approved and made, PR not opened · 🚀 ⬜.
+**Gate status:** `.claude/dev-skills-gates.md` — VERSION ⏳ (3.4.0 awaiting the
+commit approval), BUILD ✅ (PR-head test artifact still owed), SECURITY ✅,
+DOCS ✅, RELEASE ⬜, SHIP ⬜.
 
-**Mode:** this session ran semi-autonomous (on Opus 5.5, user-approved). The
-next session must ask again.
+**Mode:** this session ran semi-autonomous on Opus 5.5 (user-approved). The
+next session asks again.
 
-**New in v3.3.0 (where to look):**
-- Source verification: `github_client.get_repo_info` / `uploader_allowed`,
-  `poller._check_identity` (runs only for a new release or an unpinned repo),
-  `routes_sources.review_repo` / `confirm_repo` / `_apk_evidence`.
-- Builds page (`/repos/{id}/artifacts`, `routes_builds.py`, `artifacts.html`): past releases
-  (`poller.stage_past_release`), test builds grouped by commit with messages,
-  signing badges (`artifact_signing` table, Check signing), Refresh.
-- Artifacts: `github_client` list/get/download, `artifact_lists_apk` (zip
-  file list by range requests), build notes, siblings + debug advice.
-- Unsigned opt-in: `app/signing.py` (one key per source: `github-<repo ID>`
-  or `uploads`; keytool + zipalign + apksigner, password via env only),
-  `apk_verify.is_unsigned`.
-- Secrets: `app/secretbox.py`, `db.get_secret` / `set_secret`, startup sealing.
-- Settings split: `settings.html` (overview) + `settings_{general,security,
-  notifications,github,appearance}.html`; token template URL, expiry warning
-  (`poller._warn_token_expiry`), per-repo access check.
-- Display: `web.when` (time zone + 12/24-hour), `web.device_name` (model over adb).
-- Layout: `main.py` is the app, middleware and scheduler only; pages live in
-  `routes_{auth,sources,builds,install,devices,settings}.py`, shared page
-  helpers in `web.py`, upload staging in `uploads.py`.
+**Next step:** show the user the v3.4.0 commit checkpoint (diff, message,
+version 3.4.0, release notes = CHANGELOG 3.4.0); on yes: commit, push, PR,
+PR-head test images, merge on green CI, then the tag block for the user.
 
-**Waiting on the user:**
-1. Go-ahead to run the rest of the release: push, PR, test images from the PR
-   head, merge on green CI, then the tag block (the tag push is the user's).
-2. Pair the phone again with the test stack if they want to try pushes (its
-   data is in memory and was reset on every rebuild).
-3. Production (a different server): upgrading to 3.3.0 encrypts existing
-   secrets on first start. After that, **changing `SECRET_KEY` means
-   re-entering the token and notification services and `mfa_admin.py reset`**.
-   Back up `appdata` and `.env` together.
-4. Dependabot PRs #2/#3 (python 3.13 → 3.14 base images) are still open.
+**Also open:** test stacks t33b (18184) and t340 (18186) still run; tear down
+when the user says. Dependabot PRs #2/#3 (python 3.14 base images).
 
 **Open questions (not blocking):**
 - CI step running `adb` inside the app image (catches the read-only
@@ -97,6 +61,9 @@ next session must ask again.
   page or feature there and in `shoot.py` when the UI changes.
 - The app container is `read_only`; `adb` needs the tmpfs `~/.android`.
 - `request_body_guard` in `main.py` caps every POST before parsing — keep it.
+- The dev-skills enforcement hook reads command *text*: a heredoc that merely
+  mentions a container command gets blocked. Edit such files with the Edit tool.
+- Gate-file changes go through the Edit/Write tools, never the shell.
 - `adb connect` returning "connected" ≠ ready; wait for `get-state`.
 - **No container ever runs on host networking** (user rule). mDNS/QR pairing
   was removed in 3.0.0 for that reason; don't bring back anything that needs it.
@@ -118,7 +85,9 @@ next session must ask again.
 - Repos with no APK (release asset or artifact) can't be added.
 - Debug-signed: allowed (flagged) for uploads and artifacts, **refused for
   releases**. Unsigned: refused unless opted in **per source** (repo switch on
-  Builds, checkbox on upload), then signed with the server's own key.
+  Builds, checkbox on upload), then signed with a key kept for that source
+  alone (`signing/github-<repo ID>.p12`, `signing/uploads.p12`), never one
+  shared key.
 - Secrets in the DB are encrypted (secretbox): TOTP, notification URLs, GitHub
   token, signing-key password.
 - Token: fine-grained, read-only, created via GitHub's template URL; saved in

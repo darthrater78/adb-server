@@ -27,13 +27,14 @@ COPY --from=fetch /opt/platform-tools/adb /usr/local/bin/adb
 # adbkey/adbkey.pub (the identity every paired device trusts) and paired-device
 # state live here, on the named volume mounted over this directory — losing it
 # means every device needs to be re-paired.
-RUN mkdir -p /home/adb/.android && chown -R adb:adb /home/adb/.android
+RUN mkdir -p /home/adb/.android /adbinfo && chown -R adb:adb /home/adb/.android /adbinfo
+
+# The image's version, published into /adbinfo on start (see the entrypoint).
+# Built from the repo root, like the app image, so both read the same VERSION.
+COPY VERSION /etc/adb-server-version
+COPY --chmod=755 adb-server/entrypoint.sh /usr/local/bin/adb-server-entrypoint
 
 USER adb
 EXPOSE 5037
 
-# `-a` binds the server on all interfaces *inside this container* so the `app`
-# service can reach it by DNS name over the compose network — it does not by
-# itself expose anything to the host or LAN. See the warning in
-# docker-compose.yml before ever changing this service to host networking.
-CMD ["adb", "-a", "-P", "5037", "server", "nodaemon"]
+CMD ["adb-server-entrypoint"]

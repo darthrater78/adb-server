@@ -1,9 +1,11 @@
 """ADB Server: the FastAPI app, its middleware and the poll scheduler. The pages
 themselves are in the routes_* modules."""
+import asyncio
 import logging
 import os
 import tempfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request
@@ -21,6 +23,7 @@ import routes_install
 import routes_settings
 import routes_sources
 import uploads
+import versions
 
 logging.basicConfig(level=logging.INFO)
 # httpx logs every request's full URL at INFO, and a release asset's or an
@@ -45,6 +48,13 @@ UPLOAD_PATH = "/staged/upload"
 scheduler = AsyncIOScheduler()
 
 
+VERSION_CHECK_MINUTES = 5
+
+
+async def _check_versions() -> None:
+    await asyncio.to_thread(versions.check_and_alert)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -62,6 +72,12 @@ async def lifespan(app: FastAPI):
         poller.poll_all_repos, "interval",
         minutes=POLL_INTERVAL_MINUTES, id="poll_all_repos",
         max_instances=1, coalesce=True,
+    )
+    # Whether adb-server was left on another release: at start, then every
+    # few minutes, since either container can be recreated on its own.
+    scheduler.add_job(
+        _check_versions, "interval", minutes=VERSION_CHECK_MINUTES, id="check_versions",
+        max_instances=1, coalesce=True, next_run_time=datetime.now(),
     )
     scheduler.start()
     logger.info("Polling every %s minutes", POLL_INTERVAL_MINUTES)
