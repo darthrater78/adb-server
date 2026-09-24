@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.4.0 — 2026-09-24
+
+- Added: **a warning when the two containers are from different releases.**
+  The adb-server image now writes its version into a new `adbinfo`
+  directory that the app mounts read-only. The app also compares the adb
+  server's protocol version with its own adb client's. Either mismatch, or a
+  missing `adbinfo` mount, shows a warning with the fix on every page and
+  sends the new **version mismatch** notification once. Settings → General
+  shows both versions. Checked at start and every 5 minutes.
+- Upgrading: create `/opt/docker/adb-server/adbinfo` (owned by 10001, like
+  the other two) and add its two `volumes:` lines from this release's
+  `compose.yaml`. Until then, the app warns that it can't tell which version
+  adb-server runs.
+- Build: the adb-server image is built from the repo root, like the app, so
+  both carry the same `VERSION`.
+
 ## 3.3.0 — 2026-09-24
 
 - Added: **stage a test build straight from a watched repo's workflow

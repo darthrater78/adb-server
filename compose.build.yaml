@@ -4,7 +4,8 @@ services:
   adb-server:
     image: adb-server-local/adb-server
     build:
-      context: ./adb-server
+      context: .
+      dockerfile: adb-server/Dockerfile
 
   app:
     image: adb-server-local/app

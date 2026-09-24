@@ -17,6 +17,7 @@ import mfa
 import notify
 import poller
 import signing
+import versions
 import web
 from routes_auth import locked_message
 from routes_builds import artifact_filter
@@ -273,6 +274,8 @@ def settings_subpage(
     extra = {}
     if page == "security":
         extra["signing_keys"] = _signing_keys()
+    elif page == "general":
+        extra["versions"] = versions.last()
     return _render_settings(request, session, page=page, error=error, ok=ok, warn=warn, **extra)
 
 

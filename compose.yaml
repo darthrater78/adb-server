@@ -1,6 +1,6 @@
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.3.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.4.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -8,6 +8,7 @@ services:
       - internal
     volumes:
       - /opt/docker/adb-server/adbkeys:/home/adb/.android
+      - /opt/docker/adb-server/adbinfo:/adbinfo
     read_only: true
     tmpfs:
       - /tmp
@@ -22,7 +23,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.3.0
+    image: ghcr.io/darthrater78/adb-server/app:3.4.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -34,6 +35,7 @@ services:
       - internal
     volumes:
       - /opt/docker/adb-server/appdata:/data
+      - /opt/docker/adb-server/adbinfo:/adbinfo:ro
     read_only: true
     tmpfs:
       - /tmp:size=64m
@@ -52,7 +54,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.3.0), updated with every release
+# image: both pinned to this release (3.4.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -60,5 +62,6 @@ networks:
 # ports: 8080 is the web UI over plain HTTP. Behind a TLS proxy, bind "127.0.0.1:8080:8080"
 # /opt/docker/adb-server/adbkeys: the adb key every paired phone trusts. Back it up, keep it private
 # /opt/docker/adb-server/appdata: the database and staged APKs. Back this directory up
-# adbkeys and appdata must be owned by uid 10001 (the containers' user), or they can't write to them
+# /opt/docker/adb-server/adbinfo: adb-server writes its version there, app reads it (read-only). No secrets
+# adbkeys, appdata and adbinfo must be owned by uid 10001 (the containers' user), or they can't write to them
 # read_only + tmpfs: /tmp is scratch for apksigner; ~/.android is needed by the adb client, holds no keys

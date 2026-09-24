@@ -17,13 +17,14 @@ import db
 
 logger = logging.getLogger("notify")
 
-EVENTS = ("staged", "rejected", "install_success", "install_failed", "token_expiring")
+EVENTS = ("staged", "rejected", "install_success", "install_failed", "token_expiring", "version_mismatch")
 EVENT_LABELS = {
     "staged": "A new release was verified and staged",
     "rejected": "A release was rejected (pin mismatch or failed verification)",
     "install_success": "A push to a device succeeded",
     "install_failed": "A push to a device failed",
     "token_expiring": "The GitHub token saved in Settings expires within a week",
+    "version_mismatch": "The adb-server container and the web app are from different releases",
 }
 MAX_TARGETS = 20
 MAX_URL_LENGTH = 2000

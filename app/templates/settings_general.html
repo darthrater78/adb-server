@@ -24,4 +24,20 @@
   <p class="muted small">Times are stored in UTC; hover one to see it exactly. Until a time zone is saved here,
     <code>TZ</code> from the environment is used, else UTC.</p>
 </section>
+
+<section class="settings-section">
+  <h2>Versions</h2>
+  {% if versions %}
+  <ul class="signing-keys">
+    <li><strong>Web app</strong> <span class="mono small">{{ versions.app }}</span></li>
+    <li><strong>adb-server container</strong> <span class="mono small">{{ versions.adb_image or "unknown" }}</span></li>
+    <li><strong>adb protocol</strong> <span class="mono small">server {{ versions.server_protocol or "unreachable" }},
+      this app's client {{ versions.client_protocol or "unknown" }}</span></li>
+  </ul>
+  {% if versions.problems %}<p class="muted small">Out of step: see the warning at the top of the page.</p>
+  {% else %}<p class="muted small">Both containers are on the same release.</p>{% endif %}
+  {% else %}
+  <p class="muted small">Not checked yet: it runs a few seconds after the app starts, then every few minutes.</p>
+  {% endif %}
+</section>
 {% endblock %}

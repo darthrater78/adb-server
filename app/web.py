@@ -16,22 +16,10 @@ import audit
 import auth
 import db
 import signing
+import versions
+from versions import APP_VERSION
 
 
-def _read_version() -> str:
-    # Next to this file in the image (the Dockerfile copies it there); the
-    # repo root when running from a checkout.
-    here = os.path.dirname(os.path.abspath(__file__))
-    for path in (os.path.join(here, "VERSION"), os.path.join(here, os.pardir, "VERSION")):
-        try:
-            with open(path, encoding="utf-8") as f:
-                return f.read().strip()
-        except OSError:
-            continue
-    return "unknown"
-
-
-APP_VERSION = _read_version()
 REPO_URL = "https://github.com/darthrater78/adb-server"
 RELEASE_NOTES_URL = f"{REPO_URL}/releases/tag/v{APP_VERSION}"
 templates = Jinja2Templates(directory="templates")
@@ -136,6 +124,7 @@ def context(request: Request, session: dict | None = None, **extra) -> dict:
         "release_notes_url": RELEASE_NOTES_URL,
         "sign_explanation": signing.EXPLANATION,
         "weak_settings": auth.WEAK_SETTINGS,
+        "version_problems": versions.problems(),
         # Changes whenever the accent does, so browsers refetch /accent.css.
         "accent_version": "".join((db.get_meta(k) or "") for k in ("accent_color", "accent2_color")).replace("#", "")
                           or "default",
