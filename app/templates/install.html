@@ -62,13 +62,40 @@
 {% set version = first.version_name or latest.tag %}
 {% set has = g.target_has %}
 {% set new_kind = loop.first or loop.previtem.kind != g.kind %}
-{% set folded = not show and kinds | length > 1 %}
 {% if new_kind %}
-{% if folded %}
-<details class="fold kind-group" open>
-<summary><h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2></summary>
-{% endif %}
-<div class="card row-card">
+{# Each kind is one folded card whose head sums up where its apps stand:
+   how many, the newest, and against the device being pushed to, how many
+   are current, behind or missing. Picking a kind with the pills opens it. #}
+{% set st = namespace(n=0, current=0, behind=0, other=0, missing=0, newest=none, newest_label="") %}
+{% for k in groups if k.kind == g.kind %}
+  {% set kf = k.releases[0].apks[0] %}
+  {% set st.n = st.n + 1 %}
+  {% if not st.newest or kf.downloaded_at > st.newest.downloaded_at %}{% set st.newest = kf %}{% set st.newest_label = k.label %}{% endif %}
+  {% if k.target_has is none or not k.target_has %}{% set st.missing = st.missing + 1 %}
+  {% elif k.target_has.version_code == kf.version_code %}{% set st.current = st.current + 1 %}
+  {% elif k.target_has.version_code and kf.version_code and k.target_has.version_code < kf.version_code %}{% set st.behind = st.behind + 1 %}
+  {% else %}{% set st.other = st.other + 1 %}{% endif %}
+{% endfor %}
+<details class="card row-card device-card item-card kind-group" id="kind-{{ g.kind }}"{% if show %} open{% endif %}>
+  <summary>
+    <span class="device-icon" aria-hidden="true">{% if g.kind == "release" %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>{% elif g.kind == "artifact" %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/></svg>{% else %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>{% endif %}</span>
+    <div>
+      <h2 class="device-name">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
+      <div class="device-meta">
+        {{ st.n }} app{{ "" if st.n == 1 else "s" }}
+        {%- if st.newest %} · newest {{ st.newest_label }} {{ st.newest.version_name or st.newest.tag }}, {{ "uploaded" if g.kind == "upload" else "staged" }} {{ st.newest.downloaded_at | when }}{% endif %}
+      </div>
+    </div>
+    <span class="device-facts">
+      {% if target %}
+      {% if st.behind %}<span class="badge badge-update">{{ st.behind }} to update</span>{% endif %}
+      {% if st.current %}<span class="badge badge-ok">{{ st.current }} up to date</span>{% endif %}
+      {% if st.other %}<span class="badge badge-muted" title="Installed, but a different version from the one staged">{{ st.other }} other version</span>{% endif %}
+      {% if st.missing %}<span class="badge badge-muted">{{ st.missing }} not installed</span>{% endif %}
+      {% endif %}
+      <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </span>
+  </summary>
   <div class="row-grid install-grid row-head" aria-hidden="true"><span>App</span><span>Version</span><span>{{ "On " ~ (target | device_name) if target else "Staged" }}</span><span></span></div>
 {% endif %}
 <section class="row-item app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
@@ -167,8 +194,7 @@
   </details>
 </section>
 {% if loop.last or loop.nextitem.kind != g.kind %}
-</div>
-{% if folded %}</details>{% endif %}
+</details>
 {% endif %}
 {% else %}
 <p class="empty-state">Nothing staged yet. <a href="/sources">Add a source</a>: watch a GitHub repo, or upload an APK.

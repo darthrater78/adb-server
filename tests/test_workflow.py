@@ -181,25 +181,58 @@ def test_no_offer_for_a_trusted_or_unknown_device(authed, device, serial):
 
 # ---- collapsible blocks ----
 
-def test_add_a_device_opens_only_until_there_is_one(authed):
-    assert '<details class="panel fold" open>\n  <summary><h2>Add a device' in authed.get("/devices").text
-    db.upsert_paired_device("SER", "192.168.1.50:37000")
+def test_add_forms_start_folded_even_when_empty(authed):
+    # Everything outside Settings starts collapsed, empty page or not.
     assert '<details class="panel fold">\n  <summary><h2>Add a device' in authed.get("/devices").text
-
-
-def test_the_device_list_is_its_own_block(authed, device):
-    page = authed.get("/devices").text
-    add = page.index("<summary><h2>Add a device")
-    listed = page.index('<summary><h2 class="section-title">Paired devices')
-    assert add < page.index("</details>", add) < listed < page.index('<div class="table-wrap">')
-
-
-def test_sources_forms_fold_once_something_is_watched(authed):
     page = authed.get("/sources").text
-    assert page.count('<details class="panel fold" open>') == 1 and 'id="upload" open' in page
+    assert '<details class="panel fold" open>' not in page and 'id="upload">' in page
+
+
+@pytest.mark.parametrize("path", ["/status", "/sources", "/devices", "/install"])
+def test_every_block_outside_settings_starts_collapsed(authed, device, path):
+    db.set_device_trusted("SER", True)
+    rid = db.create_repo("o", "r", "*.apk")
+    _stage(rid, "v2", "app.apk")
+    db.insert_staged_apk(None, "dev", "dev.apk", "e" * 64, "com.dev", "d" * 64, "/nonexistent", source="upload")
+    page = authed.get(path).text
+    assert " open>" not in page, path
+
+
+def test_sources_and_devices_have_no_tables(authed, device):
+    rid = db.create_repo("o", "r", "*.apk")
+    _stage(rid, "v2", "app.apk")
+    for path in ("/sources", "/devices"):
+        assert "<table" not in authed.get(path).text, path
+
+
+def test_each_repo_and_device_is_its_own_folded_card(authed, device):
     db.create_repo("o", "r", "*.apk")
+    assert '<details class="card row-card device-card item-card" id="repo-' in authed.get("/sources").text
+    assert '<details class="card row-card device-card item-card" id="dev-1">' in authed.get("/devices").text
+
+
+def test_a_repos_head_shows_its_most_recent_release(authed):
+    rid = db.create_repo("o", "r", "*.apk")
+    _stage(rid, "v1", "app.apk", version_name="1.0")
+    _stage(rid, "v2", "app.apk", version_name="2.0")
     page = authed.get("/sources").text
-    assert '<details class="panel fold">' in page and 'id="upload">' in page
+    head = page[page.index('<h2 class="device-name">o/r'):]
+    head = head[:head.index("</summary>")]
+    assert "2.0" in head and "1.0" not in head
+
+
+def test_a_repo_whose_release_was_deleted_says_so(authed):
+    from conftest import CSRF
+    rid = db.create_repo("o", "r", "*.apk")
+    apk_id = _stage(rid, "v2", "app.apk")
+    db.update_repo_check(rid, last_tag="v2")
+    authed.post(f"/staged/{apk_id}/delete", data={"csrf_token": CSRF})
+    page = authed.get("/sources").text
+    assert "not staged" in page and "Check now</strong> downloads and verifies it again" in page
+
+
+def test_devices_explains_find(authed, device):
+    assert "What Find does" in authed.get("/devices").text
 
 
 @pytest.mark.parametrize("path", ["/status", "/sources", "/devices", "/install", "/settings", "/settings/general",
@@ -229,3 +262,36 @@ def test_an_apk_cant_inject_markup_through_its_version_or_label(authed, device):
     page = authed.get("/install").text
     assert "<img src=x" not in page and "<script>x" not in page and "<b>up</b>" not in page
     assert "&lt;img src=x onerror=alert(1)&gt;" in page
+
+
+def test_install_kind_heads_sum_up_where_the_apps_stand(authed, device):
+    for n, (pkg, has) in enumerate([("com.a", 1), ("com.b", 2), ("com.c", None)]):
+        rid = db.create_repo("o", f"r{n}", "*.apk")
+        _stage(rid, "v2", "app.apk", package=pkg, version_code=2)
+        if has:
+            db.upsert_device_package("SER", pkg, True, version_code=has, version_name=str(has))
+    db.insert_staged_apk(None, "dev", "dev.apk", "e" * 64, "com.dev", "d" * 64, "/nonexistent", source="upload")
+    page = authed.get("/install").text
+    head = page[page.index('id="kind-release"'):]
+    head = head[:head.index("</summary>")]
+    assert "3 apps" in head
+    assert "1 to update" in head and "1 up to date" in head and "1 not installed" in head
+    assert 'id="kind-upload"' in page and 'id="kind-release" open' not in page
+
+
+def test_picking_a_kind_opens_its_card(authed, device):
+    rid = db.create_repo("o", "r", "*.apk")
+    _stage(rid, "v2", "app.apk")
+    db.insert_staged_apk(None, "dev", "dev.apk", "e" * 64, "com.dev", "d" * 64, "/nonexistent", source="upload")
+    assert 'id="kind-release" open>' in authed.get("/install?show=release").text
+
+
+def test_stylesheet_url_changes_with_its_content(authed):
+    import hashlib
+    import web
+    page = authed.get("/status").text
+    with open(os.path.join(os.path.dirname(web.__file__), "static", "style.css"), "rb") as f:
+        want = hashlib.sha256(f.read()).hexdigest()[:12]
+    assert f'href="/static/style.css?v={want}"' in page
+    # accent.css still loads after it, so the chosen colours win.
+    assert page.index("/static/style.css?v=") < page.index("/accent.css?v=")

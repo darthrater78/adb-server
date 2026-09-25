@@ -1,6 +1,7 @@
 """Shared by every page: the templates and their filters, the display time
 zone, the context every page is rendered with, and the helpers every route
 uses (CSRF check, audit record, redirect)."""
+import hashlib
 import json
 import os
 import zoneinfo
@@ -117,6 +118,19 @@ def _get_theme(request: Request) -> str:
     return theme if theme in VALID_THEMES else "auto"
 
 
+def _file_version(path: str) -> str:
+    """A short hash of a static file's content, for its URL: a browser holding
+    an older copy of the file under the old URL can't keep using it."""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:12]
+    except OSError:
+        return APP_VERSION
+
+
+STYLE_VERSION = _file_version(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "style.css"))
+
+
 def context(request: Request, session: dict | None = None, **extra) -> dict:
     ctx = {
         "app_version": APP_VERSION,
@@ -125,9 +139,10 @@ def context(request: Request, session: dict | None = None, **extra) -> dict:
         "sign_explanation": signing.EXPLANATION,
         "weak_settings": auth.WEAK_SETTINGS,
         "version_problems": versions.problems(),
+        # Changes whenever style.css does, so no browser keeps a stale copy.
+        "style_version": STYLE_VERSION,
         # Changes whenever the accent does, so browsers refetch /accent.css.
-        "accent_version": "".join((db.get_meta(k) or "") for k in ("accent_color", "accent2_color")).replace("#", "")
-                          or "default",
+        "accent_version": (db.get_meta("accent_color") or "default").replace("#", ""),
         "theme": _get_theme(request),
         "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/status",
         "nav_path": NAV_SECTION.get(request.url.path, request.url.path),

@@ -43,13 +43,11 @@
   --control-border: #d9d6cf;
   --accent: #0f766e;
   --on-accent: #ffffff;
-  --accent-2: #0369a1;
-  --on-accent-2: #ffffff;
   --link: #0f766e;
-  --ok: #0f766e;
+  --ok: #15803d;
   --danger: #b42318;
   --warn: #92400e;
-  --chip-rel-bg: #e9f2f0; --chip-rel-fg: #0f5e57;
+  --chip-rel-bg: #e8f3ea; --chip-rel-fg: #166534;
   --chip-art-bg: #e7eefb; --chip-art-fg: #1d4ed8;
   --chip-neutral-bg: #f1efe9; --chip-neutral-fg: #57534e;
   --chip-debug-bg: #fdf1dc; --chip-debug-fg: #92400e;
@@ -75,13 +73,11 @@
     --line: #282723;
     --control-bg: #252420;
     --control-border: #3a3833;
-    --accent-2: #38bdf8;
-    --on-accent-2: #0b1412;
     --link: #5cc2b6;
-    --ok: #7fd6cb;
+    --ok: #86d99a;
     --danger: #f29a8a;
     --warn: #f1c373;
-    --chip-rel-bg: #17332f; --chip-rel-fg: #7fd6cb;
+    --chip-rel-bg: #183322; --chip-rel-fg: #86d99a;
     --chip-art-bg: #1c2740; --chip-art-fg: #9dbaf6;
     --chip-neutral-bg: #2b2a26; --chip-neutral-fg: #bdbab2;
     --chip-debug-bg: #3a2c12; --chip-debug-fg: #f1c373;
@@ -108,13 +104,11 @@
   --line: #efede8;
   --control-bg: #ffffff;
   --control-border: #d9d6cf;
-  --accent-2: #0369a1;
-  --on-accent-2: #ffffff;
   --link: #0f766e;
-  --ok: #0f766e;
+  --ok: #15803d;
   --danger: #b42318;
   --warn: #92400e;
-  --chip-rel-bg: #e9f2f0; --chip-rel-fg: #0f5e57;
+  --chip-rel-bg: #e8f3ea; --chip-rel-fg: #166534;
   --chip-art-bg: #e7eefb; --chip-art-fg: #1d4ed8;
   --chip-neutral-bg: #f1efe9; --chip-neutral-fg: #57534e;
   --chip-debug-bg: #fdf1dc; --chip-debug-fg: #92400e;
@@ -134,13 +128,11 @@
   --line: #282723;
   --control-bg: #252420;
   --control-border: #3a3833;
-  --accent-2: #38bdf8;
-  --on-accent-2: #0b1412;
   --link: #5cc2b6;
-  --ok: #7fd6cb;
+  --ok: #86d99a;
   --danger: #f29a8a;
   --warn: #f1c373;
-  --chip-rel-bg: #17332f; --chip-rel-fg: #7fd6cb;
+  --chip-rel-bg: #183322; --chip-rel-fg: #86d99a;
   --chip-art-bg: #1c2740; --chip-art-fg: #9dbaf6;
   --chip-neutral-bg: #2b2a26; --chip-neutral-fg: #bdbab2;
   --chip-debug-bg: #3a2c12; --chip-debug-fg: #f1c373;
@@ -228,7 +220,7 @@ input[type="file"]::file-selector-button {
   text-decoration: none;
 }
 .main-nav a:hover { color: var(--fg); }
-.main-nav a.active { background: var(--surface-2); color: var(--fg); font-weight: 600; }
+.main-nav a.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--link); font-weight: 600; }
 .main-nav svg { display: none; }
 
 .header-tools { display: flex; align-items: center; gap: 14px; }
@@ -532,7 +524,10 @@ code { font-family: var(--mono); font-size: 0.85em; }
   font-weight: 600;
   font-size: 14px;
 }
-.preview-btn.outline { background: transparent; border-color: var(--accent-2); color: var(--accent-2); }
+.preview-pill { display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 15px;
+  background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 600; }
+.preview-tab { padding: 6px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--link); font-size: 14px; font-weight: 600; }
 
 .presets { display: flex; flex-wrap: wrap; gap: 8px; }
 button.preset {
@@ -602,13 +597,14 @@ input[type="color"].colour-dot::-moz-color-swatch { border: none; border-radius:
 input[type="color"].colour-dot:hover { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--link); }
 
 /* Split swatches: primary top-left, secondary bottom-right. */
-.swatch-teal-ocean { background: linear-gradient(135deg, #0f766e 50%, #0369a1 50%); }
-.swatch-graphite-blue { background: linear-gradient(135deg, #3f3f46 50%, #2563eb 50%); }
-.swatch-navy-teal { background: linear-gradient(135deg, #1e3a8a 50%, #0d9488 50%); }
-.swatch-indigo-cyan { background: linear-gradient(135deg, #4338ca 50%, #0e7490 50%); }
-.swatch-forest-ochre { background: linear-gradient(135deg, #166534 50%, #a16207 50%); }
-.swatch-plum-slate { background: linear-gradient(135deg, #6b21a8 50%, #64748b 50%); }
-.swatch-terracotta-stone { background: linear-gradient(135deg, #9a3412 50%, #78716c 50%); }
+.swatch-teal { background: #0f766e; }
+.swatch-blue { background: #1d4ed8; }
+.swatch-indigo { background: #4338ca; }
+.swatch-violet { background: #6d28d9; }
+.swatch-rose { background: #be123c; }
+.swatch-orange { background: #c2410c; }
+.swatch-green { background: #15803d; }
+.swatch-graphite { background: #52525b; }
 
 /* ---- Login ---- */
 body.login-page {
@@ -861,7 +857,7 @@ section { margin-bottom: 24px; }
   white-space: nowrap;
 }
 .filter-pills a:hover { border-color: var(--muted); color: var(--fg); }
-.filter-pills a[aria-current="page"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.filter-pills a[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 .install-grid { grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.7fr) minmax(0, 2.4fr) 170px; }
 .row-item .debug-advice { margin: 0 20px 12px; }
@@ -937,7 +933,7 @@ main > details.panel.fold, .add-grid > details.panel.fold { margin-bottom: 16px;
 .settings-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 18px; font-size: 14px; }
 .settings-nav a { color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 8px; }
 .settings-nav a:hover { color: var(--fg); }
-.settings-nav a[aria-current="page"] { color: var(--fg); background: var(--surface-2); font-weight: 600; }
+.settings-nav a[aria-current="page"] { color: var(--link); background: color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 600; }
 .settings-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin: 16px 0 32px; }
 .settings-card { display: block; color: inherit; text-decoration: none; }
 .settings-card:hover, .settings-card:focus-visible { border-color: var(--muted); text-decoration: none; }
@@ -1229,3 +1225,69 @@ fieldset.choice legend { font-size: 13px; font-weight: 600; color: var(--muted);
   .install-grid > .row-have { grid-area: detail; }
   .install-grid > .row-state { grid-area: state; }
 }
+
+/* ---- Fold heads stand apart from their bodies ----
+   A card's head is a tinted bar across the card's full width, with a
+   hairline under it when open, so the heading never blends into what's
+   below it. Warning panels keep their own colour. */
+details.panel.fold:not(.panel-warn) > summary {
+  margin: -18px -20px 0;
+  padding: 14px 20px;
+  background: var(--surface-2);
+  border-radius: calc(var(--radius) - 1px);
+}
+details.panel.fold:not(.panel-warn)[open] > summary {
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+}
+details.panel.fold:not(.panel-warn):not([open]) { padding-bottom: 18px; }
+details.panel.fold:not(.panel-warn):not([open]) > summary { margin-bottom: -18px; }
+.device-card > summary { background: var(--surface-2); }
+.device-card[open] > summary { border-bottom-color: var(--border); }
+details.panel.fold > summary:hover, .device-card > summary:hover { filter: brightness(1.04); }
+details.panel.fold > summary:focus-visible, .device-card > summary:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+
+/* Sources' repos and Devices' phones: one folded card each, never a table,
+   so nothing ever scrolls sideways. */
+.item-card { margin-bottom: 12px; }
+.item-card .device-facts .tag-pill { white-space: nowrap; }
+.item-body { padding: 4px 20px 18px; overflow-wrap: anywhere; }
+.item-body > .more-label:first-child { margin-top: 14px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 10px 20px; margin: 14px 0 0; }
+.facts > div { min-width: 0; }
+.facts > div.wide { grid-column: 1 / -1; }
+.facts dt { font-size: 12px; font-weight: 600; color: var(--muted); }
+.facts dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.error-text { color: var(--chip-error-fg); }
+.release-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 6px; }
+.build-list { list-style: none; padding: 0; margin: 0 0 6px; display: grid; gap: 3px; }
+.build-list li { overflow-wrap: anywhere; }
+.item-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.item-actions form { margin: 0; }
+.item-actions .inline-form { flex-wrap: nowrap; }
+.item-actions input[type="text"] { width: 12rem; max-width: 100%; }
+.explainer {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--fg-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.danger-zone { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
+
+@media (max-width: 960px) {
+  details.panel.fold:not(.panel-warn) > summary { margin: -16px -16px 0; padding: 12px 16px; }
+  details.panel.fold:not(.panel-warn):not([open]) { padding-bottom: 16px; }
+  details.panel.fold:not(.panel-warn):not([open]) > summary { margin-bottom: -16px; }
+  .item-body { padding: 4px 16px 16px; }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .item-actions .inline-form { flex-wrap: wrap; width: 100%; }
+  .item-actions input[type="text"] { width: 100%; }
+  .item-actions > form:not(.inline-form), .item-actions > .button-link { flex: none; }
+}
+
+/* An open card's head carries the accent on its leading edge. */
+details.panel.fold:not(.panel-warn)[open] > summary, .device-card[open] > summary { box-shadow: inset 3px 0 0 var(--accent); }

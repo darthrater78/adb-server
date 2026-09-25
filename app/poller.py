@@ -163,7 +163,10 @@ def _stage(repo_row, tag: str, release: dict, variants: list[_Variant], repo_dir
     return staged
 
 
-async def check_repo(repo_row) -> None:
+async def check_repo(repo_row, restage: bool = False) -> None:
+    """restage: also re-download the current release if its files were
+    deleted. Only a manual Check now asks for that; the scheduled poll leaves
+    a deliberately deleted release deleted."""
     lock = _repo_locks.setdefault(repo_row["id"], asyncio.Lock())
     if lock.locked():
         return  # a check of this repo is already running
@@ -171,7 +174,7 @@ async def check_repo(repo_row) -> None:
         # Re-read: the row passed in may be stale by the time the lock is held.
         fresh = db.get_repo(repo_row["id"])
         if fresh is not None:
-            await _check_repo(fresh)
+            await _check_repo(fresh, restage)
 
 
 async def _notify(event: str, title: str, body: str) -> None:
@@ -305,7 +308,7 @@ async def stage_past_release(repo_id: int, release_id: int) -> tuple[bool, str]:
         return True, f"Staged {tag} ({staged} APK{'' if staged == 1 else 's'})"
 
 
-async def _check_repo(repo_row) -> None:
+async def _check_repo(repo_row, restage: bool = False) -> None:
     owner, repo, glob_pattern = repo_row["owner"], repo_row["repo"], repo_row["asset_glob"]
     label = f"{owner}/{repo}"
 
@@ -326,7 +329,9 @@ async def _check_repo(repo_row) -> None:
         return
 
     tag = release.get("tag_name")
-    new_release = bool(tag) and tag not in (repo_row["last_tag"], repo_row["rejected_tag"])
+    # Check now on a current release whose files were all deleted stages it again.
+    restaging = restage and bool(tag) and tag == repo_row["last_tag"] and not db.has_staged_release(repo_row["id"], tag)
+    new_release = bool(tag) and (restaging or tag not in (repo_row["last_tag"], repo_row["rejected_tag"]))
     # Only when something could be staged (plus once, to pin a repo added
     # before pinning existed): an unchanged repo costs one request per poll,
     # as before, and a name that changed hands is caught before any download.
@@ -334,7 +339,7 @@ async def _check_repo(repo_row) -> None:
         info = await _check_identity(repo_row, label)
         if info is None:
             return
-    if not tag or tag == repo_row["last_tag"]:
+    if not tag or (tag == repo_row["last_tag"] and not restaging):
         db.update_repo_check(repo_row["id"], last_error=None)
         return
     if tag == repo_row["rejected_tag"]:

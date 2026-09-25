@@ -89,10 +89,10 @@ def _render_settings(
         mfa_enabled=mfa.enabled(), mfa_locked=mfa.locked_for(), recovery_left=db.recovery_codes_left(),
         trusted_browsers=db.list_trusted_browsers(), this_browser=mfa.browser_id(auth.read_mfa_trust(request)),
         trust_days=mfa.TRUST_DAYS,
-        presets=appearance.PRESETS, accent=db.get_meta("accent_color"), accent2=db.get_meta("accent2_color"),
+        presets=appearance.PRESETS, accent=db.get_meta("accent_color"),
         saved_colours=db.list_saved_colours(), max_saved_colours=MAX_SAVED_COLOURS,
-        current_preset=appearance.preset_name(db.get_meta("accent_color"), db.get_meta("accent2_color")),
-        default_pair=appearance.PRESETS[appearance.DEFAULT_PRESET],
+        current_preset=appearance.preset_name(db.get_meta("accent_color")),
+        default_colour=appearance.PRESETS[appearance.DEFAULT_PRESET],
         default_preset=appearance.DEFAULT_PRESET,
         token_source=poller.token_source(), artifact_filter=artifact_filter(),
         time_zone=web.zone_name(), time_zones=web.TIME_ZONES, clock_24h=web.clock_24h(),
@@ -427,14 +427,15 @@ def test_notify(
 MAX_SAVED_COLOURS = 20
 
 
-def _apply_colours(request: Request, primary: str | None, secondary: str | None, name: str | None = None):
-    db.set_meta("accent_color", primary)
-    db.set_meta("accent2_color", secondary)
-    if primary is None:
+def _apply_colour(request: Request, color: str | None, name: str | None = None):
+    db.set_meta("accent_color", color)
+    # The second colour of 3.6 and earlier has no job any more; forget it.
+    db.set_meta("accent2_color", None)
+    if color is None:
         record_audit(request, "accent_reset")
-        return redirect("/settings/appearance", ok="Colours reset to the default teal and ocean")
-    record_audit(request, "accent_set", f"{primary} / {secondary}")
-    return redirect("/settings/appearance", ok=f"Colours set to {name or f'{primary} and {secondary}'}")
+        return redirect("/settings/appearance", ok="Accent reset to the default teal")
+    record_audit(request, "accent_set", color)
+    return redirect("/settings/appearance", ok=f"Accent set to {name or color}")
 
 
 # ---- settings: two-factor sign-in ----
@@ -536,29 +537,28 @@ def mfa_revoke_browser(request: Request, session: dict = Depends(auth.require_au
 def set_accent(
     request: Request, session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...), preset: str = Form(""), saved: str = Form(""),
-    accent: str = Form(""), accent2: str = Form(""),
+    accent: str = Form(""),
 ):
-    """A preset pair, a saved pair, a custom primary + secondary, or
-    (none of them) the default."""
+    """A preset, a saved colour, a custom colour, or (none of them) the default."""
     check_csrf(request, session, csrf_token)
     if saved:
         row = db.get_saved_colour(int(saved)) if saved.isdigit() else None
         if row is None:
-            return redirect("/settings/appearance", error="That saved colour pair no longer exists")
-        return _apply_colours(request, row["primary_color"], row["secondary_color"], row["name"])
+            return redirect("/settings/appearance", error="That saved colour no longer exists")
+        # A pair saved before 3.7 keeps its first colour.
+        return _apply_colour(request, row["primary_color"], row["name"])
     if preset:
         if preset not in appearance.PRESETS:
             return redirect("/settings/appearance", error="Unknown colour preset")
-        primary, secondary = (None, None) if preset == appearance.DEFAULT_PRESET else appearance.PRESETS[preset]
-    elif accent:
+        color = None if preset == appearance.DEFAULT_PRESET else appearance.PRESETS[preset]
+        return _apply_colour(request, color, preset.title() if color else None)
+    if accent:
         try:
-            primary = appearance.normalize(accent)
-            secondary = appearance.normalize(accent2 or appearance.PRESETS[appearance.DEFAULT_PRESET][1])
+            color = appearance.normalize(accent)
         except ValueError as exc:
             return redirect("/settings/appearance", error=str(exc))
-    else:
-        primary = secondary = None
-    return _apply_colours(request, primary, secondary)
+        return _apply_colour(request, None if color == appearance.PRESETS[appearance.DEFAULT_PRESET] else color)
+    return _apply_colour(request, None)
 
 
 @router.post("/settings/timezone")
@@ -583,45 +583,45 @@ def set_timezone(
 @router.post("/settings/appearance/save")
 def save_colours(
     request: Request, session: dict = Depends(auth.require_auth),
-    csrf_token: str = Form(...), name: str = Form(""), accent: str = Form(...), accent2: str = Form(...),
+    csrf_token: str = Form(...), name: str = Form(""), accent: str = Form(...),
 ):
-    """Saves the custom pair under a name (re-saving a name updates it) and applies it."""
+    """Saves the custom colour under a name (re-saving a name updates it) and applies it."""
     check_csrf(request, session, csrf_token)
     name = " ".join(name.split())
     if not name or len(name) > 40:
-        return redirect("/settings/appearance", error="Give the colour pair a name of up to 40 characters")
+        return redirect("/settings/appearance", error="Give the colour a name of up to 40 characters")
     try:
-        primary, secondary = appearance.normalize(accent), appearance.normalize(accent2)
+        color = appearance.normalize(accent)
     except ValueError as exc:
         return redirect("/settings/appearance", error=str(exc))
     names = {r["name"] for r in db.list_saved_colours()}
     if name not in names and len(names) >= MAX_SAVED_COLOURS:
-        return redirect("/settings/appearance", error=f"You can save up to {MAX_SAVED_COLOURS} colour pairs — delete one first")
-    db.save_colour(name, primary, secondary)
-    record_audit(request, "colours_saved", f"{name}: {primary} / {secondary}")
-    return _apply_colours(request, primary, secondary, name)
+        return redirect("/settings/appearance", error=f"You can save up to {MAX_SAVED_COLOURS} colours — delete one first")
+    # The table's second column is from the two-colour days: it holds the same colour.
+    db.save_colour(name, color, color)
+    record_audit(request, "colours_saved", f"{name}: {color}")
+    return _apply_colour(request, color, name)
 
 
 @router.post("/settings/appearance/saved/{colour_id}/delete")
 def delete_saved_colours(
     colour_id: int, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
 ):
-    """Removes the saved pair. Colours already in use stay as they are."""
+    """Removes the saved colour. The colour in use stays as it is."""
     check_csrf(request, session, csrf_token)
     row = db.get_saved_colour(colour_id)
     if row is None:
         raise HTTPException(status_code=404)
     db.delete_saved_colour(colour_id)
     record_audit(request, "colours_deleted", row["name"])
-    return redirect("/settings/appearance", ok=f"Deleted the saved pair “{row['name']}”")
+    return redirect("/settings/appearance", ok=f"Deleted the saved colour “{row['name']}”")
 
 
 @router.get("/accent.css")
 def accent_css():
     """Public: the sign-in page uses it too, and it reveals only a colour.
     Generated here because the CSP forbids inline styles."""
-    return Response(appearance.stylesheet(db.get_meta("accent_color"), db.get_meta("accent2_color"),
-                                          db.list_saved_colours()),
+    return Response(appearance.stylesheet(db.get_meta("accent_color"), db.list_saved_colours()),
                     media_type="text/css",
                     headers={"Cache-Control": "no-cache"})
 

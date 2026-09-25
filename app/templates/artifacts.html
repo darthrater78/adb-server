@@ -11,7 +11,7 @@
 <p class="flash flash-error">{{ problem }}</p>
 <p><a href="/settings/github" class="button-link secondary">Settings → GitHub</a></p>
 {% else %}
-<details class="settings-section fold" open>
+<details class="settings-section fold">
   <summary><h2>Releases</h2></summary>
   <p class="muted small">Each goes through the same checks as a polled release: uploaded by the owner or a workflow,
     signed with the repo's pinned certificate, and not a debug build. An older release staged here doesn't become
@@ -48,13 +48,13 @@
   </div>
 </details>
 
-<details class="settings-section fold" open>
+<details class="settings-section fold">
   <summary><h2>Test builds from workflow artifacts</h2></summary>
   <p class="muted small">Staging one is like uploading its zip: it must hold exactly one APK, up to {{ max_mb }} MB,
     whose signature verifies. Debug builds are allowed and marked. Only builds from this repo's own branches are
     listed: never one from a pull request opened from a fork, and never a release's own build (that's under
     Releases). Builds of the same commit are grouped.</p>
-  <details class="guide" open>
+  <details class="guide">
     <summary>Which build to pick</summary>
     <ul class="muted small">
       <li><span class="badge badge-ok">signed · same key as releases</span> is the one to install: a phone that has the
@@ -72,7 +72,7 @@
       downloads it, checks it and deletes it; staging one records it too.</p>
   </details>
   {% for c in artifacts %}
-  <details class="panel commit-group fold" open>
+  <details class="panel commit-group fold">
     <summary class="commit-head">
       <span class="tag-pill" title="Branch">{{ c.branch or "?" }}</span>
       <a class="mono small" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/commit/{{ c.sha }}" rel="noopener noreferrer">{{ c.sha[:7] }}</a>
@@ -127,7 +127,7 @@
 </details>
 {% endif %}
 
-<details class="settings-section fold" id="signing" open>
+<details class="settings-section fold" id="signing">
   <summary><h2>Unsigned builds</h2></summary>
   {% if repo.sign_unsigned %}
   <p><span class="badge badge-warn">On</span> Unsigned releases and test builds from this repo are signed with this

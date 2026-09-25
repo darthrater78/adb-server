@@ -39,7 +39,7 @@
 
   <a class="panel settings-card" href="/settings/appearance">
     <h2>Appearance</h2>
-    <p>{% if current_preset %}{{ current_preset | replace('-', ' & ') | title }}{% else %}Custom colours{% endif %}</p>
+    <p>{% if current_preset %}{{ current_preset | title }}{% else %}Custom accent{% endif %}</p>
     <p class="muted small">Theme is per browser, in the top bar</p>
   </a>
 </div>

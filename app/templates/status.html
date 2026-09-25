@@ -44,7 +44,7 @@
 </div>
 
 {% if not setup_done %}
-<details class="panel setup fold" open>
+<details class="panel setup fold">
   <summary><h2>Get set up</h2></summary>
   <ol class="checklist">
     {% for s in steps %}
@@ -88,7 +88,7 @@
 {% set d = card.device %}
 {% set dev_loop = loop %}
 {% set app_count = card.apps | selectattr("installed") | selectattr("installed.installed") | list | length + card.others | length %}
-<details class="card row-card device-card" id="device-{{ loop.index }}"{% if d.trusted %} open{% endif %}>
+<details class="card row-card device-card" id="device-{{ loop.index }}">
   <summary>
     <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg></span>
     <div>

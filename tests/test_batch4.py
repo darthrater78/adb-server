@@ -138,7 +138,7 @@ def test_check_now_responds_before_checking(authed, monkeypatch):
     rid = db.create_repo("o", "r", "*.apk")
     started = []
 
-    async def fake_check(row):
+    async def fake_check(row, restage=False):
         started.append(row["id"])
     monkeypatch.setattr(poller, "check_repo", fake_check)
     r = authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF}, follow_redirects=False)
@@ -150,7 +150,7 @@ def test_overlapping_checks_of_one_repo_are_collapsed(monkeypatch):
     rid = db.create_repo("o", "r", "*.apk")
     calls = []
 
-    async def slow(row):
+    async def slow(row, restage=False):
         calls.append(row["id"])
         await asyncio.sleep(0.05)
     monkeypatch.setattr(poller, "_check_repo", slow)

@@ -229,9 +229,11 @@ Then turn on two-factor sign-in under **Settings → Security**.
 ## Features
 
 The app follows the order you use it in: **Status · Sources · Devices ·
-Install · Settings**. Every card, panel and section folds away: click its
-heading. Forms you've finished with start folded (**Add a device** once a
-device is paired, the add forms on Sources once something is watched).
+Install · Settings**. Every card, panel and section folds: click its heading.
+Outside Settings everything **starts folded**, so a page opens as a list of
+headings, each summing up what's inside (a device's updates, a repo's newest
+release, how many apps in a group need updating). Only a question waiting on
+you (a repo to confirm, a signing change, a device to trust) starts open.
 
 **Every push works the same way**, from Status or Install: the button asks
 you to confirm (what, to which device, replacing which version), then a
@@ -290,7 +292,15 @@ no release yet. Nothing is watched until you confirm it's the repo you meant
 
 Repos are polled every `POLL_INTERVAL_MINUTES`
 (default 10). **Check now** checks immediately, in the background: the page
-reloads itself until the check is done, then says what it found.
+reloads itself until the check is done, then says what it found. If you
+deleted the current release's files on Install, **Check now** downloads and
+verifies it again; the scheduled poll leaves a deleted release alone.
+
+Each watched repo is one folded card. Its heading shows the most recent
+staged release (or **not staged** if its files were deleted) and whether the
+last check went through; open it for that release's builds and notes, the
+repo's details, and **Builds**, **Check now**, **Pre-releases** and
+**Remove**.
 Pre-releases are ignored unless you turn **Pre-releases** on for that repo.
 Polls use conditional requests (ETags); with `GITHUB_TOKEN` set, an unchanged
 repo doesn't use up GitHub's rate limit (GitHub only waives it for
@@ -374,18 +384,22 @@ enter the pairing address and 6-digit code the phone shows, plus its connect
 address. A new device starts **untrusted**. As soon as it's paired, the page
 asks **Trust it?**, showing its model, serial, CPU and address so you can
 check it's the phone you just paired, with a box to name it at the same
-time. **Not now** leaves it untrusted; **Trust** in the list does the same
-later. Nothing is pushed to an untrusted device.
+time. **Not now** leaves it untrusted; **Trust** on its card does the same
+later. Each paired device is one folded card: its heading shows its name,
+serial and trust, and it opens to its details, naming and trust, and its
+connection. Nothing is pushed to an untrusted device.
 
 The connect port changes whenever wireless debugging restarts. Before every
 push, the app reconnects to the device. If the stored port is dead, it scans
 the device's last known IP (`ADB_SCAN_PORTS`, default `30000-49999`) and
 accepts a port only if the device there reports the **same hardware serial**.
-**Find** does this on demand. If the phone's IP itself changed, use
+**Find** does this on demand (each device card explains it): use it to check
+a phone is reachable before you install, or after turning wireless debugging
+back on. If the phone's IP itself changed, use
 **Reconnect** with its new address. Nicknames, trust and forgetting a device
 are all on this page. Phones list this server as `@adbserver`.
 
-![Devices: pairing folded away once a device exists, and the paired devices](docs/screenshots/devices.png)
+![Devices: pairing folded away, and each paired device as a folded card, the first one opened](docs/screenshots/devices.png)
 
 ### Install
 
@@ -401,8 +415,10 @@ When a release has several APKs that match the glob (per-ABI builds such as
 staged file (to push a specific one or delete it) and older versions.
 
 Rows are grouped as **Releases**, **Test builds from workflow artifacts** and
-**Uploads**, and the **All · Releases · Test builds · Uploads** pills show
-just one group. A test build is marked **Test build**, with its branch
+**Uploads**, each a folded card whose heading sums it up: how many apps, the
+newest one, and against the device you're pushing to how many are **to
+update**, **up to date** or **not installed**. The **All · Releases · Test
+builds · Uploads** pills show just one group, opened. A test build is marked **Test build**, with its branch
 and commit linked to the workflow run, so it can't be mistaken for a release.
 Devices are named by their nickname, else its model and the
 end of its serial (e.g. `Google Pixel 8 · …005KT`), read when the app first
@@ -519,11 +535,13 @@ General shows both versions.
 
 ### Appearance
 
-**Settings → Appearance** sets two colours for the whole app: a **primary**
-(solid buttons, the current page) and a **secondary** (links, tags, outlined
-buttons, focus rings). Pick a preset pair or any two custom colours. Name a
-custom pair and **Save as preset** to keep it. Colours are darkened or
-lightened per theme so text stays readable (WCAG AA contrast). The header's
+**Settings → Appearance** sets one **accent** colour for the whole app: solid
+buttons, links, focus rings, the current page in the menu, the chosen filter
+or Settings tab, checkboxes and the edge of an open card. Status badges
+(Release, Test build, debug, errors) keep their own colours, because the
+colour is what they mean. Pick a preset or any custom colour; name a custom
+one and **Save as preset** to keep it. The accent is darkened or lightened per
+theme so text stays readable (WCAG AA contrast). The header's
 **Flashbang / Dark / OLED** buttons pick a theme for this browser: light,
 dark, or dark on true black. Without one, the app follows your OS's
 light/dark setting. The layout adapts to phones and tablets (a bottom tab bar

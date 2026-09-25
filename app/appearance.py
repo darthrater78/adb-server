@@ -1,41 +1,43 @@
-"""The app-wide accent colours: a primary (solid buttons, the active nav
-item) and a secondary (links, tags, outlined buttons, focus rings). Pure
-functions, no I/O.
+"""The app-wide accent colour: one colour for everything that highlights
+(solid buttons, links, focus rings, the current page in the nav, the chosen
+filter or Settings tab, checkboxes, the edge of an open card). Status badges
+keep their own fixed colours: they carry meaning. Pure functions, no I/O.
 
-Each colour has to work as text and as a button fill on both
-white and near-black backgrounds, so it's nudged darker for the light themes
-and lighter for the dark ones until it meets WCAG AA contrast (4.5:1), and the
-text drawn on it is whichever of white or near-black reads better."""
+The colour has to work as text and as a button fill on the light and the
+dark backgrounds, so it's nudged darker for the light theme and lighter for
+the dark ones until it meets WCAG AA contrast (4.5:1), and the text drawn on
+it is whichever of white or near-black reads better."""
 import re
 
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-# Name -> (primary, secondary) for the presets: a primary with a quieter,
-# related secondary, not complementary opposites. The default (nothing saved)
-# is the palette in style.css, which is "teal-ocean".
+# Name -> colour. The default (nothing saved) is style.css's own palette,
+# which is "teal".
 PRESETS = {
-    "teal-ocean": ("#0f766e", "#0369a1"),
-    "graphite-blue": ("#3f3f46", "#2563eb"),
-    "navy-teal": ("#1e3a8a", "#0d9488"),
-    "indigo-cyan": ("#4338ca", "#0e7490"),
-    "forest-ochre": ("#166534", "#a16207"),
-    "plum-slate": ("#6b21a8", "#64748b"),
-    "terracotta-stone": ("#9a3412", "#78716c"),
+    "teal": "#0f766e",
+    "blue": "#1d4ed8",
+    "indigo": "#4338ca",
+    "violet": "#6d28d9",
+    "rose": "#be123c",
+    "orange": "#c2410c",
+    "green": "#15803d",
+    "graphite": "#52525b",
 }
 # Hand-picked dark-theme shades for the presets. Lightening a colour by
 # mixing in white washes it out; these stay saturated. Custom colours still
 # fall back to the computed variant.
 PRESET_DARK = {
-    "teal-ocean": ("#2dd4bf", "#38bdf8"),
-    "graphite-blue": ("#a1a1aa", "#60a5fa"),
-    "navy-teal": ("#93c5fd", "#2dd4bf"),
-    "indigo-cyan": ("#818cf8", "#22d3ee"),
-    "forest-ochre": ("#4ade80", "#eab308"),
-    "plum-slate": ("#c084fc", "#94a3b8"),
-    "terracotta-stone": ("#fb923c", "#a8a29e"),
+    "teal": "#2dd4bf",
+    "blue": "#60a5fa",
+    "indigo": "#818cf8",
+    "violet": "#a78bfa",
+    "rose": "#fb7185",
+    "orange": "#fb923c",
+    "green": "#4ade80",
+    "graphite": "#a1a1aa",
 }
-DEFAULT_PRESET = "teal-ocean"
-LIGHT_BG = "#ffffff"
-DARK_BGS = ("#14161a", "#000000")  # Dark and OLED
+DEFAULT_PRESET = "teal"
+LIGHT_BGS = ("#ffffff", "#f6f5f2")  # Flashbang: cards, page
+DARK_BGS = ("#1e1d1b", "#161614", "#0e0e0d", "#000000")  # Dark and OLED: cards, page
 MIN_CONTRAST = 4.5
 _DARK_TEXT = "#0b1412"
 
@@ -89,51 +91,47 @@ def _on(color: str) -> str:
 
 def variants(color: str) -> dict[str, str]:
     color = normalize(color)
-    light = _fit(color, (LIGHT_BG,), "#000000")
+    light = _fit(color, LIGHT_BGS, "#000000")
     dark = _fit(color, DARK_BGS, "#ffffff")
     return {"light": light, "on_light": _on(light), "dark": dark, "on_dark": _on(dark)}
 
 
-def preset_name(primary: str | None, secondary: str | None) -> str | None:
-    """Which preset a saved pair is, if any (the default when nothing is saved)."""
-    if not primary:
+def preset_name(color: str | None) -> str | None:
+    """Which preset the saved colour is, if any (the default when nothing is saved)."""
+    if not color:
         return DEFAULT_PRESET
-    for name, pair in PRESETS.items():
-        if pair == (primary, secondary):
+    for name, preset in PRESETS.items():
+        if preset == color:
             return name
     return None
 
 
 def swatches(saved) -> str:
-    """Split swatches for saved pairs, like the presets' in style.css. Here
-    because the CSP forbids inline styles. The colours were normalized
-    to #rrggbb before they were stored."""
+    """Swatches for saved colours, like the presets' in style.css. Here
+    because the CSP forbids inline styles. The colours were normalized to
+    #rrggbb before they were stored."""
     return "".join(
-        f".swatch-saved-{int(s['id'])} {{ background: linear-gradient(135deg, "
-        f"{normalize(s['primary_color'])} 50%, {normalize(s['secondary_color'])} 50%); }}\n"
+        f".swatch-saved-{int(s['id'])} {{ background: {normalize(s['primary_color'])}; }}\n"
         for s in saved
     )
 
 
-def stylesheet(primary: str | None, secondary: str | None = None, saved=()) -> str:
-    """CSS overriding style.css's --accent/--accent-2 (nothing, for the
-    default palette), plus the saved pairs' swatches. Loaded after
-    style.css, so equal selectors win."""
-    if not primary:
+def stylesheet(color: str | None, saved=()) -> str:
+    """CSS overriding style.css's --accent and --link (nothing, for the
+    default), plus the saved colours' swatches. Loaded after style.css, so
+    equal selectors win. The accent fills solid buttons; --link is the same
+    colour, fitted to read as text on every background of the theme."""
+    if not color:
         return "/* default accent */\n" + swatches(saved)
-    secondary = secondary or PRESETS[DEFAULT_PRESET][1]
-    p, s2 = variants(primary), variants(secondary)
-    name = preset_name(normalize(primary), normalize(secondary))
+    v = variants(color)
+    name = preset_name(normalize(color))
     if name in PRESET_DARK:
-        for v, dark in zip((p, s2), PRESET_DARK[name]):
-            v["dark"], v["on_dark"] = dark, _on(dark)
-    # Links take the secondary colour (the default palette's are its own teal).
-    light = (f"--accent: {p['light']}; --on-accent: {p['on_light']}; "
-             f"--accent-2: {s2['light']}; --on-accent-2: {s2['on_light']}; --link: {s2['light']};")
-    dark = (f"--accent: {p['dark']}; --on-accent: {p['on_dark']}; "
-            f"--accent-2: {s2['dark']}; --on-accent-2: {s2['on_dark']}; --link: {s2['dark']};")
+        v["dark"] = PRESET_DARK[name]
+        v["on_dark"] = _on(v["dark"])
+    light = f"--accent: {v['light']}; --on-accent: {v['on_light']}; --link: {v['light']};"
+    dark = f"--accent: {v['dark']}; --on-accent: {v['on_dark']}; --link: {v['dark']};"
     return (
-        f"/* accent {normalize(primary)} / {normalize(secondary)} */\n"
+        f"/* accent {normalize(color)} */\n"
         f":root {{ {light} }}\n"
         f"@media (prefers-color-scheme: dark) {{ :root {{ {dark} }} }}\n"
         f':root[data-theme="flashbang"] {{ {light} }}\n'

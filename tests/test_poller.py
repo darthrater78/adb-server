@@ -255,3 +255,73 @@ def test_an_unsigned_release_is_refused_unless_the_repo_opted_in(upstream, monke
     [apk] = db.list_staged_apks()
     # With the repo's own key (by GitHub ID), not one shared by every source.
     assert apk["tag"] == "v2" and apk["server_signed"] == 1 and signed == ["github-1"]
+
+
+# ---- restaging a deleted release ----
+
+def _delete_all_staged(authed):
+    from conftest import CSRF
+    for a in db.list_staged_apks():
+        authed.post(f"/staged/{a['id']}/delete", data={"csrf_token": CSRF})
+
+
+def test_staging_a_deleted_release_again_is_not_refused_as_already_staged(upstream, authed, monkeypatch):
+    async def get_release(owner, repo, release_id, token):
+        return await upstream._release(owner, repo, token)
+    monkeypatch.setattr(github_client, "get_release", get_release)
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    [before] = db.list_staged_apks()
+    _delete_all_staged(authed)
+    ok, message = asyncio.run(poller.stage_past_release(rid, 1))
+    assert ok, message
+    [after] = db.list_staged_apks()
+    # The deleted row is revived, so install history keeps pointing at it.
+    assert after["id"] == before["id"] and after["pruned_at"] is None
+    assert os.path.exists(after["path"])
+
+
+def test_scheduled_poll_leaves_a_deleted_release_deleted(upstream, authed):
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    _delete_all_staged(authed)
+    _poll(rid)
+    assert db.list_staged_apks() == []
+    assert upstream.downloads == 1
+
+
+def test_check_now_restages_a_deleted_release(upstream, authed):
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    _delete_all_staged(authed)
+    asyncio.run(poller.check_repo(db.get_repo(rid), restage=True))
+    assert len(db.list_staged_apks()) == 1
+    assert upstream.downloads == 2
+
+
+def test_check_now_does_not_redownload_a_staged_release(upstream):
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    asyncio.run(poller.check_repo(db.get_repo(rid), restage=True))
+    assert upstream.downloads == 1
+
+
+def test_check_now_route_asks_for_a_restage(authed, monkeypatch):
+    from conftest import CSRF
+    calls = []
+
+    async def fake_check(row, restage=False):
+        calls.append(restage)
+
+    monkeypatch.setattr(poller, "check_repo", fake_check)
+    rid = db.create_repo("o", "r", "*.apk")
+    authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF})
+    assert calls == [True]
+
+
+def test_insert_still_refuses_a_live_duplicate():
+    rid = db.create_repo("o", "r", "*.apk")
+    args = dict(repo_id=rid, tag="v1", filename="a.apk", sha256="x" * 64,
+                package_name="p", signer_sha256=SIGNER_A, path="/data/staging/1/x.apk")
+    assert db.insert_staged_apk(**args) is not None
+    assert db.insert_staged_apk(**args) is None

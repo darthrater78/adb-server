@@ -426,25 +426,48 @@ def insert_staged_apk(
     artifact: dict | None = None, released_at: str | None = None, server_signed: bool = False,
 ) -> int | None:
     """`artifact` (repo, run_id, branch, sha) marks an upload that came from
-    a watched repo's workflow artifact."""
+    a watched repo's workflow artifact.
+
+    Returns the row's id, or None if that APK is already staged. A deleted
+    (pruned) release file keeps its row for install history, and
+    UNIQUE(repo_id, tag, filename) still counts it, so staging the same file
+    again revives that row instead of failing as a duplicate."""
     art = artifact or {}
     with get_conn() as conn:
         try:
-            cur = conn.execute(
+            row = conn.execute(
                 """INSERT INTO staged_apks
                    (repo_id, tag, filename, sha256, package_name, signer_sha256, path,
                     downloaded_at, release_notes, version_code, version_name, abis,
                     source, is_debug, artifact_repo, artifact_run_id, artifact_branch, artifact_sha, released_at,
                     server_signed, artifact_subject, artifact_repo_id, artifact_siblings)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(repo_id, tag, filename) DO UPDATE SET
+                       sha256 = excluded.sha256, package_name = excluded.package_name,
+                       signer_sha256 = excluded.signer_sha256, path = excluded.path,
+                       downloaded_at = excluded.downloaded_at, release_notes = excluded.release_notes,
+                       version_code = excluded.version_code, version_name = excluded.version_name,
+                       abis = excluded.abis, is_debug = excluded.is_debug, released_at = excluded.released_at,
+                       server_signed = excluded.server_signed, pruned_at = NULL
+                   WHERE staged_apks.pruned_at IS NOT NULL
+                   RETURNING id""",
                 (repo_id, tag, filename, sha256, package_name, signer_sha256, path, now(),
                  release_notes, version_code, version_name, abis, source, int(is_debug),
                  art.get("repo"), art.get("run_id"), art.get("branch"), art.get("sha"), released_at,
                  int(server_signed), art.get("subject"), art.get("repo_id"), art.get("siblings")),
-            )
-            return cur.lastrowid
+            ).fetchone()
+            return row["id"] if row else None
         except sqlite3.IntegrityError:
             return None
+
+
+def has_staged_release(repo_id: int, tag: str) -> bool:
+    """Whether any file of this release is still staged (not deleted)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT 1 FROM staged_apks WHERE repo_id = ? AND tag = ? AND pruned_at IS NULL LIMIT 1",
+            (repo_id, tag),
+        ).fetchone() is not None
 
 
 # Uploads have no repo: LEFT JOIN so they aren't silently dropped, and give
