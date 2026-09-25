@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.7.1 — 2026-09-25
+
+- Fixed: **Builds opens on the newest.** Releases and Test builds were both
+  folded shut, hiding everything. Each is now open, leading with its newest
+  item: the latest release as a card with its name, date, APK count, release
+  notes and **Stage**, and the newest commit's builds. Older releases and
+  older commits sit under a fold below (**N older releases**, **N older
+  commits**). Unsigned builds stays folded.
+- Fixed: **a dev build next to a release is caught.** A dev tag's images
+  (`v3.7.0-dev.1`) reported the plain version (`3.7.0`), so a dev web app
+  beside a released adb-server looked matched and no warning showed. The
+  release workflow now stamps the tag's full version into both images. Images
+  already published keep their old version; this applies from the next tag.
+  A dev build's version badge links to its tag, since it has no release page.
+
 ## 3.7.0 — 2026-09-25
 
 - Changed: **every push works the same way.** Push on Install now asks you to

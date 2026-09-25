@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.7.0](https://github.com/darthrater78/adb-server/releases/tag/v3.7.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.7.1](https://github.com/darthrater78/adb-server/releases/tag/v3.7.1)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.7.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.7.1
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.7.0
+    image: ghcr.io/darthrater78/adb-server/app:3.7.1
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.7.0), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.7.1), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -193,7 +193,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.7.0` and add one
+> Then, in your `compose.yaml`, set both images to `3.7.1` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -308,9 +308,12 @@ authenticated requests). When a release is signed by a different certificate tha
 the pinned one, a **Signing change** panel shows both certificates and whether
 the new APK proves the rotation (see [Release verification](#release-verification)).
 
-**Builds** on a watched repo has two lists:
+**Builds** on a watched repo has two lists. Each opens on its newest item,
+with **Stage** right there; the rest sit under a fold below it
+(**N older releases**, **N older commits**):
 
-- **Releases**: its published releases. **Stage** an older one and it goes
+- **Releases**: its published releases. The newest shows its name, date,
+  APK count and release notes. **Stage** an older one and it goes
   through every release check (uploader, signature, the pin, no debug
   builds). It doesn't become "latest": auto-update and **Push latest** go by
   release date, so they keep using the newest release.
@@ -523,7 +526,8 @@ checks both ways, when it starts and every 5 minutes:
 
 - **Image version.** On start, the adb-server container writes its version
   into `adbinfo/`, which the app mounts read-only, and the app compares it
-  with its own.
+  with its own. A dev build reports its full version (`3.7.1-dev.1`), so a
+  dev app beside a released adb-server (or the other way round) is caught too.
 - **adb protocol.** The app asks the adb server which protocol it speaks and
   compares that with its own adb client, since a mismatch there breaks
   pairing and installs outright.
@@ -950,7 +954,9 @@ GitHub release, but only for a commit CI already passed.
 **Dev builds** for testing a branch before it merges: tag the branch's
 commit with a suffix, such as `v3.7.0-dev.1` (the part before the `-` must
 match `VERSION`). The same workflow publishes both images as `:3.7.0-dev.1`
-only. It never moves `:latest` or `:3.7`, and it makes no GitHub release.
+only, and both report `3.7.0-dev.1` as their version, so the app's version
+check tells a dev build from the release. It never moves `:latest` or `:3.7`,
+and it makes no GitHub release.
 
 ## Non-goals
 

@@ -157,6 +157,17 @@ jobs:
           fi
           echo "prerelease=false" >> "$GITHUB_OUTPUT"
 
+      - name: Stamp the tag's full version into VERSION
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # VERSION says 3.7.0 for v3.7.0-dev.1 too (the gate checks only the
+          # part before the dash). Both images publish VERSION, and the app
+          # compares the two, so a dev build must report itself as one:
+          # otherwise a 3.7.0-dev.1 app beside a 3.7.0 adb-server looks matched.
+          printf '%s\n' "${TAG#v}" > VERSION
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

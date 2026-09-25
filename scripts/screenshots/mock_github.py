@@ -34,8 +34,10 @@ REPOS = {
 RELEASES = {
     "weather-app": [
         {"id": 9004, "tag_name": "v2.4.0", "name": "Radar layers", "published_at": ago(3),
+         "body": "## Added\n- Radar layers: rain, snow and lightning\n- Severe-weather alerts on the lock screen\n\n"
+                 "## Fixed\n- The widget no longer shows yesterday's high after midnight",
          "assets": [{"name": "weather-app-arm64-v8a.apk"}, {"name": "weather-app-armeabi-v7a.apk"}]},
-        {"id": 9003, "tag_name": "v2.3.1", "name": "", "published_at": ago(21), "assets": [{"name": "weather-app.apk"}]},
+        {"id": 9003, "tag_name": "v2.3.1", "name": "", "published_at": ago(21), "body": "- Fixes a crash on rotation", "assets": [{"name": "weather-app.apk"}]},
         {"id": 9002, "tag_name": "v2.3.0", "name": "Widgets", "published_at": ago(40), "assets": [{"name": "weather-app.apk"}]},
         {"id": 9001, "tag_name": "v2.2.0", "name": "", "published_at": ago(75), "assets": [{"name": "weather-app.apk"}]},
     ],

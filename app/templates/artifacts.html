@@ -11,45 +11,119 @@
 <p class="flash flash-error">{{ problem }}</p>
 <p><a href="/settings/github" class="button-link secondary">Settings → GitHub</a></p>
 {% else %}
-<details class="settings-section fold">
-  <summary><h2>Releases</h2></summary>
-  <p class="muted small">Each goes through the same checks as a polled release: uploaded by the owner or a workflow,
-    signed with the repo's pinned certificate, and not a debug build. An older release staged here doesn't become
-    "latest": auto-update and <strong>Push latest</strong> keep using the newest release.</p>
+{% macro stage_release(r) %}
+  {% if r.staged %}<span class="badge badge-muted">staged</span>
+  {% elif r.apks %}
+  <form method="post" action="/repos/{{ repo.id }}/releases/{{ r.id }}/stage">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="small secondary">Stage</button>
+  </form>
+  {% endif %}
+{% endmacro %}
+{% macro release_badges(r) %}
+  {% if r.current %}<span class="badge badge-ok">current</span>{% endif %}
+  {% if r.prerelease %}<span class="badge badge-muted">pre-release</span>{% endif %}
+{% endmacro %}
+{% macro commit_group(c, open=false) %}
+<details class="panel commit-group fold"{% if open %} open{% endif %}>
+  <summary class="commit-head">
+    <span class="tag-pill" title="Branch">{{ c.branch or "?" }}</span>
+    <a class="mono small" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/commit/{{ c.sha }}" rel="noopener noreferrer">{{ c.sha[:7] }}</a>
+    <strong class="commit-subject">{{ c.subject or "(no commit message available)" }}</strong>
+    <span class="muted small">{{ c.created | when }}</span>
+  </summary>
+  {% if c.message and c.message != c.subject %}
+  <details><summary>Commit message</summary><pre class="release-notes">{{ c.message }}</pre></details>
+  {% endif %}
   <div class="table-wrap">
   <table>
-    <thead><tr><th>Release</th><th>Published</th><th>APKs</th><th></th></tr></thead>
+    <thead><tr><th>Artifact</th><th>Signing</th><th>Workflow run</th><th>Size</th><th></th></tr></thead>
     <tbody>
-      {% for r in releases %}
-      <tr>
-        <td data-label="Release">
-          <span class="tag-pill">{{ r.tag }}</span>
-          {% if r.name and r.name != r.tag %}<span class="small">{{ r.name }}</span>{% endif %}
-          {% if r.current %}<span class="badge badge-ok">current</span>{% endif %}
-          {% if r.prerelease %}<span class="badge badge-muted">pre-release</span>{% endif %}
-        </td>
-        <td data-label="Published" class="small">{{ r.published or "—" }}</td>
-        <td data-label="APKs" class="small">{{ r.apks or "none matching " ~ repo.asset_glob }}</td>
-        <td>
-          {% if r.staged %}<span class="badge badge-muted">staged</span>
-          {% elif r.apks %}
-          <form method="post" action="/repos/{{ repo.id }}/releases/{{ r.id }}/stage">
+      {% for item in c.artifacts %}{% set a = item.a %}
+      {% set sig = signing.get(a.id) %}
+      <tr id="artifact-{{ a.id }}">
+        <td data-label="Artifact"><span class="clip" title="{{ a.name }}">{{ a.name }}</span></td>
+        <td data-label="Signing">
+          {% if not sig %}
+          <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/check">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="small secondary">Stage</button>
+            <button type="submit" class="small secondary" title="Downloads it, checks the signature, deletes it">Check signing</button>
           </form>
-          {% endif %}
+          {% elif sig.kind == "signed" %}
+            {% if repo.signer_sha256 and sig.signer == repo.signer_sha256 %}<span class="badge badge-ok" title="Updates the app installed from releases">signed · same key as releases</span>
+            {% elif repo.signer_sha256 %}<span class="badge badge-ok" title="A phone with the release installed refuses it">signed · different key</span>
+            {% else %}<span class="badge badge-ok">signed</span>{% endif %}
+          {% elif sig.kind == "debug" %}<span class="badge badge-warn" title="Signed with a throwaway debug key">debug build</span>
+          {% elif sig.kind == "unsigned" %}<span class="badge badge-error" title="Can't be installed unless this server signs it">unsigned</span>
+          {% else %}<span class="badge badge-error" title="{{ sig.detail }}">not a valid build</span>{% endif %}
+        </td>
+        <td data-label="Workflow run" class="small">
+          <a href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/actions/runs/{{ a.run_id }}" rel="noopener noreferrer">{{ item.run.title or "run" }}{% if item.run.number %} #{{ item.run.number }}{% endif %}</a>
+          {% if item.run.event %}<span class="muted">{{ item.run.event }}</span>{% endif %}
+        </td>
+        <td data-label="Size" class="small">{{ "%.1f" | format(a.size / 1048576) }} MB</td>
+        <td>
+          <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/stage">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="small"{% if a.size > max_mb * 1048576 %} disabled title="Over the size cap"{% endif %}>Stage</button>
+          </form>
         </td>
       </tr>
-      {% else %}
-      <tr><td colspan="4" class="empty-state">No published releases.</td></tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
 </details>
+{% endmacro %}
 
-<details class="settings-section fold">
-  <summary><h2>Test builds from workflow artifacts</h2></summary>
+<section class="settings-section">
+  <h2>Releases</h2>
+  <p class="muted small">Each goes through the same checks as a polled release: uploaded by the owner or a workflow,
+    signed with the repo's pinned certificate, and not a debug build. An older release staged here doesn't become
+    "latest": auto-update and <strong>Push latest</strong> keep using the newest release.</p>
+  {% if releases %}{% set r = releases[0] %}
+  <div class="panel release-card">
+    <div class="commit-head">
+      <a class="tag-pill" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/releases/tag/{{ r.tag | urlencode }}" rel="noopener noreferrer">{{ r.tag }}</a>
+      {% if r.name and r.name != r.tag %}<strong class="commit-subject">{{ r.name }}</strong>{% endif %}
+      {{ release_badges(r) }}
+      <span class="muted small">{{ r.published or "—" }}</span>
+    </div>
+    <p class="small">{{ r.apks ~ (" APK" if r.apks == 1 else " APKs") if r.apks else "No APK matching " ~ repo.asset_glob }}</p>
+    {% if r.notes %}<details><summary>Release notes</summary><pre class="release-notes">{{ r.notes }}</pre></details>{% endif %}
+    <div class="actions">{{ stage_release(r) }}</div>
+  </div>
+  {% if releases | length > 1 %}
+  <details class="fold sub">
+    <summary><h3>{{ releases | length - 1 }} older release{{ "" if releases | length == 2 else "s" }}</h3></summary>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Release</th><th>Published</th><th>APKs</th><th></th></tr></thead>
+      <tbody>
+        {% for r in releases[1:] %}
+        <tr>
+          <td data-label="Release">
+            <span class="tag-pill">{{ r.tag }}</span>
+            {% if r.name and r.name != r.tag %}<span class="small">{{ r.name }}</span>{% endif %}
+            {{ release_badges(r) }}
+          </td>
+          <td data-label="Published" class="small">{{ r.published or "—" }}</td>
+          <td data-label="APKs" class="small">{{ r.apks or "none matching " ~ repo.asset_glob }}</td>
+          <td>{{ stage_release(r) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endif %}
+  {% else %}
+  <p class="empty-state">No published releases.</p>
+  {% endif %}
+</section>
+
+<section class="settings-section">
+  <h2>Test builds from workflow artifacts</h2>
   <p class="muted small">Staging one is like uploading its zip: it must hold exactly one APK, up to {{ max_mb }} MB,
     whose signature verifies. Debug builds are allowed and marked. Only builds from this repo's own branches are
     listed: never one from a pull request opened from a fork, and never a release's own build (that's under
@@ -71,60 +145,18 @@
     <p class="muted small">How a build is signed is only known once it's downloaded: <strong>Check signing</strong>
       downloads it, checks it and deletes it; staging one records it too.</p>
   </details>
-  {% for c in artifacts %}
-  <details class="panel commit-group fold">
-    <summary class="commit-head">
-      <span class="tag-pill" title="Branch">{{ c.branch or "?" }}</span>
-      <a class="mono small" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/commit/{{ c.sha }}" rel="noopener noreferrer">{{ c.sha[:7] }}</a>
-      <strong class="commit-subject">{{ c.subject or "(no commit message available)" }}</strong>
-      <span class="muted small">{{ c.created | when }}</span>
-    </summary>
-    {% if c.message and c.message != c.subject %}
-    <details><summary>Commit message</summary><pre class="release-notes">{{ c.message }}</pre></details>
-    {% endif %}
-    <div class="table-wrap">
-    <table>
-      <thead><tr><th>Artifact</th><th>Signing</th><th>Workflow run</th><th>Size</th><th></th></tr></thead>
-      <tbody>
-        {% for item in c.artifacts %}{% set a = item.a %}
-        {% set sig = signing.get(a.id) %}
-        <tr id="artifact-{{ a.id }}">
-          <td data-label="Artifact"><span class="clip" title="{{ a.name }}">{{ a.name }}</span></td>
-          <td data-label="Signing">
-            {% if not sig %}
-            <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/check">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="small secondary" title="Downloads it, checks the signature, deletes it">Check signing</button>
-            </form>
-            {% elif sig.kind == "signed" %}
-              {% if repo.signer_sha256 and sig.signer == repo.signer_sha256 %}<span class="badge badge-ok" title="Updates the app installed from releases">signed · same key as releases</span>
-              {% elif repo.signer_sha256 %}<span class="badge badge-ok" title="A phone with the release installed refuses it">signed · different key</span>
-              {% else %}<span class="badge badge-ok">signed</span>{% endif %}
-            {% elif sig.kind == "debug" %}<span class="badge badge-warn" title="Signed with a throwaway debug key">debug build</span>
-            {% elif sig.kind == "unsigned" %}<span class="badge badge-error" title="Can't be installed unless this server signs it">unsigned</span>
-            {% else %}<span class="badge badge-error" title="{{ sig.detail }}">not a valid build</span>{% endif %}
-          </td>
-          <td data-label="Workflow run" class="small">
-            <a href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/actions/runs/{{ a.run_id }}" rel="noopener noreferrer">{{ item.run.title or "run" }}{% if item.run.number %} #{{ item.run.number }}{% endif %}</a>
-            {% if item.run.event %}<span class="muted">{{ item.run.event }}</span>{% endif %}
-          </td>
-          <td data-label="Size" class="small">{{ "%.1f" | format(a.size / 1048576) }} MB</td>
-          <td>
-            <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/stage">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="small"{% if a.size > max_mb * 1048576 %} disabled title="Over the size cap"{% endif %}>Stage</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
+  {% if artifacts %}
+  {{ commit_group(artifacts[0], open=true) }}
+  {% if artifacts | length > 1 %}
+  <details class="fold sub">
+    <summary><h3>{{ artifacts | length - 1 }} older commit{{ "" if artifacts | length == 2 else "s" }}</h3></summary>
+    {% for c in artifacts[1:] %}{{ commit_group(c) }}{% endfor %}
   </details>
+  {% endif %}
   {% else %}
   <p class="empty-state">No test builds: none yet, all expired, or all from releases or fork pull requests.</p>
-  {% endfor %}
-</details>
+  {% endif %}
+</section>
 {% endif %}
 
 <details class="settings-section fold" id="signing">
