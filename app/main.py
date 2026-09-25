@@ -2,6 +2,7 @@
 themselves are in the routes_* modules."""
 import asyncio
 import logging
+import mimetypes
 import os
 import tempfile
 from contextlib import asynccontextmanager
@@ -91,6 +92,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+# The slim base image's mime table has no entry for .woff2 (the UI fonts).
+mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 

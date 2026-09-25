@@ -72,8 +72,10 @@ with sync_playwright() as p:
         print("shot repo-review")
         phone = context(browser, phone=True).new_page()
         sign_in(phone)
-        shot(phone, "/status", "phone-status", True)
-        shot(phone, "/install", "phone-install", True)
+        # One screenful, as on a phone: a full-page shot would draw the
+        # fixed tab bar halfway down.
+        shot(phone, "/status", "phone-status", False)
+        shot(phone, "/install", "phone-install", False)
     else:
         page = context(browser).new_page()
         sign_in(page, shot_mfa=True)

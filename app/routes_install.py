@@ -48,12 +48,18 @@ def _install_groups() -> list[dict]:
 def install_page(
     request: Request, session: dict = Depends(auth.require_auth),
     error: str | None = None, ok: str | None = None, warn: str | None = None, to: str | None = None,
+    show: str | None = None,
 ):
     """`to` picks the device every Push on the page targets (default: the
-    first trusted one); anything else falls back to the default."""
+    first trusted one); anything else falls back to the default. `show`
+    narrows the list to one kind (release, artifact, upload)."""
     trusted = [d for d in db.list_devices() if d["trusted"]]
     target = next((d for d in trusted if d["serial"] == to), trusted[0] if trusted else None)
     groups = _install_groups()
+    kinds = list(dict.fromkeys(g["kind"] for g in groups))
+    show = show if show in kinds else None
+    if show:
+        groups = [g for g in groups if g["kind"] == show]
     installed = db.device_packages_map()
     for g in groups:
         # Trusted devices that have this card's latest version right now.
@@ -63,9 +69,13 @@ def install_page(
             if (row := installed.get((d["serial"], first["package_name"]))) is not None and row["installed"]
             and row["version_code"] is not None and row["version_code"] == first["version_code"]
         ]
+        # What the target device has of this app, if anything.
+        row = installed.get((target["serial"], first["package_name"])) if target else None
+        g["target_has"] = row if row is not None and row["installed"] else None
     return templates.TemplateResponse(
         request, "install.html",
-        context(request, session, groups=groups, devices=trusted, target=target, error=error, ok=ok, warn=warn),
+        context(request, session, groups=groups, kinds=kinds, show=show, devices=trusted, target=target,
+                error=error, ok=ok, warn=warn),
     )
 
 
@@ -181,7 +191,9 @@ def _device_cards() -> list[dict]:
             if serial == d["serial"] and row["installed"] and pkg not in repo_packages
         ]
         recent = [i for i in installs if i["device_serial"] == d["serial"]][:3]
-        cards.append({"device": d, "apps": apps, "others": others, "recent": recent})
+        # Updates that can be pushed now: a newer release fits the device.
+        updates = [a for a in apps if d["trusted"] and a["state"] == "update" and a["fits"]]
+        cards.append({"device": d, "apps": apps, "others": others, "recent": recent, "updates": updates})
     return cards
 
 

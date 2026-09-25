@@ -2,99 +2,130 @@
 {% block title %}Install — ADB Server{% endblock %}
 {% block content %}
 <h1>Install</h1>
-<p class="page-intro muted">Every verified APK, by app. The newest release picks the right build for the device's
+<p class="page-intro install-intro">Every verified APK, by app. The newest release picks the right build for the device's
   CPU. Add more apps on <a href="/sources">Sources</a>.</p>
 
 {% if not devices %}
 <p class="flash flash-warn">No trusted devices yet. <a href="/devices">Pair and trust one</a> to push to it.</p>
-{% elif groups %}
-{# The one device every Push on this page targets. Links, not a form: the CSP
-   allows no JavaScript, so a dropdown of links is what switches in one click. #}
-<div class="push-target">
-  {% if devices | length > 1 %}
-  <details class="push-target-menu">
-    <summary>Pushing to <strong>{{ target | device_name }}</strong> <span aria-hidden="true">▾</span></summary>
-    <ul>
-      {% for d in devices %}
-      <li><a href="/install?to={{ d.serial | urlencode }}"{% if d.serial == target.serial %} aria-current="true"{% endif %}>{{ d | device_name }}</a></li>
-      {% endfor %}
-    </ul>
-  </details>
-  {% else %}
-  <span>Pushing to <strong>{{ target | device_name }}</strong></span>
+{% endif %}
+
+{# Links, not forms: the CSP allows no JavaScript, so a dropdown of links is
+   what switches the device, and pills of links what filter the list. Each
+   keeps the other's choice. #}
+{% set to_q = "to=" ~ (target.serial | urlencode) if target and devices | length > 1 else "" %}
+{% if (devices and groups) or kinds | length > 1 %}
+<div class="card install-bar">
+  {% if devices and groups %}
+  <div class="push-target">
+    {% if devices | length > 1 %}
+    <details class="push-target-menu">
+      <summary><span class="push-target-label">Pushing to</span> <strong>{{ target | device_name }}</strong> <span class="caret" aria-hidden="true">▾</span></summary>
+      <ul>
+        {% for d in devices %}
+        <li><a href="/install?to={{ d.serial | urlencode }}{{ '&show=' ~ show if show else '' }}"{% if d.serial == target.serial %} aria-current="true"{% endif %}>{{ d | device_name }}</a></li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% else %}
+    <span class="push-target-fixed"><span class="push-target-label">Pushing to</span> <strong>{{ target | device_name }}</strong></span>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if kinds | length > 1 %}
+  <nav class="filter-pills" aria-label="Show">
+    {% for k, label in [(none, "All"), ("release", "Releases"), ("artifact", "Test builds"), ("upload", "Uploads")] if not k or k in kinds %}
+    {% set q = [to_q, "show=" ~ k if k else ""] | select | join("&") %}
+    <a href="/install{{ '?' ~ q if q else '' }}"{% if show == k %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
   {% endif %}
 </div>
 {% endif %}
 
-{% macro push_button(label, secondary=false) %}
+{# `what` (the version) is left off on phones: the row shows it already. #}
+{% macro push_button(label, what="", secondary=false) %}
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <input type="hidden" name="device_serial" value="{{ target.serial }}">
-<button type="submit"{% if secondary %} class="secondary"{% endif %}>{{ label }}</button>
+<button type="submit"{% if secondary %} class="secondary"{% endif %}>{{ label }}{% if what %}<span class="push-what"> {{ what }}</span>{% endif %}</button>
 {% endmacro %}
 
-{% set kinds = groups | map(attribute="kind") | unique | list %}
 {% for g in groups %}
 {% set latest = g.releases[0] %}
 {% set first = latest.apks[0] %}
 {% set version = first.version_name or latest.tag %}
-{% if kinds | length > 1 and (loop.first or loop.previtem.kind != g.kind) %}
+{% set has = g.target_has %}
+{% set new_kind = loop.first or loop.previtem.kind != g.kind %}
+{% if new_kind %}
+{% if not show and kinds | length > 1 %}
 <h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
 {% endif %}
-<section class="panel app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
-  <div class="app-card-head">
-    <div class="app-card-title">
-      <h2>{{ g.label }}</h2>
-      <p class="app-card-facts">
-        <span class="tag-pill">{{ version }}</span>
-        {% if g.kind == "release" %}<span class="badge badge-ok">Release</span>
-        {% elif g.kind == "artifact" %}<span class="badge badge-artifact" title="Built by a workflow run, not a release">Artifact · test build</span>
-        {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
-        {% set a = first %}{% include "_signing_badges.html" %}
-        <span class="muted small">
-          {{ "uploaded" if g.kind == "upload" else "staged" }} {{ first.downloaded_at | when }}
-          · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
-          {%- if g.on %} · on {% for d in g.on %}{{ d | device_name }}{{ ", " if not loop.last }}{% endfor %}{% endif %}
-        </span>
-      </p>
-      {% if g.kind == "artifact" %}
-      <p class="artifact-origin">
-        <span class="tag-pill" title="Branch">{{ first.artifact_branch or "?" }}</span>
-        <a class="mono small" href="https://github.com/{{ first.artifact_repo }}/actions/runs/{{ first.artifact_run_id }}"
-           rel="noopener noreferrer" title="Open the workflow run on GitHub">{{ (first.artifact_sha or "")[:7] }} · run {{ first.artifact_run_id }}</a>
-      </p>
-      {% if first.artifact_subject %}<p class="commit-subject">{{ first.artifact_subject }}</p>{% endif %}
+<div class="card row-card">
+  <div class="row-grid install-grid row-head" aria-hidden="true"><span>App</span><span>Version</span><span>{{ "On " ~ (target | device_name) if target else "Staged" }}</span><span></span></div>
+{% endif %}
+<section class="row-item app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
+  <div class="row-grid install-grid">
+    <div class="row-title">
+      <span class="avatar" aria-hidden="true">{{ g.label[:1] }}</span>
+      <div>
+        <h2 class="row-name">{{ g.label }}</h2>
+        {% if g.kind == "artifact" %}
+        <p class="artifact-origin row-sub">
+          <span class="mono" title="Branch">{{ first.artifact_branch or "?" }}</span>
+          <a class="mono" href="https://github.com/{{ first.artifact_repo }}/actions/runs/{{ first.artifact_run_id }}"
+             rel="noopener noreferrer" title="Open the workflow run on GitHub">{{ (first.artifact_sha or "")[:7] }} · run {{ first.artifact_run_id }}</a>
+        </p>
+        {% if first.artifact_subject %}<p class="commit-subject">{{ first.artifact_subject }}</p>{% endif %}
+        {% elif g.kind == "upload" %}<div class="row-sub mono">{{ first.filename }}</div>
+        {% else %}<div class="row-sub mono">{{ first.package_name }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="row-have row-line">
+      <span class="version">{{ version }}</span>
+      {% if g.kind == "release" %}<span class="badge badge-ok">Release</span>
+      {% elif g.kind == "artifact" %}<span class="badge badge-artifact" title="Built by a workflow run, not a release">Test build</span>
+      {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
+      {% set a = first %}{% include "_signing_badges.html" %}
+    </div>
+    <div class="row-state">
+      {% if target %}{% if not has %}Not installed{% elif has.version_code == first.version_code %}Installed{% else %}Has {{ has.version_name or "another version" }}{% endif %} · {% endif %}
+      {{- "uploaded" if g.kind == "upload" else "staged" }} {{ first.downloaded_at | when }}
+      · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
+      {%- set others = g.on | rejectattr("serial", "equalto", target.serial if target else "") | list %}
+      {%- if others %} · {{ "also " if has else "" }}on {% for d in others %}{{ d | device_name }}{{ ", " if not loop.last }}{% endfor %}{% endif %}
+    </div>
+    <div class="row-actions">
+      {% if target %}
+      {% set primary = not has or has.version_code != first.version_code %}
+      {% if g.repo_id %}
+      <form method="post" action="/push-latest" class="push-form">
+        <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
+        <input type="hidden" name="back" value="/install">
+        {{ push_button("Push", version, secondary=not primary) }}
+      </form>
+      {% else %}
+      <form method="post" action="/push" class="push-form">
+        <input type="hidden" name="apk_id" value="{{ first.id }}">
+        {{ push_button("Push", first.version_name or "", secondary=not primary) }}
+      </form>
+      {% endif %}
       {% endif %}
     </div>
-    {% if target %}
-    {% if g.repo_id %}
-    <form method="post" action="/push-latest" class="push-form">
-      <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
-      <input type="hidden" name="back" value="/install">
-      {{ push_button("Push " ~ version) }}
-    </form>
-    {% else %}
-    <form method="post" action="/push" class="push-form">
-      <input type="hidden" name="apk_id" value="{{ first.id }}">
-      {{ push_button("Push " ~ (first.version_name or "")) }}
-    </form>
-    {% endif %}
-    {% endif %}
   </div>
 
   {% set a = first %}{% include "_debug_advice.html" %}
 
   <details class="app-card-more">
-    <summary>Details{% if g.releases | length > 1 %} · {{ g.releases | length - 1 }} older version{{ "" if g.releases | length == 2 else "s" }}{% endif %}</summary>
+    <summary>details{% if g.releases | length > 1 %} · {{ g.releases | length - 1 }} older version{{ "" if g.releases | length == 2 else "s" }}{% endif %}</summary>
+    <div class="more-body">
     <p class="mono small muted">{{ first.package_name }}
       {%- if g.repo_id and first.version_name and first.version_name != latest.tag.lstrip('v') %} · {{ latest.tag }}{% endif %}</p>
 
     {% for a in latest.apks if a.release_notes %}{% if loop.first %}
-    <details class="nested" open>
-      <summary>{{ "Build notes" if a.source == "upload" else "Release notes" }} for {{ version }}</summary>
-      <pre class="release-notes">{{ a.release_notes }}</pre>
-    </details>
+    <div class="more-label">{{ "Build notes" if a.source == "upload" else "Release notes" }} for {{ version }}</div>
+    <pre class="release-notes">{{ a.release_notes }}</pre>
     {% endif %}{% endfor %}
 
+    <div class="more-label">Files</div>
     <div class="table-wrap">
     <table>
       <thead>
@@ -103,7 +134,7 @@
       <tbody>
         {% for rel in g.releases %}{% for a in rel.apks %}
         <tr id="apk-{{ a.id }}">
-          <td data-label="Version" class="nowrap">{{ a.version_name or "—" }} <span class="muted small">{{ rel.tag }}</span></td>
+          <td data-label="Version" class="nowrap"><span class="version">{{ a.version_name or "—" }}</span> <span class="muted small">{{ rel.tag }}</span></td>
           <td data-label="File"><span class="clip" title="{{ a.filename }}">{{ a.filename }}</span></td>
           <td data-label="CPU" class="mono small">{{ a.abis or "any" }}</td>
           <td data-label="Signer" class="mono small" title="{{ a.signer_sha256 }}">{{ a.signer_sha256[:16] }}…</td>
@@ -131,8 +162,12 @@
       <pre class="release-notes">{{ a.release_notes }}</pre>
     </details>
     {% endif %}{% endfor %}{% endfor %}
+    </div>
   </details>
 </section>
+{% if loop.last or loop.nextitem.kind != g.kind %}
+</div>
+{% endif %}
 {% else %}
 <p class="empty-state">Nothing staged yet. <a href="/sources">Add a source</a>: watch a GitHub repo, or upload an APK.
   A new repo's latest release is fetched on the next poll, or straight away with

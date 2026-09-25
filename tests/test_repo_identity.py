@@ -556,11 +556,11 @@ def test_install_page_sets_artifacts_apart(authed, artifact_env):
                          package_name="com.example.other", signer_sha256="d" * 64, path=path, source="upload")
     page = authed.get("/install").text
     art = page.index("Test builds from workflow artifacts")
-    assert art < page.index(">Uploads<")
-    card = page[art:page.index(">Uploads<")]
-    assert "app-card-artifact" in card and "Artifact · test build" in card
+    assert art < page.index("section-title\">Uploads<")
+    card = page[art:page.index("section-title\">Uploads<")]
+    assert "app-card-artifact" in card and ">Test build</span>" in card
     assert "feature/x" in card and "https://github.com/o/r/actions/runs/77" in card and "abcdef1 · run 77" in card
-    assert "Artifact · test build" not in page[page.index(">Uploads<"):]
+    assert ">Test build</span>" not in page[page.index("section-title\">Uploads<"):]
 
 
 def test_one_kind_of_card_gets_no_section_headings(authed, artifact_env):
