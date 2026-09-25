@@ -20,9 +20,30 @@ the workflow clumsy and asked for every block to be collapsible. Built:
 - **Sources** dropped its uploads table (Install lists them); it shows a count.
 - `web.redirect` now appends with `&` when the path already has a query.
 
-**Current state:** 616 tests pass (`tests/test_workflow.py` is new). All
-screenshots retaken at 3.7.0 by `scripts/screenshots/shoot.py` (it now opens
-the folded "Watch a GitHub repo" form first).
+- **Dev builds:** `release.yml` takes a `-suffix` tag from any branch and
+  publishes only `:<full version>` images (no `:latest`, no `:X.Y`, no GitHub
+  release); CI must have passed and VERSION must equal the tag's base.
+
+**Current state:**
+- Commit 92069da on the branch; **draft PR #17**, CI green. 616 tests pass
+  (`tests/test_workflow.py` is new). Screenshots retaken at 3.7.0 by
+  `scripts/screenshots/shoot.py` (it now opens the folded repo form first).
+- **Dev build shipped:** tag `v3.7.0-dev.1` → 92069da (user pushed), release
+  run 36087160870: both images at `:3.7.0-dev.1`, GitHub release skipped,
+  `:latest` still 3.6.0. The user was given a one-liner to switch
+  `/opt/docker/stacks/adb-server` to the dev images (compose file backed up to
+  `<file>.bak`).
+- The user's data lives in `/opt/docker/adb-server`, compose in
+  `/opt/docker/stacks/adb-server`. They were also given the adbinfo upgrade
+  one-liner (3.4.0 step).
+
+**Next step:** wait for the user to try `3.7.0-dev.1`. On "merge": mark PR
+#17 ready, merge on green CI, hand over the `v3.7.0` tag block (the user
+pushes tags), verify the release. On a problem: fix on this branch, new
+`v3.7.0-dev.2` (the tag block needs 📦 RELEASE ✅, which a draft PR gives).
+
+**Skill note for the user:** enforcement check C2 blocks a dev tag until
+RELEASE is ✅ (needs an open PR), with no exception for pre-release tags.
 
 **Gate status:** `.claude/dev-skills-gates.md`.
 
