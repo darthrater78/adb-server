@@ -1,12 +1,11 @@
-# Handoff: ADB Server (APK Pusher) — v3.5.0 built (tracking + collapsible Install); next: v3.6.0 redesign
+# Handoff: ADB Server (APK Pusher) — v3.5.0 shipped; next: v3.6.0 redesign
 
-**Goal:** two releases (user's call). **v3.5.0** (this branch,
-`feat/install-tracking`): Status shows where each installed version came from
-(Release / Test build / Upload / Not from this server, Debug flag, "likely"
-for pre-3.5.0 pushes); Install cards collapsed to essentials + Details; one
-"Pushing to ▾" picker (links, `?to=<serial>`); idempotent release step.
-**v3.6.0**: the B/C redesign below ("looks like just another vibe app",
-mobile subpar).
+**Goal:** v3.6.0 (branch `feat/redesign`): the B/C redesign below ("looks
+like just another vibe app", mobile subpar). v3.5.0 shipped: Status shows
+where each installed version came from (Release / Test build / Upload / Not
+from this server, Debug, "likely" for pre-3.5.0 pushes); Install cards
+collapsed with Details; one "Pushing to ▾" picker (links, `?to=<serial>`,
+default = most recently paired trusted device); idempotent release step.
 
 **How tracking works:** `device_packages.origin` (JSON copy of the pushed
 staged APK: kind, ref, repo, run, debug, version, `at`, the device's
@@ -44,23 +43,28 @@ B tokens, Status light, Install dark). Session 9 had not written them; make
 them if missing and get the user's OK first.
 
 **Current state:**
-- v3.4.0 fully shipped and verified (gate file). v3.5.0 is on
-  `feat/install-tracking` (uncommitted as of session 10's commit checkpoint):
-  gates 1–4 ✅, 574 tests pass, screenshots retaken.
+- v3.5.0 shipped and verified 2026-09-24: PR #15 merged → 66ff77a, tag
+  v3.5.0 → 66ff77a, one release run (success), release Latest, ghcr
+  `:3.5.0` both images, `app:latest` = 3.5.0. `feat/install-tracking` deleted.
+- `feat/redesign` is branched from main (66ff77a) with this file and the gate
+  file (v3.5.0 RELEASE/SHIP records) ahead of it; they ship in v3.6.0's PR.
+- Screenshot shots now include `phone-install`; the redesign must retake all.
 - The user's own server still needs the v3.4.0 adbinfo step if not done:
   create `/opt/docker/adb-server/adbinfo` (10001, 700), add the two volume lines.
 - No test containers are running.
 
-**Gate status:** `.claude/dev-skills-gates.md` — v3.5.0: 🔢✅ 🔨✅ 🔒✅ 📄✅ 📦⬜
-🚀⬜. Skill copy v2.28.0 is behind upstream v2.38.0 (user chose to continue).
+**Gate status:** `.claude/dev-skills-gates.md` — v3.5.0 all ✅. v3.6.0 not
+started (all ⬜). Skill copy v2.28.0 is behind upstream v2.38.0 (user chose
+to continue in session 10; offer the update again).
 
 **Mode:** session 10 ran semi-autonomous on Opus 5.5 (user-approved). The
-next session asks again (mode, model).
+next session asks again (mode, model). In session 10 the auto-mode
+permission check denied `gh pr merge` ("Merge Without Review"): the user
+merges, or adds a permission rule for it.
 
-**Next step:** commit approval for v3.5.0 → push, PR, PR-head test images on
-10.0.0.252, merge on green → user tags v3.5.0.
+**Next step:** confirmation mockups for v3.6.0 (see above), then build.
 
-**Also open:** Dependabot PRs #2/#3 (python 3.14 base images).
+**Also open:** Dependabot PR #2 (python 3.14 app base image).
 
 **Open questions (not blocking):**
 - CI step running `adb` inside the app image (catches the read-only

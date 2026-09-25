@@ -127,10 +127,11 @@ def stylesheet(primary: str | None, secondary: str | None = None, saved=()) -> s
     if name in PRESET_DARK:
         for v, dark in zip((p, s2), PRESET_DARK[name]):
             v["dark"], v["on_dark"] = dark, _on(dark)
+    # Links take the secondary colour (the default palette's are its own teal).
     light = (f"--accent: {p['light']}; --on-accent: {p['on_light']}; "
-             f"--accent-2: {s2['light']}; --on-accent-2: {s2['on_light']};")
+             f"--accent-2: {s2['light']}; --on-accent-2: {s2['on_light']}; --link: {s2['light']};")
     dark = (f"--accent: {p['dark']}; --on-accent: {p['on_dark']}; "
-            f"--accent-2: {s2['dark']}; --on-accent-2: {s2['on_dark']};")
+            f"--accent-2: {s2['dark']}; --on-accent-2: {s2['on_dark']}; --link: {s2['dark']};")
     return (
         f"/* accent {normalize(primary)} / {normalize(secondary)} */\n"
         f":root {{ {light} }}\n"

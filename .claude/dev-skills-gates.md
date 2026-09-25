@@ -1,14 +1,36 @@
 # Dev Skills gate state
-Track: release sequence → v3.5.0 (install tracking on Status + collapsible Install page); v3.6.0 = B/C redesign (user: two releases)
-Mode: semi-autonomous (approved 2026-09-24, session 10: "opus, auto") — commits and the tag still require the user's approval
-Skill: v2.28.0 ⚠️ outdated (latest v2.38.0); user chose to continue (session 10)
-Model: Opus 5.5 approved by user (session 9; re-approved session 10, v3.5.0 install tracking)
+Track: release sequence → v3.6.0 = B/C redesign on feat/redesign (building; confirmation mockups approved session 11)
+Mode: semi-autonomous (approved 2026-09-24, session 11) — commits and the tag still require the user's approval
+Skill: v2.28.0 ⚠️ outdated (latest v2.38.0); user chose to continue (session 11)
+Model: Opus 5.5 (session 11, semi-autonomous approved)
 Origin: darthrater78/adb-server (not a fork)
 Standards: at-rest ✅ encrypted (secretbox: TOTP, notify URLs, GitHub token, signing-key passwords) · TOTP ✅ · rescue ✅ · Apprise ✅ (+ version_mismatch event) · compose ✅ §10.5 (adbinfo bind mount in setup line + bottom comments)
-Version: 3.5.0 (bumped, uncommitted)
-Updated: 2026-09-24 (session 10: gates 1-4 run; awaiting commit approval)
+Version: 3.5.0 (next 3.6.0)
+Updated: 2026-09-24 (session 10: v3.5.0 shipped and verified; handed off)
 
-## Current: v3.5.0 — install tracking + collapsible Install page
+## Current: v3.6.0 — B/C redesign
+🔢 VERSION    ✅ 3.6.0 MINOR (UI redesign, no breaking change; routes/forms unchanged, new optional ?show=); bump to be
+              confirmed with the commit approval. VERSION, compose.yaml images + comment, README link + compose block
+              + upgrade note, CHANGELOG
+🔨 BUILD      ✅ working tree: 580 pytest passed (6 new: filter pills, target state, summary card; markup asserts
+              updated for new classes/labels); screenshot stack (image from the tree, seeded, GitHub mocked) on
+              10.0.0.252:18190: all pages retaken at 3.6.0, no sideways scroll; checked by eye: Status + Install
+              desktop dark and light, phone Status + Install dark and light, Devices, Sources, Settings, login
+              (light review shots were temporary, removed); container removed
+              ⬜ test artifact from the PR head (git archive) still to do after the commit
+🔒 SECURITY   ✅ 0 open — 0 Critical, 0 High
+              pip-audit --require-hashes clean (no dependency change); bandit -ll clean
+              CSP unchanged (fonts self-hosted under /static/fonts, OFL licenses beside them; no external origin)
+              review: ?show= only accepted from the kinds present; ?to= still only among trusted serials, urlencoded
+              in links; the one new `| safe` is the nav's constant SVG paths from the template, no user data;
+              every push/follow form keeps its CSRF token; confirm dialogs unchanged
+📄 DOCS       ✅ CHANGELOG 3.6.0; README Status (fold, phone summary/switcher), Install (rows, target state, filter
+              pills, Test build chip), Appearance (themes, fonts + license); all screenshots retaken at 3.6.0;
+              phone shots now one screenful (full-page drew the fixed tab bar mid-image)
+📦 RELEASE    ⬜
+🚀 SHIP       ⬜
+
+## Previous: v3.5.0 (feat/install-tracking) — install tracking + collapsible Install page
 🔢 VERSION    ✅ 3.5.0 MINOR (feat, no breaking change); bump confirmed with the commit approval
               VERSION, compose.yaml images + comment, README link + compose block + upgrade note, CHANGELOG
               prior tag v3.4.0 → a7df688 on origin (ls-remote)
@@ -16,7 +38,10 @@ Updated: 2026-09-24 (session 10: gates 1-4 run; awaiting commit approval)
               screenshot stack (image from the tree, seeded, GitHub mocked) on 10.0.0.252:18190, adbinfo = VERSION:
               Status origin chips (Release / Test build + run + Debug / likely / Not from this server),
               Install collapsed cards + Pushing-to picker, phone Install + Status checked by eye; container removed
-              PR-head images on 10.0.0.252: ⬜ after push (Gate 5)
+  test artifact: adb-server-test/app:73b6405 (ded0fb5d47e9), adb-server-test/adb-server:73b6405 (90f7cb1ac61e)
+              @ 73b6405 (PR #15 head, git archive): stack t350 on 10.0.0.252:18187, login ok, 7 pages 200,
+              no version banner, 3.5.0/3.5.0, adb devices ok, new columns + backfill marker present;
+              upgrade: 3.4.0-image DB → 3.5.0: prior push = likely/release v2, never-pushed = other; torn down
 🔒 SECURITY   ✅ 0 open — 0 Critical, 0 High
               pip-audit --require-hashes clean; bandit -ll clean; Dependabot alerts on, 0 open; actionlint clean
               (no local shellcheck: CI lint covers run: blocks)
@@ -24,8 +49,13 @@ Updated: 2026-09-24 (session 10: gates 1-4 run; awaiting commit approval)
               prefix; SQL parameterized; lastUpdateTime strict regex; CSRF on every push form; trust rechecked at push
 📄 DOCS       ✅ CHANGELOG 3.5.0; README Status (where it came from) + Install (collapsed cards, picker), phone-install
               shot; screenshots retaken at 3.5.0 (harness now mounts adbinfo, no version banner)
-📦 RELEASE    ⬜
-🚀 SHIP       ⬜
+📦 RELEASE    ✅ commit + release notes approved (user: "commit", 2026-09-24)
+              73b6405 pushed; PR #15 open, 0 behind main, all checks green (push + PR runs)
+              (this row and the test artifact are local only: added after the commit; they ship with v3.6.0's PR)
+🚀 SHIP       ✅ v3.5.0 shipped 2026-09-24 — PR #15 MERGED (user-driven) → 66ff77a; tree == tested 73b6405
+              tag v3.5.0 → 66ff77a (user-driven, ls-remote peeled); release run 36074671662 success, single run
+              release published, Latest; ghcr app + adb-server :3.5.0 pullable; app:latest = 3.5.0 digest (27508449)
+              branch feat/install-tracking deleted (user-driven, ls-remote empty)
 
 ## Previous: v3.4.0 (feat/adb-version-check) — adb-server/app release mismatch warning
 🔢 VERSION    ✅ 3.4.0 MINOR (user: "yes update the quickstart/readme with the new directory", 2026-09-24)

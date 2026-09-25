@@ -32,7 +32,7 @@ def trusted_device():
 
 
 def _nav(page):
-    return page[page.index("<nav>"):page.index("</nav>")]
+    return page[page.index('<nav class="main-nav"'):page.index("</nav>")]
 
 
 def test_nav_has_the_five_steps_in_order(authed):
@@ -81,8 +81,8 @@ def test_status_card_lists_the_devices_inventory(authed, trusted_device):
     install = db.insert_install("SER", apk, "pending")
     db.finish_install(install, "failed", "boom")
     page = authed.get("/status").text
-    card = page[page.index('class="panel device-card"'):]
-    assert "1.0 → 2.0" in card and "Update" in card
+    card = page[page.index('device-card"'):]
+    assert '<span class="version">1.0</span>' in card and "2.0 available" in card and "Update" in card
     assert "dev build" in card and "1.7-dev" in card  # an upload pushed to it
     assert "com.gone" not in card  # uninstalled packages aren't inventory
     assert "Recent installs" in card and f'href="/installs/{install}"' in card
@@ -93,7 +93,7 @@ def test_untrusted_device_card_offers_no_push(authed):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
     page = authed.get("/status").text
-    card = page[page.index('class="panel device-card"'):]
+    card = page[page.index('device-card"'):]
     assert "Not trusted" in card and "/push-latest" not in card
 
 
@@ -106,7 +106,7 @@ def test_install_groups_releases_by_app_newest_first(authed, trusted_device):
     card = page[page.index(f'id="app-{rid}"'):page.index(f'id="upload-{up}"')]
     # The latest release is pushed by repo, so the right CPU build is picked.
     assert 'action="/push-latest"' in card and 'name="back" value="/install"' in card
-    assert "Push 2.0" in card and "1 older" in card and "Fresh notes" in card
+    assert 'Push<span class="push-what"> 2.0' in card and "1 older" in card and "Fresh notes" in card
     assert card.index(f'id="apk-{new}"') < card.index(f'id="apk-{old}"')
     upload = page[page.index(f'id="upload-{up}"'):]
     assert "dev build" in upload and 'action="/push"' in upload and f'value="{up}"' in upload
@@ -135,3 +135,15 @@ def test_sources_lists_repos_and_uploads_together(authed):
     page = authed.get("/sources").text
     assert "octo/hello" in page and "dev build" in page
     assert f'href="/install#upload-{up}"' in page and f'action="/staged/{up}/delete"' in page
+
+
+def test_status_summary_points_at_the_first_update(authed, trusted_device):
+    rid = db.create_repo("o", "r", "*.apk")
+    _stage(rid, "v2", "app.apk", version_name="2.0")
+    page = authed.get("/status").text
+    assert "summary-card" not in page  # not installed: an install, not an update
+    db.upsert_device_package("SER", "com.example", installed=True, version_code=1, version_name="1.0")
+    page = authed.get("/status").text
+    summary = page[page.index("summary-card"):]
+    assert "1 update ready" in summary and f'href="#confirm-{rid}-1"' in summary
+    assert f'id="confirm-{rid}-1"' in page and "1 update available" in page

@@ -2,45 +2,53 @@
 <html lang="en"{% if theme and theme != "auto" %} data-theme="{{ theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}ADB Server{% endblock %}</title>
   <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+  <link rel="preload" href="/static/fonts/figtree-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/accent.css?v={{ accent_version }}">
   {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   {% if csrf_token is defined %}
-  <header>
+  <header class="site-header">
     <a class="brand" href="/status">
-      <img src="/static/logo.svg" width="28" height="28" alt="">
+      <img src="/static/logo.svg" width="30" height="30" alt="">
       <span class="brand-name">ADB Server</span>
     </a>
-    <span class="header-links">
-      <a class="version-badge" href="{{ release_notes_url }}" rel="noopener noreferrer"
-         title="Release notes for v{{ app_version }}">v{{ app_version }}<span class="link-word"><span class="link-word-long"> release</span> notes</span></a>
-      <a href="{{ repo_url }}" rel="noopener noreferrer" title="ADB Server on GitHub">GitHub</a>
-    </span>
-    <nav>
-      {% for href, label in [("/status", "Status"), ("/sources", "Sources"), ("/devices", "Devices"),
-                             ("/install", "Install"), ("/settings", "Settings")] %}
-      <a href="{{ href }}"{% if href == nav_path %} class="active"{% if href == request.url.path %} aria-current="page"{% endif %}{% endif %}>{{ label }}</a>
+    {# On phones this is the bottom tab bar, so each link carries an icon. #}
+    <nav class="main-nav" aria-label="Main">
+      {% for href, label, icon in [
+          ("/status", "Status", '<path d="M3 12h4l3-7 4 14 3-7h4"/>'),
+          ("/sources", "Sources", '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
+          ("/devices", "Devices", '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/>'),
+          ("/install", "Install", '<path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 20h14"/>'),
+          ("/settings", "Settings", '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>')] %}
+      <a href="{{ href }}"{% if href == nav_path %} class="active"{% if href == request.url.path %} aria-current="page"{% endif %}{% endif %}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon | safe }}</svg>{{ label }}</a>
       {% endfor %}
     </nav>
-    <div class="theme-switcher" role="group" aria-label="Theme">
+    <div class="header-tools">
+      <span class="header-links">
+        <a class="version-badge" href="{{ release_notes_url }}" rel="noopener noreferrer"
+           title="Release notes for v{{ app_version }}">v{{ app_version }}<span class="link-word"><span class="link-word-long"> release</span> notes</span></a>
+        <a href="{{ repo_url }}" rel="noopener noreferrer" title="ADB Server on GitHub">GitHub</a>
+      </span>
+      <div class="theme-switcher" role="group" aria-label="Theme">
         {% for t, label in [("flashbang", "Flashbang"), ("dark", "Dark"), ("oled", "OLED")] %}
         <form method="post" action="/theme" class="theme-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="next" value="{{ current_path }}">
           <input type="hidden" name="theme" value="{{ t }}">
-          <button type="submit" class="theme-btn{{ ' active' if theme == t else '' }}">{{ label }}</button>
+          <button type="submit" class="theme-btn{{ ' active' if theme == t else '' }}"{% if theme == t %} aria-pressed="true"{% endif %}>{{ label }}</button>
         </form>
         {% endfor %}
+      </div>
+      <form method="post" action="/logout" class="logout-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary">Log out</button>
+      </form>
     </div>
-    <form method="post" action="/logout" class="logout-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="secondary">Log out</button>
-    </form>
   </header>
   {% endif %}
 

@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.5.0](https://github.com/darthrater78/adb-server/releases/tag/v3.5.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.6.0](https://github.com/darthrater78/adb-server/releases/tag/v3.6.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.5.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.6.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.5.0
+    image: ghcr.io/darthrater78/adb-server/app:3.6.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.5.0), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.6.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -193,7 +193,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.5.0` and add one
+> Then, in your `compose.yaml`, set both images to `3.6.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -233,7 +233,7 @@ Install · Settings**.
 
 ### Status: the home page
 
-One card per device, with everything pushed to it: each watched app's
+One card per device (tap its header to fold it away), with everything pushed to it: each watched app's
 installed version against the latest staged one, with an **Update** or
 **Install** button, and anything you uploaded and pushed by hand. The button
 picks the right APK for that device's CPU and asks you to confirm first. Each
@@ -255,6 +255,10 @@ devices, and a device that already has that version or a newer one is skipped.
 
 Until you've added a source, trusted a device and installed something, the
 page shows a setup checklist instead.
+
+On a phone the nav is a tab bar along the bottom, rows are big enough to tap,
+and Status opens with a summary (**1 update ready**, and an **Update**
+button for it) and a switcher between devices.
 
 <img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
 <img src="docs/screenshots/phone-install.png" alt="Install page on a phone" width="195">
@@ -370,18 +374,19 @@ are all on this page. Phones list this server as `@adbserver`.
 
 ### Install
 
-Every verified APK, one card per app, showing just the essentials: name,
-version, where it's from, signing, when it was staged, and which devices
-already have it. **Pushing to ▾** at the top picks the device every **Push**
+Every verified APK, one row per app, showing just the essentials: name,
+version, where it's from, signing, what the chosen device has of it now,
+when it was staged, and which other devices already have it. **Pushing to ▾** at the top picks the device every **Push**
 on the page goes to (the most recently paired one to start). For a watched
 repo, the newest release is pushed, in the build that fits the device's CPU.
 When a release has several APKs that match the glob (per-ABI builds such as
 `arm64-v8a`, `armeabi-v7a` or universal), all of them are staged, up to 6.
-**Details** on a card opens the rest: the package name, release notes, every
+**Show details** on a row opens the rest: the package name, release notes, every
 staged file (to push a specific one or delete it) and older versions.
 
-Cards are grouped as **Releases**, **Test builds from workflow artifacts** and
-**Uploads**. A test build is marked **Artifact · test build**, with its branch
+Rows are grouped as **Releases**, **Test builds from workflow artifacts** and
+**Uploads**, and the **All · Releases · Test builds · Uploads** pills show
+just one group. A test build is marked **Test build**, with its branch
 and commit linked to the workflow run, so it can't be mistaken for a release.
 Devices are named by their nickname, else its model and the
 end of its serial (e.g. `Google Pixel 8 · …005KT`), read when the app first
@@ -503,9 +508,12 @@ General shows both versions.
 buttons, focus rings). Pick a preset pair or any two custom colours. Name a
 custom pair and **Save as preset** to keep it. Colours are darkened or
 lightened per theme so text stays readable (WCAG AA contrast). The header's
-**Flashbang / Dark / OLED** buttons pick a theme for this browser. Without
-one, the app follows your OS's light/dark setting. The layout adapts to phones
-and tablets (labelled cards up to 960px wide).
+**Flashbang / Dark / OLED** buttons pick a theme for this browser: light,
+dark, or dark on true black. Without one, the app follows your OS's
+light/dark setting. The layout adapts to phones and tablets (a bottom tab bar
+and touch-sized rows up to 960px wide). Text is set in Figtree, versions and
+hashes in JetBrains Mono, both served by the app itself (SIL Open Font
+License, in `app/static/fonts/`).
 
 ### Two-factor sign-in
 

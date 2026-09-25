@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.6.0 — 2026-09-24
+
+- Changed: **a new look.** Calmer cards on a warm neutral ground, one teal
+  for the button that matters, and one soft chip style for where a build
+  came from (Release, Test build, Upload, Not from this server, Debug).
+  Text is set in Figtree and versions in JetBrains Mono, both served by the
+  app itself. Flashbang is the light palette, Dark its dark twin, OLED the
+  same on true black.
+- Changed: **phones get their own layout.** The nav is a tab bar along the
+  bottom, rows are 44px+ touch targets with a letter avatar, and each row's
+  one action sits at its end. Status opens with a summary of what's ready
+  (**1 update ready** · **Update**) and a switcher between devices.
+- Changed: **Status rows line up in columns** (app, on device, latest,
+  actions) inside each device card, and a device card folds away by its
+  header. Untrusted devices start folded.
+- Changed: **Install lists apps as rows** with what the chosen device has of
+  each (*Not installed*, *Has 2.3.1*, *Installed*); **Push** is the solid
+  button only where it would change something. **All · Releases · Test
+  builds · Uploads** pills filter the list and keep the chosen device.
+- Changed: the test-build chip reads **Test build** (was *Artifact · test
+  build*); a normally signed build no longer carries a green *signed* chip on
+  phones.
+
 ## 3.5.0 — 2026-09-24
 
 - Added: **Status shows where each installed version came from.** Under the
