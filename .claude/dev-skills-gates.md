@@ -12,10 +12,12 @@ Updated: 2026-09-25 (session 14: gate 1 passed)
 Branch fix/builds-newest-first (from main e4087c9)
 🔢 VERSION    ✅ 3.7.1 PATCH (two fixes, no feat, no breaking change); prior tag v3.7.0 on origin (ls-remote)
               VERSION, compose.yaml images + comment, README link + compose block + update note, CHANGELOG all 3.7.1
-🔨 BUILD      ⏳ 630 pytest pass (py3.13, requirements-dev hashes), tree unchanged during run
+🔨 BUILD      ✅ 630 pytest pass; handoff offered, user said "merge" without reporting a try — recorded as declined
+              (images from ace1733 on 10.0.0.252:18090, mock GitHub; earlier working-tree stack tried by user)
+              630 pytest pass (py3.13, requirements-dev hashes), tree unchanged during run
               mock-GitHub stack (weather-app: 4 releases, 2 commits) shown to user at http://10.0.0.252:18090; torn down
               release.yml stamp step dry-run: v3.7.1-dev.1 → 3.7.1-dev.1, v3.7.1 → 3.7.1
-  test artifact: ⬜ local images built from the release commit, before merge
+  test artifact: local images adb-server-test/app:ace1733 (32ae6fcf92df), adb-server-test/adb-server:ace1733 (57cf3ecc7403) @ ace1733; both report VERSION 3.7.1
   test creds: generated per run, shown to user
 🔒 SECURITY   ✅ 0 open — 0 Critical, 0 High
               bandit -ll app: 0 results; pip-audit --strict --require-hashes: clean; Dependabot 0 open
@@ -23,8 +25,9 @@ Branch fix/builds-newest-first (from main e4087c9)
               release.yml TAG passed via env, written with printf '%s' (no shell splice); no new routes
 📄 DOCS       ✅ CHANGELOG 3.7.1; README Builds (opens on newest, older folds), version check (dev builds report
               their full version), dev builds paragraph
-📦 RELEASE    ⬜
-🚀 SHIP       ⬜
+📦 RELEASE    ✅ commit + release notes approved (user: "Yes / Commit", 2026-09-25); PR #18 open
+              ace1733 pushed (no force); CI ✅ on ace1733 (runs 36188504672, 36188600463); tracker commit approved ("merge")
+🚀 SHIP       ⏳ plan: merge PR #18 (branch kept) → CI on merge commit → user tags v3.7.1 → release run → verify
 
 ## Shipped: v3.7.0 — SHIP ✅ 2026-09-25: tag v3.7.0 → e4087c9 (user-driven), release run 36174930358 success,
 ## GitHub release published = latest, ghcr app/adb-server 3.7.0 = 3.7 = latest. Pending (user): delete merged
