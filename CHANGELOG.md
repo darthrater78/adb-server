@@ -1,5 +1,57 @@
 # Changelog
 
+## 3.7.0 — 2026-09-25
+
+- Changed: **every push works the same way.** Push on Install now asks you to
+  confirm, like Update on Status, naming the version, the device and what it
+  replaces. The progress page that follows takes you back where you started
+  (Install keeps the device you were pushing to) once the install succeeds;
+  a failed one stays put with its log.
+- Added: **Update all.** A device with two or more updates gets one button
+  at the top of its Status card (and in the phone summary) that installs
+  them all, one after another, after one confirmation, with one progress
+  page for the lot.
+- Added: **trust right after pairing.** Once a phone pairs, Devices asks
+  whether to trust it, showing its model, serial, CPU and address, with a
+  box to name it in the same step. No more hunting for Trust in the list.
+- Changed: **every block folds, and starts folded.** Cards, panels and
+  sections on every page (Install's groups, Sources' forms and repos,
+  Devices, every Settings section, each commit on Builds) collapse from their
+  heading. Outside Settings they all start folded, and each heading sums up
+  what's inside; only a question waiting on you (a repo to confirm, a signing
+  change, a device to trust) starts open. A card's heading is a full-width
+  tinted bar, so it no longer blends into what's below it.
+- Changed: **Sources and Devices are cards, not tables.** One folded card
+  per watched repo, whose heading shows its most recent staged release, and
+  one per paired device. Neither page scrolls sideways any more. Each device
+  card explains what **Find** does.
+- Changed: **Install's groups sum themselves up.** Releases, Test builds and
+  Uploads are folded cards whose heading shows how many apps, the newest,
+  and how many are to update, up to date or not installed on the device
+  you're pushing to. Picking a group with the pills opens it.
+- Changed: **one accent colour.** Settings → Appearance now sets a single
+  accent, used for every highlight: solid buttons, links, focus rings, the
+  current page in the menu (desktop and phone), the chosen filter pill and
+  Settings tab, checkboxes and the edge of an open card. The secondary colour
+  is gone (since 3.6 it coloured almost nothing); eight single-colour
+  presets replace the pairs, and a pair saved before applies its first
+  colour. Status badges keep their own colours; success and Release are now
+  green instead of teal, so they never look like the default accent.
+- Fixed: **a deleted release couldn't be staged again.** Staging it from
+  Builds said it was "already staged", because the deleted files' records
+  still counted. It's staged again now, and **Check now** restages a
+  current release whose files were deleted (the scheduled poll leaves it
+  deleted).
+- Fixed: **colour changes could seem to do nothing** in a browser holding an
+  old copy of the stylesheet. `style.css` is now linked by a hash of its
+  content, so every change to it is fetched.
+- Changed: **Sources no longer repeats Install.** Its "Uploads and test
+  builds" table is gone; they're listed, pushed and deleted on Install, and
+  Sources says how many there are.
+- Added: **dev builds.** A tag with a suffix (`v3.7.0-dev.1`) may be pushed
+  from any branch: it publishes both images under that exact version only,
+  never `:latest` or `:X.Y`, and makes no GitHub release.
+
 ## 3.6.0 — 2026-09-24
 
 - Changed: **a new look.** Calmer cards on a warm neutral ground, one teal

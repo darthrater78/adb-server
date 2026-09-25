@@ -11,7 +11,8 @@
     services. Each service is one URL. Tokens and passwords in a URL are masked everywhere they're shown.
   </p>
 
-  <h3>Services</h3>
+  <details class="fold sub" open>
+  <summary><h3>Services</h3></summary>
   <p class="muted small">Each saved service has its own <strong>Send test</strong> button. To try one before saving it,
     fill in a form below and press <strong>Test</strong>.</p>
   <div class="table-wrap">
@@ -55,8 +56,10 @@
     <button type="submit">Send test to all services</button>
   </form>
   {% endif %}
+  </details>
 
-  <h3>Add a service</h3>
+  <details class="fold sub" open>
+  <summary><h3>Add a service</h3></summary>
   <details class="add-details"{% if draft.server %} open{% endif %}>
     <summary>Add an Apprise server</summary>
   <p class="muted small">If you run an <a href="https://github.com/caronc/apprise-api" rel="noopener noreferrer">Apprise
@@ -101,8 +104,10 @@
     <button type="submit">Add service</button>
   </form>
   </details>
+  </details>
 
-  <h3>Events</h3>
+  <details class="fold sub" open>
+  <summary><h3>Events</h3></summary>
   <form method="post" action="/settings/notify/events" class="events-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for key, label, on in events %}
@@ -146,6 +151,7 @@
       <li>This server makes the request, so a URL can point at anything this server can reach, including your LAN.</li>
       <li>A failed notification never stops a poll or a push; it's logged and skipped.</li>
     </ul>
+  </details>
   </details>
 </section>
 {% endblock %}

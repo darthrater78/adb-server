@@ -24,6 +24,7 @@
 </div>
 {% endif %}
 {% endmacro %}
+{% from "_push.html" import confirm_dialog with context %}
 {% block content %}
 {% set update_count = cards | map(attribute="updates") | map("length") | sum %}
 <div class="page-head">
@@ -43,8 +44,8 @@
 </div>
 
 {% if not setup_done %}
-<section class="panel setup">
-  <h2>Get set up</h2>
+<details class="panel setup fold">
+  <summary><h2>Get set up</h2></summary>
   <ol class="checklist">
     {% for s in steps %}
     <li class="{{ 'done' if s.done else 'todo' }}">
@@ -57,7 +58,7 @@
     </li>
     {% endfor %}
   </ol>
-</section>
+</details>
 {% endif %}
 
 {# Phones: the one thing to do next, then a switcher between devices. #}
@@ -70,7 +71,11 @@
     <div class="summary-title">{{ update_count }} update{{ "" if update_count == 1 else "s" }} ready</div>
     <div class="muted">{{ app.latest.source_label }} {{ app.latest.version_name or app.latest.tag }} for {{ first.card.device | device_name }}{% if update_count > 1 %} and {{ update_count - 1 }} more{% endif %}</div>
   </div>
+  {% if first.card.updates | length > 1 %}
+  <a href="#confirm-all-{{ first.index }}" class="button-link">Update all</a>
+  {% else %}
   <a href="#confirm-{{ app.repo_id }}-{{ first.index }}" class="button-link">Update</a>
+  {% endif %}
 </div>
 {% endif %}
 {% if cards | length > 1 %}
@@ -83,7 +88,7 @@
 {% set d = card.device %}
 {% set dev_loop = loop %}
 {% set app_count = card.apps | selectattr("installed") | selectattr("installed.installed") | list | length + card.others | length %}
-<details class="card row-card device-card" id="device-{{ loop.index }}"{% if d.trusted %} open{% endif %}>
+<details class="card row-card device-card" id="device-{{ loop.index }}">
   <summary>
     <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg></span>
     <div>
@@ -102,6 +107,19 @@
     </span>
   </summary>
 
+  {% if card.updates | length > 1 %}
+  <div class="card-bar" id="update-all-{{ loop.index }}">
+    <span><strong>{{ card.updates | length }} updates ready</strong> <span class="muted">for {{ d | device_name }}</span></span>
+    {% call confirm_dialog("confirm-all-" ~ loop.index, "update-all-" ~ loop.index, "Update " ~ card.updates | length ~ " apps?",
+        "/update-all", {"device_serial": d.serial}, "Update all now", "Update all") %}
+    <p>On <strong>{{ d | device_name }}</strong>, one after another:</p>
+    <ul class="dialog-list">
+      {% for u in card.updates %}<li><strong>{{ u.latest.source_label }}</strong> {{ u.installed.version_name or "?" }} → {{ u.latest.version_name or u.latest.tag }}</li>
+      {% endfor %}
+    </ul>
+    {% endcall %}
+  </div>
+  {% endif %}
   {% if not d.trusted %}
   <p class="card-note">Nothing can be pushed to this device until you trust it on <a href="/devices">Devices</a>.</p>
   {% elif card.apps or card.others %}
@@ -135,28 +153,14 @@
         {% if app.fits %}
         {% set verb = "Install" if app.state == "missing" else "Update" %}
         {% set dialog = "confirm-" ~ app.repo_id ~ "-" ~ dev_loop.index %}
-        {# A CSS :target dialog — the CSP allows no JavaScript. The link opens
-           it; the push itself is still a CSRF-protected POST. #}
-        <a href="#{{ dialog }}" class="button-link">{{ verb }}</a>
-        <div id="{{ dialog }}" class="modal" role="dialog" aria-modal="true" aria-labelledby="{{ dialog }}-title">
-          <a href="#app-{{ app.repo_id }}-{{ dev_loop.index }}" class="modal-backdrop" aria-label="Cancel" tabindex="-1"></a>
-          <div class="modal-card">
-            <h2 id="{{ dialog }}-title">{{ verb }} {{ latest.source_label }}?</h2>
-            <p>
-              {{ verb }} <strong>{{ staged }}</strong>
-              on <strong>{{ d | device_name }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
-              replacing {{ app.installed.version_name }}{% endif %}.
-            </p>
-            <p class="muted small">The app keeps its data. The install runs in the background and you'll be taken to its progress page.</p>
-            <form method="post" action="/push-latest" class="modal-actions">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input type="hidden" name="repo_id" value="{{ app.repo_id }}">
-              <input type="hidden" name="device_serial" value="{{ d.serial }}">
-              <a href="#app-{{ app.repo_id }}-{{ dev_loop.index }}" class="button-link secondary">Cancel</a>
-              <button type="submit">{{ verb }} now</button>
-            </form>
-          </div>
-        </div>
+        {% call confirm_dialog(dialog, "app-" ~ app.repo_id ~ "-" ~ dev_loop.index, verb ~ " " ~ latest.source_label ~ "?",
+            "/push-latest", {"repo_id": app.repo_id, "device_serial": d.serial, "back": "/status"}, verb ~ " now", verb) %}
+        <p>
+          {{ verb }} <strong>{{ staged }}</strong>
+          on <strong>{{ d | device_name }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
+          replacing {{ app.installed.version_name }}{% endif %}.
+        </p>
+        {% endcall %}
         {% else %}
         <span class="muted small">no APK for this CPU</span>
         {% endif %}

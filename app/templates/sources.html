@@ -8,8 +8,8 @@
   <a href="/install">Install</a>.</p>
 
 <div class="add-grid">
-  <section class="panel">
-    <h2>Watch a GitHub repo</h2>
+  <details class="panel fold">
+    <summary><h2>Watch a GitHub repo</h2></summary>
     <form method="post" action="/repos" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Repo <input type="text" name="repo_url" required placeholder="https://github.com/octocat/hello-world"></label>
@@ -20,10 +20,10 @@
     <p class="muted small">A URL, <code>owner/repo</code> or an SSH remote. You'll see what GitHub says the
       repo is before it's watched. The first release pins the app's package name and signing certificate;
       later releases must match, and must be uploaded by the owner or a workflow.</p>
-  </section>
+  </details>
 
-  <section class="panel" id="upload">
-    <h2>Upload an APK</h2>
+  <details class="panel fold" id="upload">
+    <summary><h2>Upload an APK</h2></summary>
     <form method="post" action="/staged/upload" enctype="multipart/form-data" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="file" name="apk" accept=".apk,.zip,application/vnd.android.package-archive,application/zip" required>
@@ -36,12 +36,12 @@
     <p class="muted small">For a build that isn't a GitHub release. Up to {{ max_upload_mb }} MB. A zip
       holding one APK works too, such as a workflow run's artifact download. The signature must verify;
       debug-signed builds are allowed and marked "debug build".</p>
-  </section>
+  </details>
 </div>
 
 {% if review %}{% set i = review.info %}
-<section class="panel panel-warn" id="review">
-  <h2>Is this the repo you meant?</h2>
+<details class="panel panel-warn fold" id="review" open>
+  <summary><h2>Is this the repo you meant?</h2></summary>
   <p>Check the owner and details against the developer's own site or docs before watching it. Nothing is
     watched until you confirm, and its GitHub ID is pinned when you do: if the name later points at another
     repo, or the repo changes owner, nothing more is staged from it.</p>
@@ -64,12 +64,12 @@
     <button type="submit">Watch {{ i.owner }}/{{ i.repo }}</button>
     <a href="/sources" class="button-link secondary">Cancel</a>
   </form>
-</section>
+</details>
 {% endif %}
 
 {% for r in repos if r.pending_signer %}
-<section class="panel panel-warn">
-  <h2>Signing change: {{ r.owner }}/{{ r.repo }} {{ r.rejected_tag }}</h2>
+<details class="panel panel-warn fold" open>
+  <summary><h2>Signing change: {{ r.owner }}/{{ r.repo }} {{ r.rejected_tag }}</h2></summary>
   <p>
     This release is signed differently from the one this repo was pinned to, so it was <strong>not staged</strong>.
     Accept it only if you're sure the change is genuine (for example, the developer announced a key rotation).
@@ -93,7 +93,7 @@
     <label><input type="checkbox" name="confirm" value="yes" required> I've verified this new certificate is genuine</label>
     <button type="submit" class="danger">Accept new signer and stage</button>
   </form>
-</section>
+</details>
 {% endfor %}
 
 <h2 class="section-title">Watched repos</h2>
@@ -105,99 +105,91 @@
 </p>
 {% endif %}
 
-<div class="table-wrap">
-
-<table>
-  <thead>
-    <tr>
-      <th>Repo</th><th>Pinned package</th><th>Last tag</th><th>Last checked</th><th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in repos %}
-    <tr>
-      <td data-label="Repo">
-        <a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">{{ r.owner }}/{{ r.repo }}</a>
-        <span class="mono small muted" title="Asset glob">{{ r.asset_glob }}</span>
-      </td>
-      <td data-label="Pinned package" class="mono small">{{ r.expected_package or "—" }}</td>
-      <td data-label="Last tag">
-        {% if r.last_tag %}<span class="tag-pill">{{ r.last_tag }}</span>{% else %}<span class="muted small">{{ "no release yet" if r.last_checked_at else "—" }}</span>{% endif %}
-        {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
-        {% if r.sign_unsigned %}<span class="badge badge-warn" title="Unsigned builds are signed with this server's key">signs unsigned</span>{% endif %}
-      </td>
-      <td data-label="Last checked" class="small">
-        {{ r.last_checked_at | when }}
-        {% if r.last_error %}
-        <span class="badge badge-error" title="{{ r.last_error }}">Error</span>
-        {% else %}
-        <span class="badge badge-ok">OK</span>
-        {% endif %}
-      </td>
-      <td><div class="actions">
-        <a href="/repos/{{ r.id }}/artifacts" class="button-link secondary small">Builds</a>
-        <form method="post" action="/repos/{{ r.id }}/check-now">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="secondary small">Check now</button>
-        </form>
-        <form method="post" action="/repos/{{ r.id }}/prereleases">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="include" value="{{ '0' if r.include_prereleases else '1' }}">
-          <button type="submit" class="secondary small" title="Also stage pre-releases from this repo">Pre-releases: {{ "on" if r.include_prereleases else "off" }}</button>
-        </form>
-        <form method="post" action="/repos/{{ r.id }}/delete">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="danger small">Remove</button>
-        </form>
-      </div></td>
-    </tr>
-    {% else %}
-    <tr><td colspan="5" class="empty-state">No repos watched yet. Add one above.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-
-<h2 class="section-title">Uploads and test builds</h2>
-<div class="table-wrap">
-<table>
-  <thead>
-    <tr><th>Source</th><th>Label</th><th>Version</th><th>Package</th><th>CPU</th><th>Staged</th><th></th></tr>
-  </thead>
-  <tbody>
-    {% for a in uploads %}
-    <tr{% if a.artifact_repo %} class="row-artifact"{% endif %}>
-      <td data-label="Source">
-        {% if a.artifact_repo %}
-        <span class="badge badge-artifact" title="Built by a workflow run, not a release">Artifact</span>
-        <a class="mono small" href="https://github.com/{{ a.artifact_repo }}/actions/runs/{{ a.artifact_run_id }}"
-           rel="noopener noreferrer" title="{{ a.artifact_repo }} · {{ a.artifact_branch }}">{{ a.artifact_branch }} @ {{ (a.artifact_sha or "")[:7] }}</a>
-        {% else %}<span class="badge badge-muted">Upload</span>{% endif %}
-      </td>
-      <td data-label="Label">
-        <span class="clip" title="{{ a.filename }}">{{ a.tag }}</span>
-        {% include "_signing_badges.html" %}
-      </td>
-      <td data-label="Version" class="nowrap">{{ a.version_name or "—" }}</td>
-      <td data-label="Package"><span class="clip mono small" title="{{ a.package_name }}">{{ a.package_name }}</span></td>
-      {% set abis = (a.abis or "").split() %}
-      <td data-label="CPU" class="mono small" title="{{ a.abis or 'any CPU' }}">{{ abis[0] if abis else "any" }}{% if abis | length > 1 %} +{{ abis | length - 1 }}{% endif %}</td>
-      <td data-label="Staged" class="small">{{ a.downloaded_at | when }}</td>
-      <td><div class="actions">
-        <a href="/install#upload-{{ a.id }}" class="button-link secondary">Install</a>
-        <form method="post" action="/staged/{{ a.id }}/delete">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="danger">Delete</button>
-        </form>
-      </div></td>
-    </tr>
-    {% if a.is_debug and a.artifact_repo_id and (a.artifact_siblings | siblings) %}
-    <tr class="row-artifact advice-row"><td colspan="7">{% include "_debug_advice.html" %}</td></tr>
+{% for r in repos %}
+{% set rel = latest.get(r.id, []) %}
+{% set first = rel[0] if rel else None %}
+<details class="card row-card device-card item-card" id="repo-{{ r.id }}">
+  <summary>
+    <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/></svg></span>
+    <div>
+      <h2 class="device-name">{{ r.owner }}/{{ r.repo }}</h2>
+      <div class="device-meta">{{ r.expected_package or "package pinned on first release" }}</div>
+    </div>
+    <span class="device-facts">
+      {% if first %}
+      <span class="badge badge-muted tag-pill" title="Most recent release">{{ first.version_name or first.tag }}</span>
+      {% elif r.last_tag %}
+      <span class="badge badge-muted tag-pill">{{ r.last_tag }}</span><span class="badge badge-warn" title="Its files were deleted">not staged</span>
+      {% else %}
+      <span class="badge badge-muted">{{ "no release yet" if r.last_checked_at else "not checked yet" }}</span>
+      {% endif %}
+      {% if r.include_prereleases %}<span class="badge badge-muted" title="Pre-releases are included">pre</span>{% endif %}
+      {% if r.sign_unsigned %}<span class="badge badge-warn" title="Unsigned builds are signed with this server's key">signs unsigned</span>{% endif %}
+      {% if r.last_error %}<span class="badge badge-error">Error</span>{% else %}<span class="badge badge-ok">OK</span>{% endif %}
+      <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </span>
+  </summary>
+  <div class="item-body">
+    <div class="more-label">Most recent release</div>
+    {% if first %}
+    <p class="release-line">
+      <span class="version">{{ first.version_name or first.tag }}</span>
+      {% if first.version_name and first.version_name != first.tag.lstrip('v') %}<span class="muted small mono">{{ first.tag }}</span>{% endif %}
+      <span class="muted small">staged {{ first.downloaded_at | when }} · {{ rel | length }} build{{ "" if rel | length == 1 else "s" }}</span>
+      <a href="/install#app-{{ r.id }}" class="small">Install</a>
+    </p>
+    <ul class="build-list">
+      {% for a in rel %}<li><span class="mono small">{{ a.filename }}</span> <span class="muted small">{{ a.abis or "any CPU" }}</span></li>{% endfor %}
+    </ul>
+    {% if first.release_notes %}
+    <details class="nested">
+      <summary>Release notes for {{ first.version_name or first.tag }}</summary>
+      <pre class="release-notes">{{ first.release_notes }}</pre>
+    </details>
     {% endif %}
+    {% elif r.last_tag %}
+    <p class="muted small"><span class="mono">{{ r.last_tag }}</span> was staged, but its files have been deleted.
+      <strong>Check now</strong> downloads and verifies it again.</p>
     {% else %}
-    <tr><td colspan="7" class="empty-state">Nothing uploaded or staged from an artifact.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
+    <p class="muted small">Nothing staged yet. The latest release is fetched on the next poll, or straight away
+      with <strong>Check now</strong>.</p>
+    {% endif %}
+
+    <div class="more-label">Details</div>
+    <dl class="facts">
+      <div><dt>Repo</dt><dd><a href="https://github.com/{{ r.owner }}/{{ r.repo }}" rel="noopener noreferrer">github.com/{{ r.owner }}/{{ r.repo }}</a></dd></div>
+      <div><dt>Asset glob</dt><dd class="mono small">{{ r.asset_glob }}</dd></div>
+      <div><dt>Pinned package</dt><dd class="mono small">{{ r.expected_package or "—" }}</dd></div>
+      <div><dt>Last checked</dt><dd class="small">{{ r.last_checked_at | when("never") }}</dd></div>
+      {% if r.last_error %}<div class="wide"><dt>Last error</dt><dd class="error-text small">{{ r.last_error }}</dd></div>{% endif %}
+    </dl>
+
+    <div class="actions item-actions">
+      <a href="/repos/{{ r.id }}/artifacts" class="button-link secondary small">Builds</a>
+      <form method="post" action="/repos/{{ r.id }}/check-now">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary small" title="Check for a new release now; restages the current one if its files were deleted">Check now</button>
+      </form>
+      <form method="post" action="/repos/{{ r.id }}/prereleases">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="include" value="{{ '0' if r.include_prereleases else '1' }}">
+        <button type="submit" class="secondary small" title="Also stage pre-releases from this repo">Pre-releases: {{ "on" if r.include_prereleases else "off" }}</button>
+      </form>
+      <form method="post" action="/repos/{{ r.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="danger small">Remove</button>
+      </form>
+    </div>
+  </div>
+</details>
+{% else %}
+<p class="empty-state">No repos watched yet. Add one above.</p>
+{% endfor %}
+
+{# Uploads and test builds are listed, pushed and deleted on Install; this
+   page is only where they're added. #}
+{% if uploads %}
+<p class="muted">{{ uploads | length }} upload{{ "" if uploads | length == 1 else "s" }} and test build{{ "" if uploads | length == 1 else "s" }} staged:
+  see them on <a href="/install">Install</a>.</p>
+{% endif %}
 {% endblock %}

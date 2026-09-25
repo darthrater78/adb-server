@@ -11,11 +11,11 @@ GOTIFY = f"gotifys://gotify.example.com/{TOKEN}"
 
 # ---- appearance ----
 
-@pytest.mark.parametrize("color", [c for pair in appearance.PRESETS.values() for c in pair]
-                         + ["#ffff00", "#000000", "#ffffff", "#00ffcc"])
+@pytest.mark.parametrize("color", list(appearance.PRESETS.values()) + ["#ffff00", "#000000", "#ffffff", "#00ffcc"])
 def test_accent_variants_are_readable_in_every_theme(color):
     v = appearance.variants(color)
-    assert appearance.contrast(v["light"], appearance.LIGHT_BG) >= appearance.MIN_CONTRAST
+    for bg in appearance.LIGHT_BGS:
+        assert appearance.contrast(v["light"], bg) >= appearance.MIN_CONTRAST
     for bg in appearance.DARK_BGS:
         assert appearance.contrast(v["dark"], bg) >= appearance.MIN_CONTRAST
     assert appearance.contrast(v["on_light"], v["light"]) >= appearance.MIN_CONTRAST
@@ -24,11 +24,18 @@ def test_accent_variants_are_readable_in_every_theme(color):
 
 @pytest.mark.parametrize("name", list(appearance.PRESET_DARK))
 def test_preset_dark_shades_are_readable(name):
-    for color in appearance.PRESET_DARK[name]:
-        for bg in appearance.DARK_BGS:
-            assert appearance.contrast(color, bg) >= appearance.MIN_CONTRAST
-    css = appearance.stylesheet(*appearance.PRESETS[name])
-    assert all(c in css for c in appearance.PRESET_DARK[name])
+    dark = appearance.PRESET_DARK[name]
+    for bg in appearance.DARK_BGS:
+        assert appearance.contrast(dark, bg) >= appearance.MIN_CONTRAST
+    assert dark in appearance.stylesheet(appearance.PRESETS[name])
+
+
+def test_every_preset_has_a_swatch_and_a_dark_shade():
+    import os
+    css = open(os.path.join(os.path.dirname(appearance.__file__), "static", "style.css")).read()
+    assert set(appearance.PRESET_DARK) == set(appearance.PRESETS)
+    for name, colour in appearance.PRESETS.items():
+        assert f".swatch-{name} {{ background: {colour}; }}" in css
 
 
 @pytest.mark.parametrize("bad", ["", "red", "#fff", "#12345g", "#1234567", "#123456;}body{x"])
@@ -37,29 +44,35 @@ def test_accent_rejects_anything_but_hex(bad):
         appearance.normalize(bad)
 
 
-def test_custom_pair_sets_both_colours(client, authed):
+def test_custom_accent_sets_accent_and_links(client, authed):
     assert "default accent" in client.get("/accent.css").text
-    r = authed.post("/settings/appearance", data={"csrf_token": CSRF, "accent": "#7C3AED", "accent2": "#F59E0B"},
-                    follow_redirects=False)
+    r = authed.post("/settings/appearance", data={"csrf_token": CSRF, "accent": "#7C3AED"}, follow_redirects=False)
     assert "ok=" in r.headers["location"]
-    assert (db.get_meta("accent_color"), db.get_meta("accent2_color")) == ("#7c3aed", "#f59e0b")
+    assert db.get_meta("accent_color") == "#7c3aed"
     css = client.get("/accent.css")
     assert css.headers["content-type"].startswith("text/css")
-    assert "--accent-2" in css.text and "#7c3aed" in css.text and "#f59e0b" in css.text
-    assert "/accent.css?v=7c3aedf59e0b" in authed.get("/status").text
+    assert "--accent: #7c3aed" in css.text and "--link: #7c3aed" in css.text
+    assert "--accent-2" not in css.text
+    assert "/accent.css?v=7c3aed" in authed.get("/status").text
 
 
-def test_preset_pair(authed):
-    authed.post("/settings/appearance", data={"csrf_token": CSRF, "preset": "graphite-blue"})
-    assert (db.get_meta("accent_color"), db.get_meta("accent2_color")) == appearance.PRESETS["graphite-blue"]
+def test_a_second_colour_from_before_is_forgotten(authed):
+    db.set_meta("accent_color", "#2563eb")
+    db.set_meta("accent2_color", "#f59e0b")
+    authed.post("/settings/appearance", data={"csrf_token": CSRF, "preset": "violet"})
+    assert db.get_meta("accent_color") == appearance.PRESETS["violet"] and db.get_meta("accent2_color") is None
+
+
+def test_preset(authed):
+    authed.post("/settings/appearance", data={"csrf_token": CSRF, "preset": "graphite"})
+    assert db.get_meta("accent_color") == appearance.PRESETS["graphite"]
     assert 'preset current' in authed.get("/settings/appearance").text
 
 
 def test_default_preset_clears_the_setting(authed):
     db.set_meta("accent_color", "#2563eb")
-    db.set_meta("accent2_color", "#f59e0b")
     authed.post("/settings/appearance", data={"csrf_token": CSRF, "preset": appearance.DEFAULT_PRESET})
-    assert db.get_meta("accent_color") is None and db.get_meta("accent2_color") is None
+    assert db.get_meta("accent_color") is None
 
 
 def test_unknown_preset_is_refused(authed):
@@ -67,59 +80,60 @@ def test_unknown_preset_is_refused(authed):
     assert "error=" in r.headers["location"]
 
 
-def test_save_colour_pair_stores_applies_and_lists_it(client, authed):
+def test_the_page_offers_one_colour(authed):
+    page = authed.get("/settings/appearance").text
+    assert 'name="accent"' in page and 'name="accent2"' not in page and "<strong>Secondary" not in page
+
+
+def test_save_colour_stores_applies_and_lists_it(client, authed):
     r = authed.post("/settings/appearance/save", data={
-        "csrf_token": CSRF, "name": "  Sunset  ", "accent": "#C2410C", "accent2": "#7C3AED",
+        "csrf_token": CSRF, "name": "  Sunset  ", "accent": "#C2410C",
     }, follow_redirects=False)
     assert "ok=" in r.headers["location"] and r.headers["location"].startswith("/settings/appearance")
     (row,) = db.list_saved_colours()
-    assert (row["name"], row["primary_color"], row["secondary_color"]) == ("Sunset", "#c2410c", "#7c3aed")
-    assert (db.get_meta("accent_color"), db.get_meta("accent2_color")) == ("#c2410c", "#7c3aed")
+    assert (row["name"], row["primary_color"]) == ("Sunset", "#c2410c")
+    assert db.get_meta("accent_color") == "#c2410c"
     page = authed.get("/settings/appearance").text
     assert "Sunset" in page and f"swatch-saved-{row['id']}" in page
-    assert f".swatch-saved-{row['id']}" in client.get("/accent.css").text
+    assert f".swatch-saved-{row['id']} {{ background: #c2410c; }}" in client.get("/accent.css").text
 
 
 def test_saving_an_existing_name_updates_it(authed):
     for accent in ("#111111", "#222222"):
-        authed.post("/settings/appearance/save",
-                    data={"csrf_token": CSRF, "name": "Mine", "accent": accent, "accent2": "#333333"})
+        authed.post("/settings/appearance/save", data={"csrf_token": CSRF, "name": "Mine", "accent": accent})
     (row,) = db.list_saved_colours()
     assert row["primary_color"] == "#222222"
 
 
-def test_apply_and_delete_saved_pair(authed):
-    colour_id = db.save_colour("Mine", "#111111", "#333333")
+def test_a_pair_saved_before_applies_its_first_colour(authed):
+    colour_id = db.save_colour("Old pair", "#111111", "#333333")
     authed.post("/settings/appearance", data={"csrf_token": CSRF, "saved": str(colour_id)})
     assert db.get_meta("accent_color") == "#111111"
     authed.post(f"/settings/appearance/saved/{colour_id}/delete", data={"csrf_token": CSRF})
     assert db.list_saved_colours() == []
-    assert db.get_meta("accent_color") == "#111111"  # colours in use stay
+    assert db.get_meta("accent_color") == "#111111"  # the colour in use stays
 
 
 @pytest.mark.parametrize("data", [
-    {"name": "", "accent": "#111111", "accent2": "#333333"},
-    {"name": "x" * 41, "accent": "#111111", "accent2": "#333333"},
-    {"name": "Bad", "accent": "#111111;}*{x:y", "accent2": "#333333"},
+    {"name": "", "accent": "#111111"},
+    {"name": "x" * 41, "accent": "#111111"},
+    {"name": "Bad", "accent": "#111111;}*{x:y"},
 ])
-def test_save_colour_pair_validates(authed, data):
+def test_save_colour_validates(authed, data):
     r = authed.post("/settings/appearance/save", data={"csrf_token": CSRF, **data}, follow_redirects=False)
     assert "error=" in r.headers["location"]
     assert db.list_saved_colours() == []
 
 
-def test_save_colour_pair_needs_csrf(authed):
+def test_save_colour_needs_csrf(authed):
     r = authed.post("/settings/appearance/save",
-                    data={"csrf_token": "wrong", "name": "X", "accent": "#111111", "accent2": "#333333"},
-                    follow_redirects=False)
+                    data={"csrf_token": "wrong", "name": "X", "accent": "#111111"}, follow_redirects=False)
     assert r.status_code == 403 and db.list_saved_colours() == []
 
 
-@pytest.mark.parametrize("field", ["accent", "accent2"])
-def test_accent_rejects_css_injection(authed, field):
-    data = {"csrf_token": CSRF, "accent": "#000000", "accent2": "#ffffff"}
-    data[field] = "#000000;}*{display:none"
-    r = authed.post("/settings/appearance", data=data, follow_redirects=False)
+def test_accent_rejects_css_injection(authed):
+    r = authed.post("/settings/appearance", data={"csrf_token": CSRF, "accent": "#000000;}*{display:none"},
+                    follow_redirects=False)
     assert "error=" in r.headers["location"]
     assert db.get_meta("accent_color") is None
 

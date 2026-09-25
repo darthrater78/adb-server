@@ -555,17 +555,20 @@ def test_install_page_sets_artifacts_apart(authed, artifact_env):
     db.insert_staged_apk(repo_id=None, tag="hand upload", filename="plain.apk", sha256="e" * 64,
                          package_name="com.example.other", signer_sha256="d" * 64, path=path, source="upload")
     page = authed.get("/install").text
-    art = page.index("Test builds from workflow artifacts")
-    assert art < page.index("section-title\">Uploads<")
-    card = page[art:page.index("section-title\">Uploads<")]
+    art = page.index('id="kind-artifact"')
+    assert art < page.index('id="kind-upload"')
+    card = page[art:page.index('id="kind-upload"')]
+    assert "Test builds from workflow artifacts" in card
     assert "app-card-artifact" in card and ">Test build</span>" in card
     assert "feature/x" in card and "https://github.com/o/r/actions/runs/77" in card and "abcdef1 · run 77" in card
-    assert ">Test build</span>" not in page[page.index("section-title\">Uploads<"):]
+    assert ">Test build</span>" not in page[page.index('id="kind-upload"'):]
 
 
-def test_one_kind_of_card_gets_no_section_headings(authed, artifact_env):
+def test_one_kind_still_gets_its_folded_summary_card(authed, artifact_env):
+    # Every kind is a folded card with a state summary, even when it's the only one.
     authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF})
-    assert "Test builds from workflow artifacts" not in authed.get("/install").text
+    page = authed.get("/install").text
+    assert 'id="kind-artifact">' in page and "Test builds from workflow artifacts" in page
 
 
 def test_device_names_prefer_nickname_then_model(monkeypatch):
@@ -757,11 +760,11 @@ def test_builds_of_one_commit_are_grouped_with_its_message(authed, artifact_env,
         78: {"title": "Release build", "event": "push", "number": 5, "message": "fix: faster reconnects\n\nBody.", "subject": "fix: faster reconnects"},
     }
     page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
-    assert page.count('class="panel commit-group"') == 2
-    first = page[page.index('class="panel commit-group"'):page.rindex('class="panel commit-group"')]
+    assert page.count('class="panel commit-group fold"') == 2
+    first = page[page.index('class="panel commit-group fold"'):page.rindex('class="panel commit-group fold"')]
     assert "app-debug" in first and "app-release" in first and "fix: faster reconnects" in first
     assert "Body." in first and "CI #12" in first and "Release build #5" in first
-    assert "(no commit message available)" in page[page.rindex('class="panel commit-group"'):]
+    assert "(no commit message available)" in page[page.rindex('class="panel commit-group fold"'):]
 
 
 def test_list_runs_parses_titles_and_messages(monkeypatch):
@@ -825,7 +828,7 @@ def test_latest_release_404_becomes_no_release(monkeypatch):
 def test_check_now_reloads_until_done_then_says_what_it_found(authed, monkeypatch):
     rid = db.create_repo("o", "r", "*.apk", github_id=1, owner_id=10, owner_type="User")
 
-    async def slow(row):  # the background check hasn't finished yet
+    async def slow(row, restage=False):  # the background check hasn't finished yet
         return None
     monkeypatch.setattr(poller, "check_repo", slow)
     r = authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF}, follow_redirects=False)
@@ -881,7 +884,7 @@ def test_staging_records_the_other_builds_of_the_commit(authed, artifact_env, mo
     assert apk["artifact_repo_id"] == artifact_env["rid"]
 
 
-@pytest.mark.parametrize("path", ["/sources", "/install"])
+@pytest.mark.parametrize("path", ["/install"])
 def test_a_debug_build_advises_its_signed_sibling(authed, artifact_env, monkeypatch, path):
     _stage_debug_with_sibling(authed, artifact_env, monkeypatch)  # artifact_env signs it as debug
     page = authed.get(path).text
@@ -892,7 +895,7 @@ def test_a_debug_build_advises_its_signed_sibling(authed, artifact_env, monkeypa
 def test_a_signed_build_gets_the_signed_badge_and_no_advice(authed, artifact_env, monkeypatch):
     monkeypatch.setattr(apk_verify, "verify_signature", lambda path: apk_verify.SignerInfo("d" * 64, False))
     _stage_debug_with_sibling(authed, artifact_env, monkeypatch)
-    for path in ("/sources", "/install"):
+    for path in ("/install",):
         page = authed.get(path).text
         assert "title=\"Signed with the developer's own key\">signed</span>" in page
         assert "Better not install" not in page

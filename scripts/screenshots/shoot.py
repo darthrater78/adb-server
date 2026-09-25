@@ -41,9 +41,16 @@ def sign_in(page, shot_mfa=False):
         page.wait_for_load_state()
 
 
+# Everything outside Settings starts folded; the README shows each page with
+# its first card opened, so there's something to see besides headings.
+FIRST_CARD = "main details.device-card, main details.kind-group"
+
+
 def shot(page, path, name, full=True):
     page.goto(URL + path)
     page.wait_for_load_state()
+    if page.locator(FIRST_CARD).count():
+        page.locator(FIRST_CARD).first.evaluate("d => d.open = true")
     page.screenshot(path=f"{OUT}/{name}.png", full_page=full)
     if page.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
         raise SystemExit(f"{name}: the page scrolls sideways")
@@ -65,6 +72,7 @@ with sync_playwright() as p:
                                  ("/settings/notifications", "settings-notifications", True)):
             shot(page, path, name, full)
         page.goto(URL + "/sources")
+        page.click("summary:has-text('Watch a GitHub repo')")  # folded once repos are watched
         page.fill("input[name=repo_url]", "example-dev/weather-app")
         page.click("text=Look up repo")
         page.wait_for_load_state()

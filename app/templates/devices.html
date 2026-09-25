@@ -4,8 +4,28 @@
 <h1>Devices</h1>
 <p class="page-intro muted">Phones this server can push to. See what each one has on <a href="/status">Status</a>.</p>
 
-<section class="panel">
-  <h2>Add a device</h2>
+{% if offer %}
+<details class="panel panel-warn fold trust-offer" id="trust-offer" open>
+  <summary><h2>Trust {{ offer | device_name }}?</h2></summary>
+  <p>It's paired. Nothing is pushed to a device until you trust it, so check this is the phone you just paired.</p>
+  <dl>
+    {% if offer.model %}<dt>Model</dt><dd>{{ offer.model }}</dd>{% endif %}
+    <dt>Serial</dt><dd class="mono small">{{ offer.serial }}</dd>
+    <dt>CPU</dt><dd class="mono small">{{ offer.abis.split()[0] if offer.abis else "unknown" }}</dd>
+    <dt>Address</dt><dd class="mono small">{{ offer.last_connect_addr or "—" }}</dd>
+  </dl>
+  <form method="post" action="/devices/{{ offer.serial | urlencode }}/trust" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="trusted" value="1">
+    <label>Name <input type="text" name="nickname" maxlength="100" value="{{ offer.nickname or '' }}" placeholder="optional, e.g. Pixel 8"></label>
+    <button type="submit">Trust</button>
+    <a href="/devices" class="button-link secondary">Not now</a>
+  </form>
+</details>
+{% endif %}
+
+<details class="panel fold">
+  <summary><h2>Add a device</h2></summary>
   <ol class="steps">
     <li>On the phone, turn on <strong>Settings → Developer options → Wireless debugging</strong>. The phone and
       this server must be on the same network.</li>
@@ -13,7 +33,7 @@
       connect address.</li>
     <li>Tap <strong>Pair device with pairing code</strong>. Enter the address and 6-digit code it shows,
       plus the connect address, below.</li>
-    <li>Once it's paired, press <strong>Trust</strong> in the list. Nothing is ever pushed to an untrusted device.</li>
+    <li>Once it's paired, press <strong>Trust</strong> on its card. Nothing is ever pushed to an untrusted device.</li>
   </ol>
   <form method="post" action="/devices/pair" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -24,69 +44,83 @@
   </form>
   <p class="muted small">The connect port changes whenever wireless debugging restarts. Pushes find the new port
     automatically by scanning the device's last known IP; <strong>Find</strong> does the same on demand.</p>
-</section>
+</details>
 
-<div class="table-wrap">
+<h2 class="section-title">Paired devices</h2>
+{% for d in devices %}
+<details class="card row-card device-card item-card" id="dev-{{ loop.index }}">
+  <summary>
+    <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg></span>
+    <div>
+      <h2 class="device-name">{{ d | device_name }}</h2>
+      <div class="device-meta">
+        {% if d.model and d.nickname %}{{ d.model }} · {% endif %}{{ d.serial }} · seen {{ d.last_seen_at | when("never") }}
+      </div>
+    </div>
+    <span class="device-facts">
+      {% if d.trusted %}<span class="badge badge-ok">Trusted</span>{% else %}<span class="badge badge-warn">Not trusted</span>{% endif %}
+      <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </span>
+  </summary>
+  <div class="item-body">
+    <dl class="facts">
+      <div><dt>Model</dt><dd>{{ d.model or "—" }}</dd></div>
+      <div><dt>Serial</dt><dd class="mono small">{{ d.serial }}</dd></div>
+      <div><dt>CPU</dt><dd class="mono small">{{ d.abis.split()[0] if d.abis else "—" }}</dd></div>
+      <div><dt>Last address</dt><dd class="mono small">{{ d.last_connect_addr or "—" }}</dd></div>
+      <div><dt>Last seen</dt><dd class="small">{{ d.last_seen_at | when("never") }}</dd></div>
+    </dl>
 
-<table>
-  <thead>
-    <tr>
-      <th>Device</th><th>Model</th><th>Serial</th><th>CPU</th><th>Trusted</th><th>Last address</th><th>Last seen</th><th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for d in devices %}
-    <tr>
-      <td data-label="Device">
-        <form method="post" action="/devices/{{ d.serial | urlencode }}/nickname" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="text" name="nickname" value="{{ d.nickname or '' }}" placeholder="nickname">
-          <button type="submit" class="secondary">Save</button>
-        </form>
-      </td>
-      <td data-label="Model">{{ d.model or "—" }}</td>
-      <td data-label="Serial" class="mono small">{{ d.serial }}</td>
-      <td data-label="CPU" class="mono small">{{ d.abis.split()[0] if d.abis else "—" }}</td>
-      <td data-label="Trusted">
+    <div class="more-label">Name and trust</div>
+    <div class="actions item-actions">
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/nickname" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="nickname" value="{{ d.nickname or '' }}" placeholder="nickname" aria-label="Nickname" maxlength="100">
+        <button type="submit" class="secondary">Save name</button>
+      </form>
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {% if d.trusted %}
-        <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="trusted" value="0">
-          <span class="badge badge-ok">Trusted</span>
-          <button type="submit" class="secondary small">Revoke</button>
-        </form>
+        <input type="hidden" name="trusted" value="0">
+        <button type="submit" class="secondary">Revoke trust</button>
         {% else %}
-        <form method="post" action="/devices/{{ d.serial | urlencode }}/trust" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="trusted" value="1">
-          <span class="badge badge-warn">Not trusted</span>
-          <button type="submit">Trust</button>
-        </form>
+        <input type="hidden" name="trusted" value="1">
+        <button type="submit">Trust</button>
         {% endif %}
-      </td>
-      <td data-label="Address">
-        <form method="post" action="/devices/{{ d.serial | urlencode }}/connect" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="text" name="connect_addr" value="{{ d.last_connect_addr or '' }}" placeholder="ip:port">
-          <button type="submit" class="secondary">Reconnect</button>
-        </form>
-        <form method="post" action="/devices/{{ d.serial | urlencode }}/find" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="secondary" title="Scan this device's IP for its new wireless debugging port">Find</button>
-        </form>
-      </td>
-      <td data-label="Last seen">{{ d.last_seen_at | when }}</td>
-      <td>
-        <form method="post" action="/devices/{{ d.serial | urlencode }}/delete">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="danger">Forget</button>
-        </form>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="8" class="empty-state">No devices yet. Add one above.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
+      </form>
+    </div>
+
+    <div class="more-label">Connection</div>
+    <div class="actions item-actions">
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/connect" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="connect_addr" value="{{ d.last_connect_addr or '' }}" placeholder="ip:port" aria-label="Connect address">
+        <button type="submit" class="secondary">Reconnect</button>
+      </form>
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/find" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary">Find</button>
+      </form>
+    </div>
+    <p class="explainer">
+      <strong>What Find does:</strong> the phone picks a new port every time wireless debugging restarts, so
+      the saved address stops working. Find tries the saved address first. If nothing answers, it scans that
+      same IP for the new port and reconnects. It only accepts a port if the phone there reports this device's
+      serial, so it never latches onto a different phone. Pushes and installs do this on their own when the
+      saved port has gone stale. Use Find to check a phone is reachable before you install, or after you turn
+      wireless debugging back on. It can take a few seconds. If the phone's IP address changed, use
+      <strong>Reconnect</strong> with the new address instead.
+    </p>
+
+    <div class="actions item-actions danger-zone">
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="danger">Forget device</button>
+      </form>
+    </div>
+  </div>
+</details>
+{% else %}
+<p class="empty-state">No devices yet. Add one above.</p>
+{% endfor %}
 {% endblock %}

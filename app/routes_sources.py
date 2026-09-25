@@ -132,9 +132,13 @@ async def _apk_evidence(info: github_client.RepoInfo, asset_glob: str) -> tuple[
 
 def _sources_page(request: Request, session: dict, **extra) -> HTMLResponse:
     uploaded = [a for a in db.list_staged_apks() if a["repo_id"] is None]
+    # Each repo's most recent staged release, shown on its folded card's head.
+    latest: dict[int, list] = {}
+    for a in db.list_latest_variants():
+        latest.setdefault(a["repo_id"], []).append(a)
     return templates.TemplateResponse(
         request, "sources.html",
-        context(request, session, repos=db.list_repos(), uploads=uploaded,
+        context(request, session, repos=db.list_repos(), latest=latest, uploads=uploaded,
               max_upload_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), **extra),
     )
 
@@ -228,7 +232,8 @@ def check_repo_now(
     repo_row = db.get_repo(repo_id)
     if repo_row is None:
         raise HTTPException(status_code=404)
-    background_tasks.add_task(poller.check_repo, repo_row)
+    # Check now also restages the current release if its files were deleted.
+    background_tasks.add_task(poller.check_repo, repo_row, True)
     # The Sources page then reloads itself until this check has finished.
     return redirect("/sources", checking=repo_id, since=db.now())
 

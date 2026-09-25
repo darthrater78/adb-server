@@ -16,9 +16,14 @@ router = APIRouter()
 # ---- devices ----
 
 @router.get("/devices", response_class=HTMLResponse)
-def devices_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None, ok: str | None = None):
+def devices_page(request: Request, session: dict = Depends(auth.require_auth), error: str | None = None,
+                 ok: str | None = None, trust: str | None = None):
+    """`trust` names a just-paired device to offer trusting right away; it
+    only shows for a device that exists and isn't trusted yet."""
+    devices = db.list_devices()
+    offer = next((d for d in devices if d["serial"] == trust and not d["trusted"]), None) if trust else None
     return templates.TemplateResponse(
-        request, "devices.html", context(request, session, devices=db.list_devices(), error=error, ok=ok),
+        request, "devices.html", context(request, session, devices=devices, offer=offer, error=error, ok=ok),
     )
 
 
@@ -64,9 +69,9 @@ def _register_paired(request: Request, serial: str, addr: str) -> RedirectRespon
     if db.get_device(serial)["trusted"]:
         return redirect("/devices", ok="Paired")
     if adopted:
-        return redirect("/devices", ok="Paired. It took over the older record for that IP (nickname and history "
-                                        "kept) — trust it again below if it's the same phone")
-    return redirect("/devices", ok="Paired. Trust the device below before it can receive pushes")
+        return redirect("/devices", trust=serial, ok="Paired. It took over the older record for that IP (nickname "
+                                                      "and history kept) — trust it again if it's the same phone")
+    return redirect("/devices", trust=serial, ok="Paired")
 
 
 @router.post("/devices/{serial}/connect")
@@ -110,14 +115,19 @@ def find_device(serial: str, request: Request, session: dict = Depends(auth.requ
 @router.post("/devices/{serial}/trust")
 def trust_device(
     serial: str, request: Request, session: dict = Depends(auth.require_auth),
-    csrf_token: str = Form(...), trusted: str = Form(...),
+    csrf_token: str = Form(...), trusted: str = Form(...), nickname: str | None = Form(None),
 ):
+    """The trust prompt after pairing can name the device in the same step."""
     check_csrf(request, session, csrf_token)
     if db.get_device(serial) is None:
         raise HTTPException(status_code=404)
+    if nickname is not None and nickname.strip():
+        db.set_device_nickname(serial, nickname.strip()[:100])
     db.set_device_trusted(serial, trusted == "1")
     record_audit(request, "device_trust" if trusted == "1" else "device_untrust", serial)
-    return redirect("/devices", ok="Updated")
+    if trusted == "1":
+        return redirect("/devices", ok="Trusted. It can receive pushes now: see Status or Install")
+    return redirect("/devices", ok="Trust revoked")
 
 
 @router.post("/devices/{serial}/nickname")

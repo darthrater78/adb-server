@@ -1,35 +1,50 @@
 {% extends "base.html" %}
 {% block title %}Push status — ADB Server{% endblock %}
 {% block head %}
-{% if install.status in ["pending", "installing"] %}
+{# No JavaScript (CSP): a meta refresh polls while anything runs, and when
+   everything succeeded it takes you back to where the push started. #}
+{% if running %}
 <meta http-equiv="refresh" content="2">
+{% elif done_url %}
+<meta http-equiv="refresh" content="3; url={{ done_url }}">
 {% endif %}
 {% endblock %}
 {% block content %}
-<h1>Push status</h1>
+<h1>{% if installs | length > 1 %}Updating {{ installs | length }} apps{% else %}Push status{% endif %}</h1>
 
-<p>
-  <strong>{{ install.source_label }}</strong> {{ install.tag }} ({{ install.filename }})
-  → {{ install.nickname or install.device_serial }}
-</p>
+{% for install in installs %}
+<section class="card push-progress">
+  <p class="push-progress-what">
+    <strong>{{ install.source_label }}</strong> {{ install.tag }}
+    <span class="muted">→ {{ install.nickname or install.device_serial }}</span>
+  </p>
+  <div class="progress-track">
+    <div class="progress-bar {{ install.status if install.status in ['success', 'failed'] else 'indeterminate' }}"></div>
+  </div>
+  <p class="status-{{ install.status }}">
+    {% if install.status == "pending" %}Queued…
+    {% elif install.status == "installing" %}Installing on device…
+    {% elif install.status == "success" %}Installed
+    {% elif install.status == "failed" %}Install failed
+    {% endif %}
+    {% if install.finished_at %}<span class="muted small">· {{ install.finished_at | when }}</span>{% endif %}
+  </p>
+  {% if install.log and install.status == "failed" %}<pre class="log">{{ install.log }}</pre>
+  {% elif install.log and not running %}<details class="nested"><summary>Log</summary><pre class="log">{{ install.log }}</pre></details>{% endif %}
+</section>
+{% endfor %}
 
-<div class="progress-track">
-  <div class="progress-bar {{ install.status if install.status in ['success', 'failed'] else 'indeterminate' }}"></div>
-</div>
-
-<p class="status-{{ install.status }}">
-  {% if install.status == "pending" %}Queued…
-  {% elif install.status == "installing" %}Installing on device…
-  {% elif install.status == "success" %}Install succeeded
-  {% elif install.status == "failed" %}Install failed
-  {% endif %}
-</p>
-
-{% if install.status in ["pending", "installing"] %}
-<p class="muted small">This page refreshes automatically every 2 seconds.</p>
+{% if running %}
+<p class="muted small">This page refreshes every 2 seconds{% if installs | length > 1 %}; apps install one after another{% endif %}.
+  You can leave it: installs carry on in the background.</p>
+<p><a href="{{ back }}" class="button-link secondary">Back to {{ back_label }}</a></p>
+{% elif done_url %}
+<p class="muted">Done. Taking you back to {{ back_label }}…</p>
+<p><a href="{{ done_url }}" class="button-link">Back to {{ back_label }}</a></p>
 {% else %}
-<p class="muted">Finished {{ install.finished_at | when }}</p>
-{% if install.log %}<pre class="log">{{ install.log }}</pre>{% endif %}
-<p><a href="/status">Device status</a> · <a href="/install">Install another</a> · <a href="/installs">Install history</a></p>
+<p class="actions">
+  <a href="{{ back }}" class="button-link">Back to {{ back_label }}</a>
+  <a href="/installs" class="button-link secondary">Install history</a>
+</p>
 {% endif %}
 {% endblock %}

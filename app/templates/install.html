@@ -42,11 +42,18 @@
 </div>
 {% endif %}
 
-{# `what` (the version) is left off on phones: the row shows it already. #}
-{% macro push_button(label, what="", secondary=false) %}
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<input type="hidden" name="device_serial" value="{{ target.serial }}">
-<button type="submit"{% if secondary %} class="secondary"{% endif %}>{{ label }}{% if what %}<span class="push-what"> {{ what }}</span>{% endif %}</button>
+{# The confirm dialog every push shares with Status; the version in the
+   button is left off on phones, where the row shows it already. #}
+{% from "_push.html" import confirm_dialog with context %}
+{% macro push_confirm(id, back_to, label, version, action, fields, has=none, trigger="Push", secondary=false) %}
+{% call confirm_dialog(id, back_to, "Push " ~ label ~ "?", action, dict(fields, device_serial=target.serial, back="/install"),
+    "Push now", trigger ~ ("<span class=\"push-what\"> " | safe) ~ version ~ ("</span>" | safe) if version else trigger,
+    "push-link" ~ (" secondary" if secondary else "")) %}
+<p>
+  Push <strong>{{ version or "this build" }}</strong> to <strong>{{ target | device_name }}</strong>{% if has %},
+  replacing {{ has.version_name or "the installed version" }}{% endif %}.
+</p>
+{% endcall %}
 {% endmacro %}
 
 {% for g in groups %}
@@ -56,10 +63,39 @@
 {% set has = g.target_has %}
 {% set new_kind = loop.first or loop.previtem.kind != g.kind %}
 {% if new_kind %}
-{% if not show and kinds | length > 1 %}
-<h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
-{% endif %}
-<div class="card row-card">
+{# Each kind is one folded card whose head sums up where its apps stand:
+   how many, the newest, and against the device being pushed to, how many
+   are current, behind or missing. Picking a kind with the pills opens it. #}
+{% set st = namespace(n=0, current=0, behind=0, other=0, missing=0, newest=none, newest_label="") %}
+{% for k in groups if k.kind == g.kind %}
+  {% set kf = k.releases[0].apks[0] %}
+  {% set st.n = st.n + 1 %}
+  {% if not st.newest or kf.downloaded_at > st.newest.downloaded_at %}{% set st.newest = kf %}{% set st.newest_label = k.label %}{% endif %}
+  {% if k.target_has is none or not k.target_has %}{% set st.missing = st.missing + 1 %}
+  {% elif k.target_has.version_code == kf.version_code %}{% set st.current = st.current + 1 %}
+  {% elif k.target_has.version_code and kf.version_code and k.target_has.version_code < kf.version_code %}{% set st.behind = st.behind + 1 %}
+  {% else %}{% set st.other = st.other + 1 %}{% endif %}
+{% endfor %}
+<details class="card row-card device-card item-card kind-group" id="kind-{{ g.kind }}"{% if show %} open{% endif %}>
+  <summary>
+    <span class="device-icon" aria-hidden="true">{% if g.kind == "release" %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>{% elif g.kind == "artifact" %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/></svg>{% else %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>{% endif %}</span>
+    <div>
+      <h2 class="device-name">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
+      <div class="device-meta">
+        {{ st.n }} app{{ "" if st.n == 1 else "s" }}
+        {%- if st.newest %} · newest {{ st.newest_label }} {{ st.newest.version_name or st.newest.tag }}, {{ "uploaded" if g.kind == "upload" else "staged" }} {{ st.newest.downloaded_at | when }}{% endif %}
+      </div>
+    </div>
+    <span class="device-facts">
+      {% if target %}
+      {% if st.behind %}<span class="badge badge-update">{{ st.behind }} to update</span>{% endif %}
+      {% if st.current %}<span class="badge badge-ok">{{ st.current }} up to date</span>{% endif %}
+      {% if st.other %}<span class="badge badge-muted" title="Installed, but a different version from the one staged">{{ st.other }} other version</span>{% endif %}
+      {% if st.missing %}<span class="badge badge-muted">{{ st.missing }} not installed</span>{% endif %}
+      {% endif %}
+      <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </span>
+  </summary>
   <div class="row-grid install-grid row-head" aria-hidden="true"><span>App</span><span>Version</span><span>{{ "On " ~ (target | device_name) if target else "Staged" }}</span><span></span></div>
 {% endif %}
 <section class="row-item app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
@@ -96,17 +132,11 @@
     <div class="row-actions">
       {% if target %}
       {% set primary = not has or has.version_code != first.version_code %}
+      {% set sid = 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id %}
       {% if g.repo_id %}
-      <form method="post" action="/push-latest" class="push-form">
-        <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
-        <input type="hidden" name="back" value="/install">
-        {{ push_button("Push", version, secondary=not primary) }}
-      </form>
+      {{ push_confirm("push-" ~ sid, sid, g.label, version, "/push-latest", {"repo_id": g.repo_id}, has, secondary=not primary) }}
       {% else %}
-      <form method="post" action="/push" class="push-form">
-        <input type="hidden" name="apk_id" value="{{ first.id }}">
-        {{ push_button("Push", first.version_name or "", secondary=not primary) }}
-      </form>
+      {{ push_confirm("push-" ~ sid, sid, g.label, first.version_name or "", "/push", {"apk_id": first.id}, has, secondary=not primary) }}
       {% endif %}
       {% endif %}
     </div>
@@ -141,10 +171,8 @@
           <td data-label="Staged" class="small">{{ a.downloaded_at | when }}</td>
           <td><div class="actions">
             {% if target %}
-            <form method="post" action="/push" class="inline-form">
-              <input type="hidden" name="apk_id" value="{{ a.id }}">
-              {{ push_button("Push this", secondary=true) }}
-            </form>
+            {{ push_confirm("push-apk-" ~ a.id, "apk-" ~ a.id, g.label, a.version_name or rel.tag, "/push", {"apk_id": a.id},
+                g.target_has, trigger="Push this", secondary=true) }}
             {% endif %}
             <form method="post" action="/staged/{{ a.id }}/delete">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -166,7 +194,7 @@
   </details>
 </section>
 {% if loop.last or loop.nextitem.kind != g.kind %}
-</div>
+</details>
 {% endif %}
 {% else %}
 <p class="empty-state">Nothing staged yet. <a href="/sources">Add a source</a>: watch a GitHub repo, or upload an APK.
