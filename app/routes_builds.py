@@ -80,7 +80,8 @@ async def artifacts_page(
             releases = [{"id": r["id"], "tag": r["tag_name"], "name": r.get("name") or "",
                          "published": (r.get("published_at") or "")[:10], "prerelease": bool(r.get("prerelease")),
                          "apks": len(github_client.find_matching_assets(r, repo["asset_glob"])),
-                         "staged": r["tag_name"] in staged_tags, "current": r["tag_name"] == repo["last_tag"]}
+                         "staged": r["tag_name"] in staged_tags, "current": r["tag_name"] == repo["last_tag"],
+                         "notes": (r.get("body") or "").strip()}
                         for r in listed]
             tags = {r["tag"] for r in releases}
             # A build of a release (its tag's run, or its tagged commit) is that

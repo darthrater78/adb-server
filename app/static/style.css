@@ -949,6 +949,7 @@ details.add-details[open] > form { margin-top: 10px; }
 /* Test builds from workflow artifacts. */
 .artifact-origin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 2px; }
 .commit-group { margin: 10px 0 14px; }
+.release-card { margin: 10px 0 14px; } .release-card .actions { margin-top: 8px; }
 .commit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
 details.fold > summary.commit-head { flex-wrap: wrap; gap: 8px; }
 details.fold > summary.commit-head::after { margin-left: auto; }

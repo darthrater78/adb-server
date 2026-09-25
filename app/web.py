@@ -22,7 +22,9 @@ from versions import APP_VERSION
 
 
 REPO_URL = "https://github.com/darthrater78/adb-server"
-RELEASE_NOTES_URL = f"{REPO_URL}/releases/tag/v{APP_VERSION}"
+# A dev build (3.7.0-dev.1) publishes images only, no release: link its tag.
+RELEASE_NOTES_URL = (f"{REPO_URL}/tree/v{APP_VERSION}" if "-" in APP_VERSION
+                     else f"{REPO_URL}/releases/tag/v{APP_VERSION}")
 templates = Jinja2Templates(directory="templates")
 
 

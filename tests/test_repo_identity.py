@@ -409,6 +409,21 @@ def test_artifacts_page_lists_them(authed, artifact_env):
     assert f'action="/repos/{artifact_env["rid"]}/artifacts/5/stage"' in page
 
 
+def test_builds_page_opens_the_newest_and_folds_the_rest(authed, artifact_env):
+    def release(i, tag):
+        return {"id": i, "tag_name": tag, "name": "", "published_at": "2026-09-2%dT00:00:00Z" % i,
+                "body": f"notes for {tag}", "assets": [{"name": "app.apk", "id": i}]}
+    artifact_env["releases"] = [release(3, "v1.2.0"), release(2, "v1.1.0"), release(1, "v1.0.0")]
+    page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
+    fold = page.index("2 older releases")
+    # The newest release is a card with its notes and Stage, above the fold.
+    assert page.index("notes for v1.2.0") < fold and page.index("/releases/3/stage") < fold
+    assert "notes for v1.1.0" not in page
+    assert fold < page.index("/releases/2/stage") and fold < page.index("/releases/1/stage")
+    # The newest commit's builds are shown open.
+    assert '<details class="panel commit-group fold" open>' in page
+
+
 def test_artifacts_page_explains_a_missing_token(authed, artifact_env, monkeypatch):
     monkeypatch.setattr(poller, "GITHUB_TOKEN", None)
     page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
