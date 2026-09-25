@@ -115,3 +115,8 @@ def test_header_links_to_the_repo_and_this_versions_release_notes(authed):
     assert 'href="https://github.com/darthrater78/adb-server"' in header
     assert f'href="https://github.com/darthrater78/adb-server/releases/tag/v{web.APP_VERSION}"' in header
     assert web.APP_VERSION != "unknown"
+
+
+def test_ui_fonts_are_served_as_fonts(client):
+    r = client.get("/static/fonts/figtree-latin-wght-normal.woff2")
+    assert r.status_code == 200 and r.headers["content-type"] == "font/woff2"
