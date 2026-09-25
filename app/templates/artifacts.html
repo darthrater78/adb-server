@@ -11,8 +11,8 @@
 <p class="flash flash-error">{{ problem }}</p>
 <p><a href="/settings/github" class="button-link secondary">Settings → GitHub</a></p>
 {% else %}
-<section class="settings-section">
-  <h2>Releases</h2>
+<details class="settings-section fold" open>
+  <summary><h2>Releases</h2></summary>
   <p class="muted small">Each goes through the same checks as a polled release: uploaded by the owner or a workflow,
     signed with the repo's pinned certificate, and not a debug build. An older release staged here doesn't become
     "latest": auto-update and <strong>Push latest</strong> keep using the newest release.</p>
@@ -46,10 +46,10 @@
     </tbody>
   </table>
   </div>
-</section>
+</details>
 
-<section class="settings-section">
-  <h2>Test builds from workflow artifacts</h2>
+<details class="settings-section fold" open>
+  <summary><h2>Test builds from workflow artifacts</h2></summary>
   <p class="muted small">Staging one is like uploading its zip: it must hold exactly one APK, up to {{ max_mb }} MB,
     whose signature verifies. Debug builds are allowed and marked. Only builds from this repo's own branches are
     listed: never one from a pull request opened from a fork, and never a release's own build (that's under
@@ -72,13 +72,13 @@
       downloads it, checks it and deletes it; staging one records it too.</p>
   </details>
   {% for c in artifacts %}
-  <div class="panel commit-group">
-    <div class="commit-head">
+  <details class="panel commit-group fold" open>
+    <summary class="commit-head">
       <span class="tag-pill" title="Branch">{{ c.branch or "?" }}</span>
       <a class="mono small" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/commit/{{ c.sha }}" rel="noopener noreferrer">{{ c.sha[:7] }}</a>
       <strong class="commit-subject">{{ c.subject or "(no commit message available)" }}</strong>
       <span class="muted small">{{ c.created | when }}</span>
-    </div>
+    </summary>
     {% if c.message and c.message != c.subject %}
     <details><summary>Commit message</summary><pre class="release-notes">{{ c.message }}</pre></details>
     {% endif %}
@@ -120,15 +120,15 @@
       </tbody>
     </table>
     </div>
-  </div>
+  </details>
   {% else %}
   <p class="empty-state">No test builds: none yet, all expired, or all from releases or fork pull requests.</p>
   {% endfor %}
-</section>
+</details>
 {% endif %}
 
-<section class="settings-section" id="signing">
-  <h2>Unsigned builds</h2>
+<details class="settings-section fold" id="signing" open>
+  <summary><h2>Unsigned builds</h2></summary>
   {% if repo.sign_unsigned %}
   <p><span class="badge badge-warn">On</span> Unsigned releases and test builds from this repo are signed with this
     server's key before they're staged.</p>
@@ -150,5 +150,5 @@
     <button type="submit" class="danger">Sign unsigned builds from this repo</button>
   </form>
   {% endif %}
-</section>
+</details>
 {% endblock %}

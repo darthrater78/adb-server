@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.6.0](https://github.com/darthrater78/adb-server/releases/tag/v3.6.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.7.0](https://github.com/darthrater78/adb-server/releases/tag/v3.7.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.6.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.7.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.6.0
+    image: ghcr.io/darthrater78/adb-server/app:3.7.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.6.0), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.7.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -193,7 +193,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.6.0` and add one
+> Then, in your `compose.yaml`, set both images to `3.7.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -229,7 +229,14 @@ Then turn on two-factor sign-in under **Settings → Security**.
 ## Features
 
 The app follows the order you use it in: **Status · Sources · Devices ·
-Install · Settings**.
+Install · Settings**. Every card, panel and section folds away: click its
+heading. Forms you've finished with start folded (**Add a device** once a
+device is paired, the add forms on Sources once something is watched).
+
+**Every push works the same way**, from Status or Install: the button asks
+you to confirm (what, to which device, replacing which version), then a
+progress page follows the install and, once it succeeds, takes you back to
+the page you started on. A failed install stays on its log.
 
 ### Status: the home page
 
@@ -237,7 +244,9 @@ One card per device (tap its header to fold it away), with everything pushed to 
 installed version against the latest staged one, with an **Update** or
 **Install** button, and anything you uploaded and pushed by hand. The button
 picks the right APK for that device's CPU and asks you to confirm first. Each
-card also lists the device's last few installs. **Refresh installed versions**
+card also lists the device's last few installs. When a device has two or more
+updates, **Update all** at the top of its card installs them one after
+another, after one confirmation. **Refresh installed versions**
 asks each device what it has now; versions also refresh after every push.
 Untrusted devices are shown, but offer nothing to push.
 
@@ -258,14 +267,17 @@ page shows a setup checklist instead.
 
 On a phone the nav is a tab bar along the bottom, rows are big enough to tap,
 and Status opens with a summary (**1 update ready**, and an **Update**
-button for it) and a switcher between devices.
+button for it, or **Update all** when a device has several) and a switcher
+between devices.
 
 <img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
 <img src="docs/screenshots/phone-install.png" alt="Install page on a phone" width="195">
 
 ### Sources: repos and uploads
 
-Everything APKs come from, on one page.
+Everything APKs come from, on one page. What they staged is listed on
+[Install](#install), which is where uploads and test builds are pushed or
+deleted; Sources only says how many there are.
 
 **Watch a GitHub repo** as a URL, `owner/repo` or an SSH remote, plus an asset
 glob (default `*.apk`). **Look up repo** first shows what GitHub says it is:
@@ -352,15 +364,18 @@ build whose commit also produced other builds is flagged **Better not install
 this debug build**, with a button to stage the other one instead: a phone with
 the signed app refuses a debug build as an update.
 
-![Sources: repos, a signing-key change awaiting review, and uploads and test builds with their signing badges](docs/screenshots/sources.png)
+![Sources: the add forms folded away, a signing-key change awaiting review, and the watched repos](docs/screenshots/sources.png)
 
 ### Devices
 
 Follow the steps at the top of the page. On the phone, open Settings →
 Developer options → Wireless debugging → *Pair device with pairing code*, then
 enter the pairing address and 6-digit code the phone shows, plus its connect
-address. A new device starts **untrusted**: press **Trust** before it can
-receive pushes.
+address. A new device starts **untrusted**. As soon as it's paired, the page
+asks **Trust it?**, showing its model, serial, CPU and address so you can
+check it's the phone you just paired, with a box to name it at the same
+time. **Not now** leaves it untrusted; **Trust** in the list does the same
+later. Nothing is pushed to an untrusted device.
 
 The connect port changes whenever wireless debugging restarts. Before every
 push, the app reconnects to the device. If the stored port is dead, it scans
@@ -370,7 +385,7 @@ accepts a port only if the device there reports the **same hardware serial**.
 **Reconnect** with its new address. Nicknames, trust and forgetting a device
 are all on this page. Phones list this server as `@adbserver`.
 
-![Devices: the pairing steps and the device list](docs/screenshots/devices.png)
+![Devices: pairing folded away once a device exists, and the paired devices](docs/screenshots/devices.png)
 
 ### Install
 
@@ -381,6 +396,7 @@ on the page goes to (the most recently paired one to start). For a watched
 repo, the newest release is pushed, in the build that fits the device's CPU.
 When a release has several APKs that match the glob (per-ABI builds such as
 `arm64-v8a`, `armeabi-v7a` or universal), all of them are staged, up to 6.
+**Push** asks you to confirm first, like Status (see above).
 **Show details** on a row opens the rest: the package name, release notes, every
 staged file (to push a specific one or delete it) and older versions.
 
@@ -912,6 +928,11 @@ runs `bandit` (Medium and up fails the build) and builds both images. Pushing a
 `v*` tag on the default branch runs `release.yml`, which publishes the images
 to `ghcr.io/darthrater78/adb-server/{app,adb-server}` and creates the
 GitHub release, but only for a commit CI already passed.
+
+**Dev builds** for testing a branch before it merges: tag the branch's
+commit with a suffix, such as `v3.7.0-dev.1` (the part before the `-` must
+match `VERSION`). The same workflow publishes both images as `:3.7.0-dev.1`
+only. It never moves `:latest` or `:3.7`, and it makes no GitHub release.
 
 ## Non-goals
 

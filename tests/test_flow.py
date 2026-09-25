@@ -119,22 +119,24 @@ def test_install_page_without_trusted_devices_points_to_devices(authed):
     assert 'href="/devices">Pair and trust one' in page and "/push-latest" not in page
 
 
-@pytest.mark.parametrize("back,expected", [("/install", "/install"), ("/status", "/status"),
-                                           ("https://evil.example", "/status"), ("/settings", "/status")])
+@pytest.mark.parametrize("back,expected", [("/install", "/install?to=SER&"), ("/status", "/status?"),
+                                           ("https://evil.example", "/status?"), ("/settings", "/status?")])
 def test_push_latest_returns_only_to_known_pages(authed, trusted_device, back, expected):
     db.create_repo("o", "r", "*.apk")  # nothing staged, so the push is refused
     rid = db.list_repos()[0]["id"]
     r = authed.post("/push-latest", data={"csrf_token": CSRF, "device_serial": "SER", "repo_id": rid, "back": back},
                     follow_redirects=False)
-    assert r.headers["location"].startswith(f"{expected}?error=")
+    assert r.headers["location"].startswith(f"{expected}error=")
 
 
-def test_sources_lists_repos_and_uploads_together(authed):
+def test_sources_adds_uploads_and_install_lists_them(authed):
     db.create_repo("octo", "hello", "*.apk")
     up = _stage_upload("dev build")
     page = authed.get("/sources").text
-    assert "octo/hello" in page and "dev build" in page
-    assert f'href="/install#upload-{up}"' in page and f'action="/staged/{up}/delete"' in page
+    assert "octo/hello" in page and "dev build.apk" not in page and f"/staged/{up}/delete" not in page
+    assert '1 upload and test build staged' in page and 'see them on <a href="/install">Install</a>' in page
+    install = authed.get("/install").text
+    assert f'id="upload-{up}"' in install and f'action="/staged/{up}/delete"' in install
 
 
 def test_status_summary_points_at_the_first_update(authed, trusted_device):

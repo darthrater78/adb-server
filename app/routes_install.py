@@ -1,6 +1,8 @@
 """Status, Install and install history: what is staged, what each device
 has, and pushing one to the other."""
 
+from urllib.parse import parse_qs, quote, urlsplit
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -98,14 +100,34 @@ def delete_staged(apk_id: int, request: Request, session: dict = Depends(auth.re
 
 # ---- push ----
 
+# Where a push was started from, and so where its progress page leads back
+# to: the two pages that offer one.
+PUSH_BACK_PATHS = {"/status", "/install"}
+
+
+def _back(path: str, device) -> str:
+    """The page to return to after a push. Install keeps the device it was
+    pushing to selected."""
+    if path == "/install" and device is not None:
+        return f"/install?to={quote(device['serial'], safe='')}"
+    return path if path in PUSH_BACK_PATHS else "/status"
+
+
+def _progress_url(install_ids: list[int], back: str) -> str:
+    ids = ",".join(str(i) for i in install_ids)
+    base = f"/installs/{ids}" if len(install_ids) == 1 else f"/installs/batch?ids={ids}"
+    return f"{base}{'&' if '?' in base else '?'}back={quote(back, safe='')}"
+
+
 def _queue_push(request: Request, background_tasks: BackgroundTasks, device, apk, back: str) -> RedirectResponse:
+    back = _back(back, device)
     try:
         install_id = pushes.create_install(device, apk)
     except pushes.PushRefused as exc:
         return redirect(back, error=str(exc))
     record_audit(request, "push", f"{apk['source_label']} {apk['tag']} ({apk['filename']}) → {device['nickname'] or device['serial']}")
     background_tasks.add_task(pushes.run_push, install_id, dict(device), dict(apk))
-    return RedirectResponse(f"/installs/{install_id}", status_code=303)
+    return RedirectResponse(_progress_url([install_id], back), status_code=303)
 
 
 @router.post("/push")
@@ -116,17 +138,14 @@ def push(
     csrf_token: str = Form(...),
     device_serial: str = Form(...),
     apk_id: int = Form(...),
+    back: str = Form("/install"),
 ):
     check_csrf(request, session, csrf_token)
     device = db.get_device(device_serial)
     apk = db.get_staged_apk(apk_id)
     if device is None or apk is None:
         raise HTTPException(status_code=404)
-    return _queue_push(request, background_tasks, device, apk, "/install")
-
-
-# Where a failed push-latest sends you back to: the two pages that offer it.
-PUSH_BACK_PATHS = {"/status", "/install"}
+    return _queue_push(request, background_tasks, device, apk, back)
 
 
 @router.post("/push-latest")
@@ -142,17 +161,57 @@ def push_latest(
     """Pushes the repo's newest staged release, choosing the APK variant
     that fits the device's CPU."""
     check_csrf(request, session, csrf_token)
-    back = back if back in PUSH_BACK_PATHS else "/status"
     device = db.get_device(device_serial)
     if device is None:
         raise HTTPException(status_code=404)
     variants = [v for v in db.list_latest_variants() if v["repo_id"] == repo_id]
     if not variants:
-        return redirect(back, error="Nothing staged for that repo")
+        return redirect(_back(back, device), error="Nothing staged for that repo")
     apk = selection.pick_variant(variants, device["abis"])
     if apk is None:
-        return redirect(back, error="No APK in the latest release supports this device's CPU")
+        return redirect(_back(back, device), error="No APK in the latest release supports this device's CPU")
     return _queue_push(request, background_tasks, device, apk, back)
+
+
+def _run_pushes(jobs: list[tuple[int, dict, dict]]) -> None:
+    """One device, one install at a time: adb installs to the same phone
+    don't run side by side."""
+    for install_id, device, apk in jobs:
+        pushes.run_push(install_id, device, apk)
+
+
+@router.post("/update-all")
+def update_all(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    device_serial: str = Form(...),
+):
+    """Every update Status offers for the device, queued together. The same
+    checks as a single push, per app: create_install() refuses what it must."""
+    check_csrf(request, session, csrf_token)
+    device = db.get_device(device_serial)
+    if device is None:
+        raise HTTPException(status_code=404)
+    card = next((c for c in _device_cards() if c["device"]["serial"] == device["serial"]), None)
+    latest = db.list_latest_variants()
+    jobs, refused = [], []
+    for app in card["updates"] if card else []:
+        apk = selection.pick_variant([v for v in latest if v["repo_id"] == app["repo_id"]], device["abis"])
+        if apk is None:
+            continue
+        try:
+            install_id = pushes.create_install(device, apk)
+        except pushes.PushRefused as exc:
+            refused.append(f"{apk['source_label']}: {exc}")
+            continue
+        record_audit(request, "push", f"{apk['source_label']} {apk['tag']} ({apk['filename']}) → {device['nickname'] or device['serial']}")
+        jobs.append((install_id, dict(device), dict(apk)))
+    if not jobs:
+        return redirect("/status", error="; ".join(refused) or "Nothing to update on that device")
+    background_tasks.add_task(_run_pushes, jobs)
+    return RedirectResponse(_progress_url([j[0] for j in jobs], "/status"), status_code=303)
 
 
 # ---- status ----
@@ -277,9 +336,49 @@ def installs_page(request: Request, session: dict = Depends(auth.require_auth)):
     return templates.TemplateResponse(request, "installs.html", context(request, session, installs=db.list_installs()))
 
 
+def _safe_back(back: str | None) -> str:
+    """Rebuilt from its parts, never echoed: one of the two pages, plus the
+    device Install had selected if that device exists."""
+    parts = urlsplit(back or "")
+    if parts.scheme or parts.netloc or parts.path not in PUSH_BACK_PATHS:
+        return "/status"
+    to = parse_qs(parts.query).get("to", [None])[0]
+    return _back(parts.path, db.get_device(to) if to else None)
+
+
+def _progress_page(request: Request, session: dict, installs: list, back: str | None) -> HTMLResponse:
+    """Where a push goes after it's queued. Refreshes while anything is
+    running; when everything succeeded it returns to the page it came from."""
+    back = _safe_back(back)
+    running = any(i["status"] in ("pending", "installing") for i in installs)
+    all_ok = not running and all(i["status"] == "success" for i in installs)
+    names = ", ".join(f"{i['source_label']} {i['tag']}" for i in installs)
+    sep = "&" if "?" in back else "?"
+    done_url = f"{back}{sep}ok={quote('Installed ' + names)}" if all_ok else None
+    return templates.TemplateResponse(
+        request, "install_status.html",
+        context(request, session, installs=installs, running=running, back=back, done_url=done_url,
+                back_label="Install" if back.startswith("/install") else "Status"),
+    )
+
+
+@router.get("/installs/batch", response_class=HTMLResponse)
+def install_batch_page(request: Request, session: dict = Depends(auth.require_auth), ids: str = "",
+                       back: str | None = None):
+    try:
+        wanted = [int(i) for i in ids.split(",") if i][:50]
+    except ValueError:
+        raise HTTPException(status_code=404) from None
+    installs = [i for i in (db.get_install(n) for n in wanted) if i is not None]
+    if not installs:
+        raise HTTPException(status_code=404)
+    return _progress_page(request, session, installs, back)
+
+
 @router.get("/installs/{install_id}", response_class=HTMLResponse)
-def install_status_page(install_id: int, request: Request, session: dict = Depends(auth.require_auth)):
+def install_status_page(install_id: int, request: Request, session: dict = Depends(auth.require_auth),
+                        back: str | None = None):
     install = db.get_install(install_id)
     if install is None:
         raise HTTPException(status_code=404)
-    return templates.TemplateResponse(request, "install_status.html", context(request, session, install=install))
+    return _progress_page(request, session, [install], back)

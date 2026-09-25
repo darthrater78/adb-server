@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.7.0 — 2026-09-25
+
+- Changed: **every push works the same way.** Push on Install now asks you to
+  confirm, like Update on Status, naming the version, the device and what it
+  replaces. The progress page that follows takes you back where you started
+  (Install keeps the device you were pushing to) once the install succeeds;
+  a failed one stays put with its log.
+- Added: **Update all.** A device with two or more updates gets one button
+  at the top of its Status card (and in the phone summary) that installs
+  them all, one after another, after one confirmation, with one progress
+  page for the lot.
+- Added: **trust right after pairing.** Once a phone pairs, Devices asks
+  whether to trust it, showing its model, serial, CPU and address, with a
+  box to name it in the same step. No more hunting for Trust in the list.
+- Changed: **every block folds.** Cards, panels and sections on every page
+  (Install's groups, Sources' forms and repos, Devices, every Settings
+  section, each commit on Builds) collapse from their heading. Forms you're
+  done with start folded: Add a device once one is paired, the add forms on
+  Sources once something is watched.
+- Changed: **Sources no longer repeats Install.** Its "Uploads and test
+  builds" table is gone; they're listed, pushed and deleted on Install, and
+  Sources says how many there are.
+- Added: **dev builds.** A tag with a suffix (`v3.7.0-dev.1`) may be pushed
+  from any branch: it publishes both images under that exact version only,
+  never `:latest` or `:X.Y`, and makes no GitHub release.
+
 ## 3.6.0 — 2026-09-24
 
 - Changed: **a new look.** Calmer cards on a warm neutral ground, one teal

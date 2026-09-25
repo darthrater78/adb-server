@@ -42,11 +42,18 @@
 </div>
 {% endif %}
 
-{# `what` (the version) is left off on phones: the row shows it already. #}
-{% macro push_button(label, what="", secondary=false) %}
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<input type="hidden" name="device_serial" value="{{ target.serial }}">
-<button type="submit"{% if secondary %} class="secondary"{% endif %}>{{ label }}{% if what %}<span class="push-what"> {{ what }}</span>{% endif %}</button>
+{# The confirm dialog every push shares with Status; the version in the
+   button is left off on phones, where the row shows it already. #}
+{% from "_push.html" import confirm_dialog with context %}
+{% macro push_confirm(id, back_to, label, version, action, fields, has=none, trigger="Push", secondary=false) %}
+{% call confirm_dialog(id, back_to, "Push " ~ label ~ "?", action, dict(fields, device_serial=target.serial, back="/install"),
+    "Push now", trigger ~ ("<span class=\"push-what\"> " | safe) ~ version ~ ("</span>" | safe) if version else trigger,
+    "push-link" ~ (" secondary" if secondary else "")) %}
+<p>
+  Push <strong>{{ version or "this build" }}</strong> to <strong>{{ target | device_name }}</strong>{% if has %},
+  replacing {{ has.version_name or "the installed version" }}{% endif %}.
+</p>
+{% endcall %}
 {% endmacro %}
 
 {% for g in groups %}
@@ -55,9 +62,11 @@
 {% set version = first.version_name or latest.tag %}
 {% set has = g.target_has %}
 {% set new_kind = loop.first or loop.previtem.kind != g.kind %}
+{% set folded = not show and kinds | length > 1 %}
 {% if new_kind %}
-{% if not show and kinds | length > 1 %}
-<h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2>
+{% if folded %}
+<details class="fold kind-group" open>
+<summary><h2 class="section-title">{{ {"release": "Releases", "artifact": "Test builds from workflow artifacts", "upload": "Uploads"}[g.kind] }}</h2></summary>
 {% endif %}
 <div class="card row-card">
   <div class="row-grid install-grid row-head" aria-hidden="true"><span>App</span><span>Version</span><span>{{ "On " ~ (target | device_name) if target else "Staged" }}</span><span></span></div>
@@ -96,17 +105,11 @@
     <div class="row-actions">
       {% if target %}
       {% set primary = not has or has.version_code != first.version_code %}
+      {% set sid = 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id %}
       {% if g.repo_id %}
-      <form method="post" action="/push-latest" class="push-form">
-        <input type="hidden" name="repo_id" value="{{ g.repo_id }}">
-        <input type="hidden" name="back" value="/install">
-        {{ push_button("Push", version, secondary=not primary) }}
-      </form>
+      {{ push_confirm("push-" ~ sid, sid, g.label, version, "/push-latest", {"repo_id": g.repo_id}, has, secondary=not primary) }}
       {% else %}
-      <form method="post" action="/push" class="push-form">
-        <input type="hidden" name="apk_id" value="{{ first.id }}">
-        {{ push_button("Push", first.version_name or "", secondary=not primary) }}
-      </form>
+      {{ push_confirm("push-" ~ sid, sid, g.label, first.version_name or "", "/push", {"apk_id": first.id}, has, secondary=not primary) }}
       {% endif %}
       {% endif %}
     </div>
@@ -141,10 +144,8 @@
           <td data-label="Staged" class="small">{{ a.downloaded_at | when }}</td>
           <td><div class="actions">
             {% if target %}
-            <form method="post" action="/push" class="inline-form">
-              <input type="hidden" name="apk_id" value="{{ a.id }}">
-              {{ push_button("Push this", secondary=true) }}
-            </form>
+            {{ push_confirm("push-apk-" ~ a.id, "apk-" ~ a.id, g.label, a.version_name or rel.tag, "/push", {"apk_id": a.id},
+                g.target_has, trigger="Push this", secondary=true) }}
             {% endif %}
             <form method="post" action="/staged/{{ a.id }}/delete">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -167,6 +168,7 @@
 </section>
 {% if loop.last or loop.nextitem.kind != g.kind %}
 </div>
+{% if folded %}</details>{% endif %}
 {% endif %}
 {% else %}
 <p class="empty-state">Nothing staged yet. <a href="/sources">Add a source</a>: watch a GitHub repo, or upload an APK.

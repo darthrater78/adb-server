@@ -17,7 +17,8 @@
     <span class="badge badge-update">update available</span>
   </div>
 
-  <h3>Presets</h3>
+  <details class="fold sub" open>
+  <summary><h3>Presets</h3></summary>
   <form method="post" action="/settings/appearance" class="presets" aria-label="Colour pairs">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for name, pair in presets.items() %}
@@ -29,9 +30,11 @@
     </button>
     {% endfor %}
   </form>
+  </details>
 
   {% if saved_colours %}
-  <h3>Saved</h3>
+  <details class="fold sub" open>
+  <summary><h3>Saved</h3></summary>
   <form method="post" action="/settings/appearance" class="presets" aria-label="Saved colour pairs">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for s in saved_colours %}
@@ -48,9 +51,11 @@
     </span>
     {% endfor %}
   </form>
+  </details>
   {% endif %}
 
-  <h3>Custom</h3>
+  <details class="fold sub" open>
+  <summary><h3>Custom</h3></summary>
   <form method="post" action="/settings/appearance" class="custom-pair">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="colour-field">
@@ -73,6 +78,7 @@
   </form>
   <p class="muted small">Tap a circle to choose a colour, then Apply — or name it and Save as preset to keep it
     in Saved. Saving an existing name updates it.</p>
+  </details>
 
 </section>
 {% endblock %}

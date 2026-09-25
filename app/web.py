@@ -154,7 +154,7 @@ def redirect(path: str, status_code: int = 303, **params) -> RedirectResponse:
     path, hash_, fragment = path.partition("#")
     if params:
         qs = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v is not None)
-        path = f"{path}?{qs}" if qs else path
+        path = f"{path}{'&' if '?' in path else '?'}{qs}" if qs else path
     return RedirectResponse(path + hash_ + fragment, status_code=status_code)
 
 

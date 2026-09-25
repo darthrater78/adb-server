@@ -4,8 +4,28 @@
 <h1>Devices</h1>
 <p class="page-intro muted">Phones this server can push to. See what each one has on <a href="/status">Status</a>.</p>
 
-<section class="panel">
-  <h2>Add a device</h2>
+{% if offer %}
+<details class="panel panel-warn fold trust-offer" id="trust-offer" open>
+  <summary><h2>Trust {{ offer | device_name }}?</h2></summary>
+  <p>It's paired. Nothing is pushed to a device until you trust it, so check this is the phone you just paired.</p>
+  <dl>
+    {% if offer.model %}<dt>Model</dt><dd>{{ offer.model }}</dd>{% endif %}
+    <dt>Serial</dt><dd class="mono small">{{ offer.serial }}</dd>
+    <dt>CPU</dt><dd class="mono small">{{ offer.abis.split()[0] if offer.abis else "unknown" }}</dd>
+    <dt>Address</dt><dd class="mono small">{{ offer.last_connect_addr or "—" }}</dd>
+  </dl>
+  <form method="post" action="/devices/{{ offer.serial | urlencode }}/trust" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="trusted" value="1">
+    <label>Name <input type="text" name="nickname" maxlength="100" value="{{ offer.nickname or '' }}" placeholder="optional, e.g. Pixel 8"></label>
+    <button type="submit">Trust</button>
+    <a href="/devices" class="button-link secondary">Not now</a>
+  </form>
+</details>
+{% endif %}
+
+<details class="panel fold"{% if not devices %} open{% endif %}>
+  <summary><h2>Add a device</h2></summary>
   <ol class="steps">
     <li>On the phone, turn on <strong>Settings → Developer options → Wireless debugging</strong>. The phone and
       this server must be on the same network.</li>
@@ -24,8 +44,10 @@
   </form>
   <p class="muted small">The connect port changes whenever wireless debugging restarts. Pushes find the new port
     automatically by scanning the device's last known IP; <strong>Find</strong> does the same on demand.</p>
-</section>
+</details>
 
+<details class="fold" open>
+<summary><h2 class="section-title">Paired devices</h2></summary>
 <div class="table-wrap">
 
 <table>
@@ -89,4 +111,5 @@
   </tbody>
 </table>
 </div>
+</details>
 {% endblock %}

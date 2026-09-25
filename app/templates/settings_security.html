@@ -6,7 +6,8 @@
 <p class="page-intro muted">Two-factor sign-in and the browsers trusted to skip it.</p>
 
 <section class="settings-section">
-  <h3>Two-factor sign-in</h3>
+  <details class="fold sub" open>
+  <summary><h3>Two-factor sign-in</h3></summary>
   {% if not mfa_enabled %}
   <p class="muted">After the password, also ask for a 6-digit code from an authenticator app on your phone
     (Google Authenticator, Aegis, 1Password, Bitwarden and the like). A browser can be trusted for
@@ -30,8 +31,12 @@
     <button type="submit" class="danger" formaction="/settings/mfa/disable">Turn off two-factor</button>
   </form>
   <p class="muted small">Both need a current code (or a recovery code). New recovery codes replace all the old ones.</p>
+  {% endif %}
+  </details>
 
-  <h3>Trusted browsers</h3>
+  {% if mfa_enabled %}
+  <details class="fold sub" open>
+  <summary><h3>Trusted browsers</h3></summary>
   {% if trusted_browsers %}
   <div class="table-wrap">
   <table>
@@ -74,8 +79,11 @@
         off (and signs everyone out), so you can sign in with the password and set it up again.</li>
     </ul>
   </details>
+  </details>
   {% endif %}
-  <h3>This server's signing keys</h3>
+
+  <details class="fold sub" open>
+  <summary><h3>This server's signing keys</h3></summary>
   {% if signing_keys %}
   <ul class="signing-keys">
     {% for k in signing_keys %}
@@ -89,5 +97,6 @@
   <p class="muted small">None yet. A source's key is created the first time an unsigned build from it is signed, for a
     source you opted in.</p>
   {% endif %}
+  </details>
 </section>
 {% endblock %}

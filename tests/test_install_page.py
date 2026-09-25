@@ -54,8 +54,14 @@ def test_a_card_shows_its_essentials_and_hides_the_rest(authed, two_devices):
     page = authed.get("/install").text
     card = page[page.index(f'id="app-{rid}"'):]
     head, more = card.split('<details class="app-card-more">', 1)
-    assert 'Push<span class="push-what"> 2.0</span>' in head and "Release" in head and "1 build" in head
+    assert 'Push<span class="push-what"> 2.0</span></a>' in head and "Release" in head and "1 build" in head
     assert f'id="apk-{apk_id}"' in more and "Delete file" in more
+
+
+def _head(page, rid):
+    """A card's row, without its confirm dialog (which names the target)."""
+    head = page.split(f'id="app-{rid}"', 1)[1].split("app-card-more", 1)[0]
+    return head.split('class="modal"', 1)[0]
 
 
 def test_a_card_says_which_devices_already_have_it(authed, two_devices):
@@ -65,7 +71,7 @@ def test_a_card_says_which_devices_already_have_it(authed, two_devices):
     db.upsert_device_package("AAA", "com.example", True, 1, "1.0")  # older: not "on"
     db.upsert_device_package("EVIL", "com.example", True, 2, "2.0")  # untrusted: not shown
     def head(query=""):
-        return authed.get("/install" + query).text.split(f'id="app-{rid}"', 1)[1].split("app-card-more", 1)[0]
+        return _head(authed.get("/install" + query).text, rid)
     assert "Has 1.0" in head("?to=AAA") and "· also on Tablet\n" in head("?to=AAA")
     assert "Pixel" not in head("?to=AAA") and "EVIL" not in head("?to=AAA")
     # The target itself isn't listed again: its column already says so.
@@ -113,7 +119,7 @@ def test_a_row_says_what_the_target_has(authed, two_devices, have, text, solid):
     _stage(rid, "v2", "app.apk", version_code=2, version_name="2.0")
     if have:
         db.upsert_device_package("BBB", "com.example", True, *have)
-    head = authed.get("/install").text.split(f'id="app-{rid}"', 1)[1].split("app-card-more", 1)[0]
+    head = _head(authed.get("/install").text, rid)
     assert f"{text} · staged" in head
     # The push is the solid button only when it would change something.
-    assert ('<button type="submit">Push<span class="push-what"> 2.0' in head) == solid
+    assert (f'href="#push-app-{rid}" class="button-link push-link">Push<span class="push-what"> 2.0' in head) == solid

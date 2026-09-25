@@ -65,6 +65,7 @@ with sync_playwright() as p:
                                  ("/settings/notifications", "settings-notifications", True)):
             shot(page, path, name, full)
         page.goto(URL + "/sources")
+        page.click("summary:has-text('Watch a GitHub repo')")  # folded once repos are watched
         page.fill("input[name=repo_url]", "example-dev/weather-app")
         page.click("text=Look up repo")
         page.wait_for_load_state()

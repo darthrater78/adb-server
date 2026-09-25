@@ -1,0 +1,22 @@
+{# Every push on Status and Install goes through this: a link that opens a
+   CSS :target dialog (the CSP allows no JavaScript), and a CSRF-protected
+   POST inside it. `back_to` is the id the dialog's Cancel returns to.
+   Import it `with context` so csrf_token is in scope. #}
+{% macro confirm_dialog(id, back_to, title, action, fields, submit, trigger, trigger_class="") %}
+<a href="#{{ id }}" class="button-link{{ ' ' ~ trigger_class if trigger_class }}">{{ trigger }}</a>
+<div id="{{ id }}" class="modal" role="dialog" aria-modal="true" aria-labelledby="{{ id }}-title">
+  <a href="#{{ back_to }}" class="modal-backdrop" aria-label="Cancel" tabindex="-1"></a>
+  <div class="modal-card">
+    <h2 id="{{ id }}-title">{{ title }}</h2>
+    {{ caller() }}
+    <p class="muted small">Apps keep their data. You'll see the progress, then come back here.</p>
+    <form method="post" action="{{ action }}" class="modal-actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% for name, value in fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">
+      {% endfor %}
+      <a href="#{{ back_to }}" class="button-link secondary">Cancel</a>
+      <button type="submit">{{ submit }}</button>
+    </form>
+  </div>
+</div>
+{% endmacro %}

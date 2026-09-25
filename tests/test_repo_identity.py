@@ -757,11 +757,11 @@ def test_builds_of_one_commit_are_grouped_with_its_message(authed, artifact_env,
         78: {"title": "Release build", "event": "push", "number": 5, "message": "fix: faster reconnects\n\nBody.", "subject": "fix: faster reconnects"},
     }
     page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
-    assert page.count('class="panel commit-group"') == 2
-    first = page[page.index('class="panel commit-group"'):page.rindex('class="panel commit-group"')]
+    assert page.count('class="panel commit-group fold"') == 2
+    first = page[page.index('class="panel commit-group fold"'):page.rindex('class="panel commit-group fold"')]
     assert "app-debug" in first and "app-release" in first and "fix: faster reconnects" in first
     assert "Body." in first and "CI #12" in first and "Release build #5" in first
-    assert "(no commit message available)" in page[page.rindex('class="panel commit-group"'):]
+    assert "(no commit message available)" in page[page.rindex('class="panel commit-group fold"'):]
 
 
 def test_list_runs_parses_titles_and_messages(monkeypatch):
@@ -881,7 +881,7 @@ def test_staging_records_the_other_builds_of_the_commit(authed, artifact_env, mo
     assert apk["artifact_repo_id"] == artifact_env["rid"]
 
 
-@pytest.mark.parametrize("path", ["/sources", "/install"])
+@pytest.mark.parametrize("path", ["/install"])
 def test_a_debug_build_advises_its_signed_sibling(authed, artifact_env, monkeypatch, path):
     _stage_debug_with_sibling(authed, artifact_env, monkeypatch)  # artifact_env signs it as debug
     page = authed.get(path).text
@@ -892,7 +892,7 @@ def test_a_debug_build_advises_its_signed_sibling(authed, artifact_env, monkeypa
 def test_a_signed_build_gets_the_signed_badge_and_no_advice(authed, artifact_env, monkeypatch):
     monkeypatch.setattr(apk_verify, "verify_signature", lambda path: apk_verify.SignerInfo("d" * 64, False))
     _stage_debug_with_sibling(authed, artifact_env, monkeypatch)
-    for path in ("/sources", "/install"):
+    for path in ("/install",):
         page = authed.get(path).text
         assert "title=\"Signed with the developer's own key\">signed</span>" in page
         assert "Better not install" not in page

@@ -697,7 +697,7 @@ section { margin-bottom: 24px; }
 .steps li + li { margin-top: 4px; }
 
 .add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 8px; }
-.add-grid .panel h2 { margin: 0 0 10px; }
+.add-grid .panel h2 { margin: 0; }
 .add-grid .panel > p:last-child { margin: 12px 0 0; }
 .stack-form { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
 .stack-form label { display: flex; flex-direction: column; gap: 4px; }
@@ -880,10 +880,58 @@ details.nested > summary { font-size: 13px; }
 .commit-subject { margin: 3px 0 0; font-size: 13px; color: var(--fg-soft); overflow-wrap: anywhere; }
 
 @media (max-width: 960px) {
-  .push-form, .push-form button { width: 100%; }
+  .push-form, .push-form button, .row-actions > .push-link { width: 100%; text-align: center; }
   /* The cell already draws the divider; its action group doesn't repeat it. */
   td > .actions { border-top: none; padding-top: 0; margin-top: 0; }
 }
+
+/* ---- Collapsible blocks ----
+   Every card, panel and section is a <details class="fold">: its heading is
+   the summary, with a chevron drawn in CSS (no markup, no JavaScript). */
+details.fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  color: var(--fg);
+  font-size: inherit;
+  font-weight: inherit;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary > h2, details.fold > summary > h3 { margin: 0; flex: 1; min-width: 0; }
+details.fold > summary::after {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 0 6px 4px 0;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+}
+details.fold[open] > summary::after { transform: rotate(-135deg); margin: 4px 6px 0 0; }
+details.fold > summary:hover::after { border-color: var(--fg); }
+details.panel.fold[open] > summary, details.fold.sub[open] > summary { margin-bottom: 10px; }
+details.settings-section.fold[open] > summary { margin-bottom: 8px; }
+details.fold.sub { margin: 22px 0 6px; }
+details.fold.sub > summary > h3 { font-size: 15px; }
+/* A bare section heading (Install's kinds, Sources' repos, Devices' list). */
+details.fold:not(.panel):not(.settings-section):not(.sub) > summary { margin: 28px 0 10px; }
+details.fold > summary > .section-title { margin: 0; }
+main > details.panel.fold, .add-grid > details.panel.fold { margin-bottom: 16px; }
+.add-grid { align-items: start; }
+
+/* Status: "Update all" under a device's head; the dialog's list of apps. */
+.card-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.dialog-list { margin: 0 0 10px; padding-left: 20px; }
+.dialog-list li { margin: 2px 0; }
+
+/* Push progress: one card per install. */
+.push-progress { margin-bottom: 12px; }
+.push-progress-what { margin: 0 0 10px; }
+.push-progress p:last-child { margin-bottom: 0; }
 
 /* ---- Settings: overview cards and sub-pages ---- */
 .settings-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 18px; font-size: 14px; }
@@ -906,6 +954,8 @@ details.add-details[open] > form { margin-top: 10px; }
 .artifact-origin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 2px; }
 .commit-group { margin: 10px 0 14px; }
 .commit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+details.fold > summary.commit-head { flex-wrap: wrap; gap: 8px; }
+details.fold > summary.commit-head::after { margin-left: auto; }
 .commit-group table { margin-top: 6px; }
 .commit-head .tag-pill, .artifact-origin .tag-pill { white-space: normal; overflow-wrap: anywhere; max-width: 100%; height: auto; min-height: 22px; }
 .debug-advice { margin: 8px 0; font-size: 14px; white-space: normal; } .debug-advice .actions { margin-top: 8px; }
@@ -921,7 +971,8 @@ fieldset.choice legend { font-size: 13px; font-weight: 600; color: var(--muted);
 @media (min-width: 961px) {
   .table-wrap { overflow-x: auto; }
   /* A page-level table sits in a card, like everything else. */
-  main > .table-wrap, main > section:not(.panel):not(.card) > .table-wrap, .settings-section > .table-wrap {
+  main > .table-wrap, main > section:not(.panel):not(.card) > .table-wrap, .settings-section > .table-wrap,
+  main > details.fold:not(.panel) > .table-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);

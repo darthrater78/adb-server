@@ -35,6 +35,12 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          # A dev build (v3.7.0-dev.1) may come from a branch: it only publishes
+          # images under its own full version, never :latest or :X.Y, and makes
+          # no GitHub release (see the publish job).
+          case "$GITHUB_REF_NAME" in
+            *-*) echo "Pre-release tag $GITHUB_REF_NAME: any branch may build it."; exit 0 ;;
+          esac
           if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
             echo "::error::Tag $GITHUB_REF_NAME is not on $DEFAULT_BRANCH. Releases come from the default branch only."
             exit 1
@@ -46,6 +52,8 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
+          # v3.7.0-dev.1 is a build of the 3.7.0 in VERSION.
+          version="${version%%-*}"
           file_version="$(tr -d '[:space:]' < VERSION)"
           if [ "$file_version" != "$version" ]; then
             echo "::error::Tag $TAG does not match VERSION ($file_version). Bump VERSION and re-tag."
@@ -184,6 +192,8 @@ jobs:
   publish:
     name: Create GitHub release
     needs: [gate, images]
+    # Dev builds (any tag with a -suffix) publish images only.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

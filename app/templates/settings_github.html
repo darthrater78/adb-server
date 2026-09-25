@@ -6,8 +6,8 @@
 <p class="page-intro muted">A token lets ADB Server read private repos, stage workflow artifacts, and poll without
   GitHub's anonymous limit of 60 requests an hour. It only ever needs read access.</p>
 
-<section class="settings-section">
-  <h2>Token</h2>
+<details class="settings-section fold" open>
+  <summary><h2>Token</h2></summary>
   <p class="status-line">
     {% if token_source == "settings" %}<span class="badge badge-ok">Saved here</span> encrypted, never shown again.
       {% if token_expiry %}
@@ -55,11 +55,11 @@
     {% endif %}
   </div>
   {% endif %}
-</section>
+</details>
 
 {% if token_source and token_source != "unreadable" %}
-<section class="settings-section">
-  <h2>Access</h2>
+<details class="settings-section fold" open>
+  <summary><h2>Access</h2></summary>
   <p class="muted small">Checked against GitHub just now, for each watched repo.</p>
   {% if access %}
   <div class="table-wrap">
@@ -84,11 +84,11 @@
   {% else %}
   <p class="muted">No repos watched yet. Add one on <a href="/sources">Sources</a>.</p>
   {% endif %}
-</section>
+</details>
 {% endif %}
 
-<section class="settings-section">
-  <h2>Artifact list</h2>
+<details class="settings-section fold" open>
+  <summary><h2>Artifact list</h2></summary>
   <p class="muted small">What <strong>Artifacts</strong> on a repo shows. This only tidies the list: whatever you
     stage still has to be a zip holding exactly one APK whose signature verifies.</p>
   <form method="post" action="/settings/artifacts" class="inline-form">
@@ -98,5 +98,5 @@
     <label>Name pattern <input type="text" name="name_glob" maxlength="100" size="16" value="{{ artifact_filter.name_glob }}" placeholder="e.g. *apk*"></label>
     <button type="submit" class="secondary">Save</button>
   </form>
-</section>
+</details>
 {% endblock %}
