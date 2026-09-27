@@ -66,10 +66,10 @@ def test_install_push_confirms_first_like_status(authed, device):
 
 
 @pytest.mark.parametrize("back,lands", [
-    ("/apps", "/apps?to=SER&open=repo-{rid}#repo-{rid}"),
-    ("/library", "/status?open={dom}#app-{rid}-{dom}"),
-    ("/status", "/status?open={dom}#app-{rid}-{dom}"),
-    ("https://evil.example/", "/status?open={dom}#app-{rid}-{dom}")])
+    ("/apps", "/apps?to=SER&at=repo-{rid}&open=repo-{rid}#repo-{rid}"),
+    ("/library", "/status?at=app-{rid}-{dom}&open={dom}#app-{rid}-{dom}"),
+    ("/status", "/status?at=app-{rid}-{dom}&open={dom}#app-{rid}-{dom}"),
+    ("https://evil.example/", "/status?at=app-{rid}-{dom}&open={dom}#app-{rid}-{dom}")])
 def test_a_push_lands_back_on_the_row_it_came_from(authed, device, queued, back, lands):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
@@ -83,8 +83,13 @@ def test_the_row_shows_its_push_running_then_done(authed, device):
     rid = db.create_repo("o", "r", "*.apk")
     apk = _stage(rid, "v2", "app.apk")
     install = db.insert_install("SER", apk, status="installing")
-    page = authed.get(f"/status?open={DOM}").text
-    assert '<meta http-equiv="refresh" content="2">' in page  # reloads itself while it runs
+    page = authed.get(f"/status?at=app-{rid}-{DOM}&open={DOM}").text
+    # It reloads itself while the push runs: to a new URL each time (the same
+    # URL, #fragment and all, is only a scroll to a browser), on the same row.
+    assert (f'<meta http-equiv="refresh" content="2; url=/status?at=app-{rid}-{DOM}&amp;open={DOM}&amp;tick=1'
+            f'#app-{rid}-{DOM}">') in page
+    again = authed.get(f"/status?at=app-{rid}-{DOM}&open={DOM}&tick=1").text
+    assert f'&amp;tick=2#app-{rid}-{DOM}">' in again
     row = page[page.index(f'id="app-{rid}-{DOM}"'):]
     row = row[:row.index('<div class="row-follow">')]
     assert "Installing 2.0…" in row and 'action="/push-latest"' not in row  # no second push while one runs
@@ -114,7 +119,8 @@ def test_the_progress_page_refreshes_while_running_and_never_leaves(authed, devi
     apk = _stage(rid, "v2", "app.apk")
     install = db.insert_install("SER", apk, status="installing")
     page = authed.get(f"/installs/{install}?back=%2Fapps%3Fto%3DSER").text
-    assert '<meta http-equiv="refresh" content="2">' in page and 'href="/apps?to=SER"' in page
+    assert ('<meta http-equiv="refresh" content="2; url=/installs/1?back=%2Fapps%3Fto%3DSER&amp;tick=1">' in page
+            and 'href="/apps?to=SER"' in page)
     db.finish_install(install, "success", "Success")
     page = authed.get(f"/installs/{install}?back=%2Fapps%3Fto%3DSER").text
     # Opened from history, a finished push stays put.
@@ -160,7 +166,8 @@ def test_update_all_queues_every_update_one_after_another(authed, device, queued
     assert sorted(p for _, p in queued) == ["com.one", "com.two"]
     page = authed.get(r.headers["location"]).text
     activity = page[page.index('class="card activity"'):]
-    assert activity.count('class="activity-row"') == 2 and '<meta http-equiv="refresh" content="2">' in page
+    assert activity.count('class="activity-row"') == 2
+    assert f'<meta http-equiv="refresh" content="2; url=/status?open={DOM}&amp;tick=1#{DOM}">' in page
 
 
 def test_update_all_refuses_an_untrusted_device(authed, device, queued):

@@ -63,6 +63,7 @@
     {% set sig = signing.get(a.id) %}
     {% set st = staged_builds.get(a.id) %}
     <div class="build-row" id="artifact-{{ a.id }}">
+      {% if open_card == "artifact-" ~ a.id %}<div class="card-flash">{% include "_flash.html" %}</div>{% endif %}
       <div class="build-info">
         <div class="build-line">
           <strong class="build-name">{{ a.name }}</strong>
@@ -166,7 +167,9 @@
   {% if artifacts %}
   {{ commit_group(artifacts[0]) }}
   {% if artifacts | length > 1 %}
-  <details class="fold sub">
+  {# Open when the build an action was just taken on is in it. #}
+  {% set older_ids = artifacts[1:] | map(attribute="artifacts") | sum(start=[]) | map(attribute="a.id") | map("string") | list %}
+  <details class="fold sub"{% if open_card and open_card.startswith("artifact-") and open_card[9:] in older_ids %} open{% endif %}>
     <summary><h3>{{ artifacts | length - 1 }} older commit{{ "" if artifacts | length == 2 else "s" }}</h3>
       <span class="fold-peek">{% for c in artifacts[1:4] %}<span class="tag-pill" title="{{ c.subject }}">{{ c.branch or "?" }} @ {{ c.sha[:7] }}</span>{% endfor %}{% if artifacts | length > 4 %}<span class="muted small">+{{ artifacts | length - 4 }} more</span>{% endif %}</span></summary>
     {% for c in artifacts[1:] %}{{ commit_group(c) }}{% endfor %}
@@ -178,8 +181,9 @@
 </section>
 {% endif %}
 
-<details class="settings-section fold" id="signing">
+<details class="settings-section fold" id="signing"{% if open_card == "signing" %} open{% endif %}>
   <summary><h2>Unsigned builds</h2></summary>
+  {% if open_card == "signing" %}<div class="card-flash">{% include "_flash.html" %}</div>{% endif %}
   {% if repo.sign_unsigned %}
   <p><span class="badge badge-warn">On</span> Unsigned releases and test builds from this repo are signed with this
     server's key before they're staged.</p>

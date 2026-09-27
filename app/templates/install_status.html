@@ -3,7 +3,7 @@
 {% block title %}Push status — ADB Server{% endblock %}
 {% block head %}
 {# No JavaScript (CSP): a meta refresh polls while anything runs. #}
-{% if running %}<meta http-equiv="refresh" content="2">{% endif %}
+{% if running %}<meta http-equiv="refresh" content="2; url={{ reload_url }}">{% endif %}
 {% endblock %}
 {% block content %}
 <p class="breadcrumb"><a href="/status">Status</a> / <a href="/installs">Install history</a> /</p>

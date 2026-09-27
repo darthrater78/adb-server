@@ -207,10 +207,14 @@ def status_row_id(apk, device) -> str:
 
 def _landing(back: str, device, apk, **flash) -> RedirectResponse:
     """Back where the push started, opened on the card and row it came from,
-    which shows it running (the page refreshes itself until it's done)."""
+    which shows it running (the page refreshes itself until it's done).
+    `at` names the row again, for those reloads: a browser never sends the
+    #fragment, and without it each one would jump back to the card's top."""
     if back.startswith("/apps"):
-        return redirect(f"{back}#{library_row_id(apk)}", card=apps_card(apk), **flash)
-    return redirect(f"/status#{status_row_id(apk, device)}", card=dom_id(device["serial"]), **flash)
+        row = library_row_id(apk)
+        return redirect(f"{back}#{row}", card=apps_card(apk), at=row, **flash)
+    row = status_row_id(apk, device)
+    return redirect(f"/status#{row}", card=dom_id(device["serial"]), at=row, **flash)
 
 
 def queue_push(request: Request, background_tasks: BackgroundTasks, device, apk, back: str,
@@ -515,7 +519,9 @@ def set_follow_all(
 
 @router.get("/installs", response_class=HTMLResponse)
 def installs_page(request: Request, session: dict = Depends(auth.require_auth)):
-    return templates.TemplateResponse(request, "installs.html", context(request, session, installs=db.list_installs()))
+    installs = db.list_installs()
+    return templates.TemplateResponse(request, "installs.html", context(
+        request, session, installs=installs, running=any(i["status"] in RUNNING for i in installs)))
 
 
 def _safe_back(back: str | None) -> str:

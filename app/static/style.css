@@ -1025,6 +1025,7 @@ details.fold > summary > h3:has(+ .fold-peek) { flex: none; }
 .commit-group table { margin-top: 6px; }
 .build-rows { margin-top: 8px; }
 .build-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.build-row > .card-flash { flex-basis: 100%; padding: 0; }
 .build-info { flex: 1 1 280px; min-width: 0; }
 .build-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .build-name { overflow-wrap: anywhere; }

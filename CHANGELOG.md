@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.8.1 — 2026-09-27
+
+- Fixed: **a push's row updates on its own again.** After **Install**,
+  **Update**, **Push** or **Update all**, the page was meant to refresh
+  itself until the install finished, but a browser treats reloading the
+  exact address it's on (`#row` and all) as a scroll, so it never reloaded
+  and the row sat at **Installing…** until you refreshed by hand. Each
+  reload now asks for a new address and comes back to the same row, on
+  Status, Apps, a push's own page and install history (which didn't refresh
+  at all before).
+- Fixed: **watching a repo installs on the devices you ticked, visibly.**
+  The first release's install was queued only after the page had decided
+  the check was done, so it stopped reloading before the install started.
+- Fixed: **accepting a new signer waits for the release**, like **Check
+  now**, instead of leaving the card as it was.
+- Fixed: **a check that crashes says so.** **Check now** used to wait a
+  minute and then say it was taking a while; the error now shows on the
+  repo's card.
+- Fixed: **Builds shows what you just did.** Turning **Unsigned builds** on
+  or off opens that section with its message, and **Check signing** on an
+  older commit opens its fold and says the result on that build's row.
+- Fixed: **the theme switcher keeps you on the page you're on.** On Builds,
+  a push's page or any other page below the top bar, it used to send you to
+  Status.
+
 ## 3.8.0 — 2026-09-27
 
 - Changed: **every action brings you back where you were.** Saving a name,

@@ -2,7 +2,7 @@
 {% block title %}Status — ADB Server{% endblock %}
 {# No JavaScript (CSP): while a push runs, the page reloads itself every 2
    seconds, staying on the card and row it was opened on. #}
-{% block head %}{% if running %}<meta http-equiv="refresh" content="2">{% endif %}{% endblock %}
+{% block head %}{% if running %}<meta http-equiv="refresh" content="2; url={{ reload_url }}">{% endif %}{% endblock %}
 {# Where the installed copy came from: chips beside the version, then a
    line under it saying what was pushed and when. #}
 {% macro origin_chips(o) %}
