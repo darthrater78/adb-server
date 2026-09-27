@@ -168,7 +168,7 @@ def test_every_page_warns_while_out_of_step(authed, sides):
     sides(image="3.2.0")
     versions.check_and_alert()
     assert "runs 3.2.0" in authed.get("/status").text
-    assert "runs 3.2.0" in authed.get("/sources").text
+    assert "runs 3.2.0" in authed.get("/apps").text
     authed.cookies.clear()
     assert "runs 3.2.0" not in authed.get("/login").text
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_push.html" import confirm_delete with context %}
 {% block title %}Notifications — Settings — ADB Server{% endblock %}
 {% block content %}
 {% include "_settings_nav.html" %}
@@ -16,7 +17,7 @@
   <p class="muted small">Each saved service has its own <strong>Send test</strong> button. To try one before saving it,
     fill in a form below and press <strong>Test</strong>.</p>
   <div class="table-wrap">
-  <table class="notify-table">
+  <table class="notify-table" id="notify-targets">
     <thead><tr><th>Service</th><th>Address</th><th>Label</th><th></th></tr></thead>
     <tbody>
       {% for t in targets %}
@@ -35,10 +36,10 @@
             <button type="submit" class="secondary">Send test</button>
           </form>
           {% if not t.from_env %}
-          <form method="post" action="/settings/notify/{{ t.key }}/delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="danger">Remove</button>
-          </form>
+          {% call confirm_delete("remove-notify-" ~ t.key, "notify-targets", "Remove " ~ (t.label or t.masked) ~ "?",
+              "/settings/notify/" ~ t.key ~ "/delete", {}, "Remove", trigger_class="secondary danger-link") %}
+          <p>Stops sending notifications to <span class="mono">{{ t.masked }}</span>. Add it again to bring it back.</p>
+          {% endcall %}
           {% endif %}
         </td>
       </tr>

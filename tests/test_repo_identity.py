@@ -2,6 +2,7 @@
 pinned by GitHub ID, and release assets accepted only from the owner or a
 workflow."""
 import asyncio
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -195,7 +196,8 @@ def test_review_warns_about_look_alike_signals(authed, lookup):
 
 def test_an_established_repo_gets_no_warnings(authed, lookup):
     page = _review(authed).text
-    assert "flash flash-warn" not in page
+    review = page[page.index('id="review"'):]
+    assert "flash flash-warn" not in review[:review.index("</details>")]
 
 
 def test_lookup_errors_are_shown(authed, lookup):
@@ -206,7 +208,8 @@ def test_lookup_errors_are_shown(authed, lookup):
 
 def test_confirm_watches_the_repo_with_its_identity_pinned(authed, lookup):
     r = _confirm(authed, include_prereleases="1")
-    assert "ok=" in r.headers["location"]
+    # Its first check starts at once, and the page waits for it on the repo's card.
+    assert re.match(r"/apps\?checking=\d+&since=[^&]+&open=repo-\d+#repo-\d+$", r.headers["location"])
     [repo] = db.list_repos()
     assert (repo["owner"], repo["repo"], repo["github_id"], repo["owner_id"], repo["owner_type"]) == ("o", "r", 1, 10, "User")
     assert repo["include_prereleases"] == 1
@@ -376,14 +379,15 @@ def artifact_env(monkeypatch):
     async def commits(owner, repo, tags, token):
         return state.get("release_shas", set())
 
-    async def runs(owner, repo, token, per_page=50):
-        return state.get("runs", {77: {"title": "CI", "event": "push", "number": 12,
-                                       "message": "fix: faster reconnects\n\nLonger body.",
-                                       "subject": "fix: faster reconnects"}})
+    async def runs(owner, repo, run_ids, token):
+        known = state.get("runs", {77: {"title": "CI", "event": "push", "number": 12,
+                                        "message": "fix: faster reconnects\n\nLonger body.",
+                                        "subject": "fix: faster reconnects"}})
+        return {r: known[r] for r in run_ids if r in known}
 
     monkeypatch.setattr(github_client, "list_releases", no_releases)
     monkeypatch.setattr(github_client, "release_commits", commits)
-    monkeypatch.setattr(github_client, "list_runs", runs)
+    monkeypatch.setattr(github_client, "get_runs", runs)
     monkeypatch.setattr(github_client, "get_repo_info", repo_info)
     monkeypatch.setattr(github_client, "get_build_notes", build_notes)
     monkeypatch.setattr(github_client, "list_artifacts", list_artifacts)
@@ -420,8 +424,8 @@ def test_builds_page_opens_the_newest_and_folds_the_rest(authed, artifact_env):
     assert page.index("notes for v1.2.0") < fold and page.index("/releases/3/stage") < fold
     assert "notes for v1.1.0" not in page
     assert fold < page.index("/releases/2/stage") and fold < page.index("/releases/1/stage")
-    # The newest commit's builds are shown open.
-    assert '<details class="panel commit-group fold" open>' in page
+    # The newest commit's builds are shown in full, never folded.
+    assert '<section class="panel commit-group">' in page and "commit-group fold" not in page
 
 
 def test_artifacts_page_explains_a_missing_token(authed, artifact_env, monkeypatch):
@@ -430,10 +434,41 @@ def test_artifacts_page_explains_a_missing_token(authed, artifact_env, monkeypat
     assert "needs a GitHub token" in page and "/stage" not in page
 
 
+def test_stage_and_install_pushes_the_artifact_it_staged(authed, artifact_env, monkeypatch):
+    import pushes
+    import web
+    ran = []
+    monkeypatch.setattr(pushes, "run_push", lambda install_id, device, apk: ran.append(apk["id"]))
+    db.upsert_paired_device("SER", "192.168.1.50:37000")
+    db.set_device_trusted("SER", True)
+    page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
+    assert '<option value="SER">Stage and install on SER</option>' in page
+    r = authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF, "push_to": "SER"},
+                    follow_redirects=False)
+    [apk] = db.list_staged_apks()
+    dom = web.dom_id("SER")
+    # On to the device's card on Status, on the row of the build it's installing.
+    assert r.headers["location"].startswith("/status?") and "Staged%20app-debug.apk" in r.headers["location"]
+    assert r.headers["location"].endswith(f"open={dom}#upload-{apk['id']}-{dom}")
+    assert ran == [apk["id"]] and db.list_installs()[0]["apk_id"] == apk["id"]
+
+
+def test_stage_and_install_on_an_untrusted_device_only_stages(authed, artifact_env, monkeypatch):
+    import pushes
+    ran = []
+    monkeypatch.setattr(pushes, "run_push", lambda install_id, device, apk: ran.append(apk["id"]))
+    db.upsert_paired_device("NEW", "192.168.1.50:37000")
+    assert "Stage and install" not in authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
+    r = authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF, "push_to": "NEW"},
+                    follow_redirects=False)
+    assert "error=Device%20is%20not%20trusted" in r.headers["location"]
+    assert len(db.list_staged_apks()) == 1 and ran == [] and db.list_installs() == []
+
+
 def test_staging_an_artifact_stages_the_apk_inside_with_its_provenance(authed, artifact_env):
     r = authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF},
                     follow_redirects=False)
-    assert r.headers["location"].startswith("/install?")
+    assert r.headers["location"].startswith("/apps?") and r.headers["location"].endswith("&open=kind-artifact#upload-1")
     [apk] = db.list_staged_apks()
     assert apk["source"] == "upload" and apk["repo_id"] is None and apk["is_debug"]
     assert apk["tag"] == "app-debug feature/x@abcdef1" and apk["filename"] == "app-debug.apk"
@@ -537,7 +572,7 @@ def test_staged_artifact_shows_its_build_notes(authed, artifact_env, monkeypatch
     authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF})
     [apk] = db.list_staged_apks()
     assert apk["release_notes"].startswith("Release (run #12")
-    page = authed.get("/install").text
+    page = authed.get("/apps").text
     assert "Build notes for" in page and "&lt;b&gt;not html&lt;/b&gt;" in page
 
 
@@ -547,7 +582,7 @@ def test_an_artifact_stages_even_when_its_notes_cant_be_fetched(authed, artifact
     monkeypatch.setattr(github_client, "get_build_notes", fail)
     r = authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF},
                     follow_redirects=False)
-    assert r.headers["location"].startswith("/install?")
+    assert r.headers["location"].startswith("/apps?") and r.headers["location"].endswith("&open=kind-artifact#upload-1")
     [apk] = db.list_staged_apks()
     assert apk["release_notes"] is None
 
@@ -569,21 +604,19 @@ def test_install_page_sets_artifacts_apart(authed, artifact_env):
     open(path, "wb").write(b"x")
     db.insert_staged_apk(repo_id=None, tag="hand upload", filename="plain.apk", sha256="e" * 64,
                          package_name="com.example.other", signer_sha256="d" * 64, path=path, source="upload")
-    page = authed.get("/install").text
+    page = authed.get("/apps").text
     art = page.index('id="kind-artifact"')
     assert art < page.index('id="kind-upload"')
     card = page[art:page.index('id="kind-upload"')]
-    assert "Test builds from workflow artifacts" in card
-    assert "app-card-artifact" in card and ">Test build</span>" in card
+    assert "Test builds" in card and ">Test build</span>" in card
     assert "feature/x" in card and "https://github.com/o/r/actions/runs/77" in card and "abcdef1 · run 77" in card
     assert ">Test build</span>" not in page[page.index('id="kind-upload"'):]
 
 
-def test_one_kind_still_gets_its_folded_summary_card(authed, artifact_env):
-    # Every kind is a folded card with a state summary, even when it's the only one.
+def test_test_builds_get_their_own_section(authed, artifact_env):
     authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF})
-    page = authed.get("/install").text
-    assert 'id="kind-artifact">' in page and "Test builds from workflow artifacts" in page
+    page = authed.get("/apps").text
+    assert 'id="kind-artifact">Test builds' in page and 'id="kind-upload"' not in page
 
 
 def test_device_names_prefer_nickname_then_model(monkeypatch):
@@ -775,22 +808,29 @@ def test_builds_of_one_commit_are_grouped_with_its_message(authed, artifact_env,
         78: {"title": "Release build", "event": "push", "number": 5, "message": "fix: faster reconnects\n\nBody.", "subject": "fix: faster reconnects"},
     }
     page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
-    assert page.count('class="panel commit-group fold"') == 2
-    first = page[page.index('class="panel commit-group fold"'):page.rindex('class="panel commit-group fold"')]
+    assert page.count('class="panel commit-group"') == 2
+    first = page[page.index('class="panel commit-group"'):page.rindex('class="panel commit-group"')]
     assert "app-debug" in first and "app-release" in first and "fix: faster reconnects" in first
     assert "Body." in first and "CI #12" in first and "Release build #5" in first
-    assert "(no commit message available)" in page[page.rindex('class="panel commit-group fold"'):]
+    assert "(no commit message available)" in page[page.rindex('class="panel commit-group"'):]
 
 
-def test_list_runs_parses_titles_and_messages(monkeypatch):
+def test_get_runs_fetches_just_those_runs_and_parses_them(monkeypatch):
     real = httpx.AsyncClient
-    body = {"workflow_runs": [{"id": 7, "display_title": "CI", "event": "push", "run_number": 3,
-                               "head_commit": {"message": "feat: x\n\nmore"}}, {"id": "bad"}]}
+    asked = []
+
+    def handle(req):
+        asked.append(req.url.path)
+        if req.url.path.endswith("/runs/9"):
+            return httpx.Response(404)
+        return httpx.Response(200, json={"id": 7, "display_title": "CI", "event": "push", "run_number": 3,
+                                         "head_commit": {"message": "feat: x\n\nmore"}})
     monkeypatch.setattr(github_client.httpx, "AsyncClient",
-                        lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)), **kw))
+                        lambda **kw: real(transport=httpx.MockTransport(handle), **kw))
     github_client._etag_cache.clear()
-    runs = asyncio.run(github_client.list_runs("o", "r", "t"))
+    runs = asyncio.run(github_client.get_runs("o", "r", {7, 9, 7}, "t"))
     assert runs == {7: {"title": "CI", "event": "push", "number": 3, "message": "feat: x\n\nmore", "subject": "feat: x"}}
+    assert sorted(asked) == ["/repos/o/r/actions/runs/7", "/repos/o/r/actions/runs/9"]  # each once, 9 left out
 
 
 def test_install_card_shows_the_commit_subject(authed, artifact_env, monkeypatch):
@@ -800,7 +840,7 @@ def test_install_card_shows_the_commit_subject(authed, artifact_env, monkeypatch
     authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF})
     [apk] = db.list_staged_apks()
     assert apk["artifact_subject"] == "fix: faster reconnects"
-    assert '<p class="commit-subject">fix: faster reconnects</p>' in authed.get("/install").text
+    assert '<p class="commit-subject">fix: faster reconnects</p>' in authed.get("/apps").text
 
 
 def test_refresh_drops_this_repos_cached_answers_only():
@@ -848,9 +888,9 @@ def test_check_now_reloads_until_done_then_says_what_it_found(authed, monkeypatc
     monkeypatch.setattr(poller, "check_repo", slow)
     r = authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF}, follow_redirects=False)
     loc = r.headers["location"]
-    assert loc.startswith(f"/sources?checking={rid}&since=")
+    assert loc.startswith(f"/apps?checking={rid}&since=")
     page = authed.get(loc).text
-    assert '<meta http-equiv="refresh" content="2; url=/sources?checking=' in page and "Checking o/r" in page
+    assert '<meta http-equiv="refresh" content="2; url=/apps?checking=' in page and "Checking o/r" in page
     db.mark_repo_checked(rid)  # the check finishes: no release, no error
     page = authed.get(loc).text
     assert 'http-equiv="refresh"' not in page
@@ -861,21 +901,21 @@ def test_check_now_shows_an_error_or_the_latest_release(authed):
     rid = db.create_repo("o", "r", "*.apk", github_id=1, owner_id=10, owner_type="User")
     since = db.now()
     db.update_repo_check(rid, last_tag="v2")
-    assert "latest release is v2" in authed.get(f"/sources?checking={rid}&since={since}").text
+    assert "latest release is v2" in authed.get(f"/apps?checking={rid}&since={since}").text
     since = db.now()
     db.update_repo_check(rid, last_error="GitHub API answered HTTP 500")
-    assert "HTTP 500" in authed.get(f"/sources?checking={rid}&since={since}").text
+    assert "HTTP 500" in authed.get(f"/apps?checking={rid}&since={since}").text
 
 
 def test_check_now_stops_reloading_after_a_minute(authed):
     rid = db.create_repo("o", "r", "*.apk")
-    page = authed.get(f"/sources?checking={rid}&since=2020-01-01T00:00:00%2B00:00").text
+    page = authed.get(f"/apps?checking={rid}&since=2020-01-01T00:00:00%2B00:00").text
     assert 'http-equiv="refresh"' not in page and "taking a while" in page
 
 
 def test_a_bogus_since_is_ignored(authed):
     rid = db.create_repo("o", "r", "*.apk")
-    r = authed.get(f"/sources?checking={rid}&since=yesterday")
+    r = authed.get(f"/apps?checking={rid}&since=yesterday")
     assert r.status_code == 200 and 'http-equiv="refresh"' not in r.text
 
 

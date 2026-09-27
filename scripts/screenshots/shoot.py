@@ -41,8 +41,8 @@ def sign_in(page, shot_mfa=False):
         page.wait_for_load_state()
 
 
-# Everything outside Settings starts folded; the README shows each page with
-# its first card opened, so there's something to see besides headings.
+# Quiet cards start folded; the README shows each page with its first card
+# opened, so there's something to see besides headings.
 FIRST_CARD = "main details.device-card, main details.kind-group"
 
 
@@ -64,14 +64,14 @@ with sync_playwright() as p:
         page.goto(URL + "/login")
         page.screenshot(path=f"{OUT}/login.png")
         sign_in(page)
-        for path, name, full in (("/status", "status", True), ("/sources", "sources", True),
-                                 ("/repos/1/artifacts", "builds", True), ("/install", "install", True),
+        for path, name, full in (("/status", "status", True), ("/apps", "apps", True),
+                                 ("/repos/1/artifacts", "builds", True),
                                  ("/installs/3", "install-status", False), ("/installs", "installs", False),
                                  ("/audit", "audit", True), ("/devices", "devices", True),
                                  ("/settings", "settings", False), ("/settings/github", "settings-github", True),
                                  ("/settings/notifications", "settings-notifications", True)):
             shot(page, path, name, full)
-        page.goto(URL + "/sources")
+        page.goto(URL + "/apps")
         page.click("summary:has-text('Watch a GitHub repo')")  # folded once repos are watched
         page.fill("input[name=repo_url]", "example-dev/weather-app")
         page.click("text=Look up repo")
@@ -83,7 +83,7 @@ with sync_playwright() as p:
         # One screenful, as on a phone: a full-page shot would draw the
         # fixed tab bar halfway down.
         shot(phone, "/status", "phone-status", False)
-        shot(phone, "/install", "phone-install", False)
+        shot(phone, "/apps", "phone-apps", False)
     else:
         page = context(browser).new_page()
         sign_in(page, shot_mfa=True)

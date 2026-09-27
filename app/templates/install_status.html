@@ -1,15 +1,12 @@
 {% extends "base.html" %}
+{% from "_push.html" import confirm_delete with context %}
 {% block title %}Push status — ADB Server{% endblock %}
 {% block head %}
-{# No JavaScript (CSP): a meta refresh polls while anything runs, and when
-   everything succeeded it takes you back to where the push started. #}
-{% if running %}
-<meta http-equiv="refresh" content="2">
-{% elif done_url %}
-<meta http-equiv="refresh" content="3; url={{ done_url }}">
-{% endif %}
+{# No JavaScript (CSP): a meta refresh polls while anything runs. #}
+{% if running %}<meta http-equiv="refresh" content="2">{% endif %}
 {% endblock %}
 {% block content %}
+<p class="breadcrumb"><a href="/status">Status</a> / <a href="/installs">Install history</a> /</p>
 <h1>{% if installs | length > 1 %}Updating {{ installs | length }} apps{% else %}Push status{% endif %}</h1>
 
 {% for install in installs %}
@@ -30,6 +27,15 @@
     {% if install.finished_at %}<span class="muted small">· {{ install.finished_at | when }}</span>{% endif %}
   </p>
   {% if install.log and install.status == "failed" %}<pre class="log">{{ install.log }}</pre>
+  {% if blocked_by_existing(install.log) and installs | length == 1 %}
+  <div class="actions" id="install-{{ install.id }}">
+  {% call confirm_delete("remove-everywhere-" ~ install.id, "install-" ~ install.id, "Remove " ~ install.package_name ~ " from every profile?",
+      "/installs/" ~ install.id ~ "/remove-everywhere", {"back": back}, "Remove from every profile", trigger_class="danger-link") %}
+  <p>Uninstalls it from every profile on {{ install.nickname or install.device_serial }}, Private space and work
+    profiles included, and <strong>deletes its data in each</strong>. Then push it again.</p>
+  {% endcall %}
+  </div>
+  {% endif %}
   {% elif install.log and not running %}<details class="nested"><summary>Log</summary><pre class="log">{{ install.log }}</pre></details>{% endif %}
 </section>
 {% endfor %}
@@ -37,14 +43,9 @@
 {% if running %}
 <p class="muted small">This page refreshes every 2 seconds{% if installs | length > 1 %}; apps install one after another{% endif %}.
   You can leave it: installs carry on in the background.</p>
-<p><a href="{{ back }}" class="button-link secondary">Back to {{ back_label }}</a></p>
-{% elif done_url %}
-<p class="muted">Done. Taking you back to {{ back_label }}…</p>
-<p><a href="{{ done_url }}" class="button-link">Back to {{ back_label }}</a></p>
-{% else %}
+{% endif %}
 <p class="actions">
   <a href="{{ back }}" class="button-link">Back to {{ back_label }}</a>
   <a href="/installs" class="button-link secondary">Install history</a>
 </p>
-{% endif %}
 {% endblock %}

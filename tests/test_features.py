@@ -45,7 +45,7 @@ def test_push_latest_picks_the_variant_for_the_device(authed, trusted_device, no
     _stage(rid, "v2", "universal.apk", "arm64-v8a armeabi-v7a x86_64")
     arm64 = _stage(rid, "v2", "arm64.apk", "arm64-v8a")
     r = authed.post("/push-latest", data={"csrf_token": CSRF, "repo_id": rid, "device_serial": "SER"}, follow_redirects=False)
-    assert r.headers["location"].startswith("/installs/")
+    assert r.headers["location"].startswith("/status?open=dev-")
     assert db.list_installs()[0]["apk_id"] == arm64
 
 

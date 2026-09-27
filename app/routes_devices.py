@@ -8,7 +8,7 @@ import auth
 import db
 import discovery
 import pushes
-from web import check_csrf, context, record_audit, redirect, templates
+from web import check_csrf, context, dom_id, record_audit, redirect, templates
 
 router = APIRouter()
 
@@ -23,8 +23,43 @@ def devices_page(request: Request, session: dict = Depends(auth.require_auth), e
     devices = db.list_devices()
     offer = next((d for d in devices if d["serial"] == trust and not d["trusted"]), None) if trust else None
     return templates.TemplateResponse(
-        request, "devices.html", context(request, session, devices=devices, offer=offer, error=error, ok=ok),
+        request, "devices.html",
+        context(request, session, card_ids=[dom_id(d["serial"]) for d in devices], devices=devices, offer=offer,
+                state=_device_states(devices), error=error, ok=ok),
     )
+
+
+def _device_states(devices) -> dict[str, dict]:
+    """How each device stands right now, by serial: its connection as the
+    adb server reports it, how many apps it has from here, and its last push."""
+    try:
+        transports = adb_client.transport_states()
+    except adb_client.AdbError:
+        transports = None
+    installed = db.device_packages_map()
+    last_push = {}
+    for i in db.list_installs():  # newest first
+        last_push.setdefault(i["device_serial"], i)
+    states = {}
+    for d in devices:
+        addr = d["last_connect_addr"]
+        if transports is None:
+            link = "unknown"
+        else:
+            link = {"device": "connected", "unauthorized": "unauthorized"}.get(transports.get(addr or ""),
+                                                                               "offline" if addr in transports else "disconnected")
+        states[d["serial"]] = {
+            "link": link,
+            "apps": sum(1 for (serial, _), row in installed.items() if serial == d["serial"] and row["installed"]),
+            "last_push": last_push.get(d["serial"]),
+        }
+    return states
+
+
+def _back(back: str, serial: str, **flash):
+    """After an action on a device: its card on Status when that's where the
+    action was, else its card here."""
+    return redirect("/status" if back == "/status" else "/devices", card=dom_id(serial), **flash)
 
 
 @router.post("/devices/pair")
@@ -67,7 +102,7 @@ def _register_paired(request: Request, serial: str, addr: str) -> RedirectRespon
     record_audit(request, "device_pair", f"{serial} at {addr}"
            + (f", took over the record of {adopted}; trust cleared" if adopted else ""))
     if db.get_device(serial)["trusted"]:
-        return redirect("/devices", ok="Paired")
+        return _back("/devices", serial, ok="Paired")
     if adopted:
         return redirect("/devices", trust=serial, ok="Paired. It took over the older record for that IP (nickname "
                                                       "and history kept) — trust it again if it's the same phone")
@@ -88,18 +123,20 @@ def reconnect_device(
         adb_client.connect(addr)
         confirmed = adb_client.get_serialno(addr)
     except adb_client.AdbError as exc:
-        return redirect("/devices", error=str(exc))
+        return _back("/devices", serial, error=str(exc))
     if not discovery.is_same_device(serial, addr, confirmed):
-        return redirect("/devices", error="That address now answers as a different device - not updated")
+        return _back("/devices", serial, error="That address now answers as a different device - not updated")
     serial = discovery.record(serial, confirmed, addr)
     pushes.refresh_abis(serial, addr)
-    return redirect("/devices", ok="Reconnected")
+    return _back("/devices", serial, ok="Reconnected")
 
 
 @router.post("/devices/{serial}/find")
-def find_device(serial: str, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...)):
+def find_device(serial: str, request: Request, session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+                back: str = Form("/devices")):
     """Sync route, so Starlette runs it in a threadpool: the port scan can
-    take several seconds and must not block the event loop."""
+    take several seconds and must not block the event loop. Offered on each
+    device's card on Status as well as here."""
     check_csrf(request, session, csrf_token)
     device = db.get_device(serial)
     if device is None:
@@ -107,17 +144,19 @@ def find_device(serial: str, request: Request, session: dict = Depends(auth.requ
     try:
         serial, addr = discovery.ensure_connected(device)
     except adb_client.AdbError as exc:
-        return redirect("/devices", error=str(exc))
+        return _back(back, serial, error=str(exc))
     pushes.refresh_abis(serial, addr)
-    return redirect("/devices", ok=f"Found at {addr}")
+    return _back(back, serial, ok=f"Found at {addr}")
 
 
 @router.post("/devices/{serial}/trust")
 def trust_device(
     serial: str, request: Request, session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...), trusted: str = Form(...), nickname: str | None = Form(None),
+    back: str = Form("/devices"),
 ):
-    """The trust prompt after pairing can name the device in the same step."""
+    """The trust prompt after pairing can name the device in the same step,
+    and it (like Trust on Status) goes on to the device's card on Status."""
     check_csrf(request, session, csrf_token)
     if db.get_device(serial) is None:
         raise HTTPException(status_code=404)
@@ -126,8 +165,8 @@ def trust_device(
     db.set_device_trusted(serial, trusted == "1")
     record_audit(request, "device_trust" if trusted == "1" else "device_untrust", serial)
     if trusted == "1":
-        return redirect("/devices", ok="Trusted. It can receive pushes now: see Status or Install")
-    return redirect("/devices", ok="Trust revoked")
+        return _back(back, serial, ok="Trusted. It can receive pushes now")
+    return _back(back, serial, ok="Trust revoked")
 
 
 @router.post("/devices/{serial}/nickname")
@@ -139,7 +178,7 @@ def nickname_device(
     if db.get_device(serial) is None:
         raise HTTPException(status_code=404)
     db.set_device_nickname(serial, nickname.strip()[:100] or None)
-    return redirect("/devices", ok="Updated")
+    return _back("/devices", serial, ok="Name saved")
 
 
 @router.post("/devices/{serial}/delete")

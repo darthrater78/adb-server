@@ -54,7 +54,7 @@ _background: set[asyncio.Task] = set()
 
 
 class _Rejected(Exception):
-    """The release as a whole is rejected; message is shown on the Sources page."""
+    """The release as a whole is rejected; message is shown on the Apps page."""
 
     def __init__(
         self, message: str, pending: tuple[str, str, bool] | None = None, permanent: bool = True,
@@ -92,7 +92,7 @@ async def _download_and_verify(asset: dict, repo_dir: str, sign_as: str | None =
             if sign_as is None:
                 raise apk_verify.ApkVerifyError(
                     "it's unsigned, and Android can't install an unsigned APK. Turn on signing unsigned builds "
-                    "with this server's key for this repo (Sources → Builds) to stage it")
+                    "with this server's key for this repo (Apps → Builds) to stage it")
             try:
                 await asyncio.to_thread(signing.sign_in_place, tmp_path, sign_as)
             except signing.SigningError as exc:
@@ -242,6 +242,29 @@ async def _check_identity(repo_row, label: str) -> github_client.RepoInfo | None
     return info
 
 
+# A release's CPU builds download side by side, a few at a time.
+DOWNLOAD_CONCURRENCY = 3
+
+
+async def _download_all(assets: list[dict], repo_dir: str, sign_as: str | None) -> list[_Variant]:
+    """Every asset downloaded and verified, in the assets' order. If any one
+    fails, the others' files are removed and the first failure is raised."""
+    gate = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
+
+    async def one(asset: dict) -> _Variant:
+        async with gate:
+            return await _download_and_verify(asset, repo_dir, sign_as)
+
+    results = await asyncio.gather(*(one(a) for a in assets), return_exceptions=True)
+    failed = next((r for r in results if isinstance(r, BaseException)), None)
+    if failed is not None:
+        for r in results:
+            if isinstance(r, _Variant):
+                staging.remove_file(r.tmp_path)
+        raise failed
+    return list(results)
+
+
 async def _verify_release(repo_row, tag: str, assets: list[dict], info, repo_dir: str) -> list[_Variant]:
     """Every check a release goes through before it's staged: who uploaded
     it, each APK's download and signature, that its APKs agree, and the pin.
@@ -251,8 +274,7 @@ async def _verify_release(repo_row, tag: str, assets: list[dict], info, repo_dir
     variants: list[_Variant] = []
     try:
         _check_uploaders(tag, assets, info)
-        for asset in assets:
-            variants.append(await _download_and_verify(asset, repo_dir, sign_as))
+        variants = await _download_all(assets, repo_dir, sign_as)
         first = variants[0]
         for v in variants[1:]:
             if (v.info.name, v.signer) != (first.info.name, first.signer):
@@ -370,6 +392,9 @@ async def _check_repo(repo_row, restage: bool = False) -> None:
         await _notify("rejected", f"{label} {tag} rejected", str(exc))
         return
 
+    # Staged first, then recorded as checked: a page waiting on the check
+    # (Check now) stops waiting at last_checked_at, so the files must be there by then.
+    staged = _stage(repo_row, tag, release, variants, repo_dir)
     if repo_row["expected_package"] is None:
         # First release ever staged for this repo — pin it. Every later
         # release must match both, or it's a rejected, surfaced mismatch.
@@ -379,8 +404,6 @@ async def _check_repo(repo_row, restage: bool = False) -> None:
         )
     else:
         db.update_repo_check(repo_row["id"], last_tag=tag)
-
-    staged = _stage(repo_row, tag, release, variants, repo_dir)
     logger.info("%s: staged %s (%d APK%s)", label, tag, staged, "" if staged == 1 else "s")
     pruned = staging.prune_repo(repo_row["id"])
     if pruned:
@@ -413,13 +436,23 @@ async def _warn_token_expiry() -> None:
                   "workflow artifacts stop working.")
 
 
+# Repos checked side by side in a poll: a big download in one doesn't hold
+# up the rest, and GitHub never sees more than a few requests at once.
+POLL_CONCURRENCY = 3
+
+
 async def poll_all_repos() -> None:
     await _warn_token_expiry()
-    for repo_row in db.list_repos():
-        try:
-            await check_repo(repo_row)
-        except Exception:
-            # One repo failing in an unexpected way must not stop every repo
-            # after it from being polled.
-            logger.exception("%s/%s: poll crashed", repo_row["owner"], repo_row["repo"])
-            db.update_repo_check(repo_row["id"], last_error="Internal error while checking — see server logs")
+    gate = asyncio.Semaphore(POLL_CONCURRENCY)
+
+    async def one(repo_row) -> None:
+        async with gate:
+            try:
+                await check_repo(repo_row)
+            except Exception:
+                # One repo failing in an unexpected way must not stop any
+                # other repo from being polled.
+                logger.exception("%s/%s: poll crashed", repo_row["owner"], repo_row["repo"])
+                db.update_repo_check(repo_row["id"], last_error="Internal error while checking — see server logs")
+
+    await asyncio.gather(*(one(r) for r in db.list_repos()))

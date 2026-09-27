@@ -16,6 +16,37 @@ class PushRefused(Exception):
     pass
 
 
+# adb's reasons for refusing an APK because of the copy already on the phone.
+DOWNGRADE = "INSTALL_FAILED_VERSION_DOWNGRADE"
+KEY_MISMATCH = "INSTALL_FAILED_UPDATE_INCOMPATIBLE"
+
+
+def blocked_by_existing(log: str | None) -> bool:
+    return bool(log) and (DOWNGRADE in log or KEY_MISMATCH in log)
+
+
+def explain_blocked(addr: str, package: str, log: str) -> str:
+    """Why the phone refused, in words, naming every profile that still has
+    the app: a copy in Private space or a work profile blocks an older or
+    differently signed build even after it's uninstalled from the main one."""
+    if not blocked_by_existing(log):
+        return ""
+    try:
+        profiles = adb_client.profiles_holding(addr, package)
+    except adb_client.AdbError:
+        profiles = []
+    what = "a newer version" if DOWNGRADE in log else "a copy signed with a different key"
+    text = f"Why: the phone already has {what} of {package}"
+    if profiles:
+        text += " in " + ", ".join(name for _, name in profiles) + "."
+        if any(user != 0 for user, _ in profiles):
+            text += (" Uninstalling it from one profile leaves it in the others, and Android refuses the install "
+                     "(from here or from the APK by hand) until it's gone from all of them.")
+    else:
+        text += "."
+    return text + " Remove it from every profile, then push again. That deletes the app's data in each profile."
+
+
 def refresh_abis(serial: str, addr: str) -> str:
     """Best effort: a device that can't be queried keeps its last known ABIs.
     Its model name is read at the same time, for display."""
@@ -50,6 +81,32 @@ def refresh_installed(serial: str, addr: str, package: str) -> adb_client.Packag
     return info
 
 
+def debug_over_installed(device, apk, installed: dict | None = None) -> str | None:
+    """Why a debug build can't go to this device, or None if it can. A phone
+    that has the app signed with any other key refuses a debug build as an
+    update, and the only way past that is uninstalling the app, which deletes
+    its data. So it's blocked here, before the phone refuses it: unless the
+    copy on the phone is a debug build this server pushed with the same key.
+    `installed` is db.device_packages_map(), for a caller checking many builds."""
+    if not apk["is_debug"]:
+        return None
+    if installed is None:
+        installed = db.device_packages_map()
+    row = installed.get((device["serial"], apk["package_name"]))
+    if row is None or not row["installed"]:
+        return None
+    came_from = selection.origin(row)
+    if came_from and came_from["state"] in ("ours", "likely") and came_from.get("debug"):
+        pushed = db.get_staged_apk(came_from["apk_id"]) if came_from.get("apk_id") else None
+        if pushed is not None and pushed["signer_sha256"] == apk["signer_sha256"]:
+            return None
+    name = device["nickname"] or device["serial"]
+    return (f"{name} already has {apk['package_name']} {row['version_name'] or ''} installed, signed with a "
+            f"different key. {apk['filename']} is a debug build, so the phone would refuse it, and getting past "
+            f"that means uninstalling the app and losing its data. Push the signed build instead, or uninstall "
+            f"the app on the phone first.").replace("  ", " ")
+
+
 def create_install(device, apk) -> int:
     """Validates a push and records it as pending. Raises PushRefused."""
     if apk["pruned_at"]:
@@ -60,6 +117,8 @@ def create_install(device, apk) -> int:
         raise PushRefused("Device is not trusted")
     if not selection.compatible(apk["abis"], device["abis"]):
         raise PushRefused(f"{apk['filename']} doesn't support this device's CPU ({device['abis']})")
+    if reason := debug_over_installed(device, apk):
+        raise PushRefused(reason)
     return db.insert_install(device["serial"], apk["id"], status="pending")
 
 
@@ -92,6 +151,8 @@ def run_push(install_id: int, device: dict, apk: dict) -> None:
         log = ((result.stdout or "") + (result.stderr or "")).strip()[:8000]
         status = "success" if result.returncode == 0 and "Success" in result.stdout else "failed"
         info = refresh_installed(serial, addr, apk["package_name"])
+        if status == "failed" and (why := explain_blocked(addr, apk["package_name"], log)):
+            log = f"{log}\n\n{why}"
         if status == "success":
             # lastUpdateTime pins this exact install: a later reinstall of the
             # same version from elsewhere changes it.

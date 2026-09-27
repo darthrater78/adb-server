@@ -152,7 +152,29 @@ def install(addr: str, apk_path: str, timeout: int = 180) -> subprocess.Complete
     # apk_path is always a server-generated /data/staging/<repo_id>/<sha256>.apk
     # path, never user input, so no separate validation needed here. -r only —
     # never -g (auto-grant permissions), -d (allow downgrade) or -t (test APKs).
-    return _run("-s", addr, "install", "-r", apk_path, timeout=timeout)
+    # --user current: without it adb installs into every profile on the phone,
+    # Private space and work profiles included, and a copy left in one of those
+    # keeps blocking an older version after the app is uninstalled from the main one.
+    return _run("-s", addr, "install", "-r", "--user", "current", apk_path, timeout=timeout)
+
+
+# What adb reports for each connection: device (ready), offline, unauthorized, ...
+_TRANSPORT_STATE_RE = re.compile(r"^[a-z-]+$")
+
+
+def transport_states() -> dict[str, str]:
+    """Every connection the adb server has, by address, and its state.
+    Raises AdbError if the adb server can't be reached."""
+    result = _run("devices", timeout=10)
+    if result.returncode != 0:
+        raise AdbError(result.stderr.strip() or "adb server did not answer")
+    states = {}
+    for line in result.stdout.strip().splitlines()[1:]:
+        addr, _, state = line.partition("\t")
+        state = state.strip()
+        if addr and _TRANSPORT_STATE_RE.match(state):
+            states[addr.strip()] = state
+    return states
 
 
 def list_devices() -> list[str]:
@@ -170,6 +192,11 @@ _VERSION_NAME_RE = re.compile(r"\bversionName=(\S+)")
 # "lastUpdateTime=2026-09-24 21:10:45": digits and separators only, so it is safe to store and show.
 _UPDATE_TIME_RE = re.compile(r"\blastUpdateTime=(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
 _ABI_RE = re.compile(r"^[a-z0-9_-]+$")
+# "User 10: ceDataInode=0 ... installed=true ...": which profiles have the package.
+_USER_INSTALLED_RE = re.compile(r"^\s*User (\d+):[^\n]*?\binstalled=(true|false)", re.M)
+# "UserInfo{10:Private space:1090}"
+_USER_INFO_RE = re.compile(r"UserInfo\{(\d+):([^:}]*):")
+_USER_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9 ._()'-]")
 
 
 def validate_package(package: str) -> str:
@@ -184,24 +211,71 @@ class PackageInfo(NamedTuple):
     update_time: str | None  # lastUpdateTime, in the device's own clock and format
 
 
-def package_info(addr: str, package: str) -> PackageInfo | None:
-    """What the device at `addr` reports for `package`, or None if it isn't
-    installed. Raises AdbError if it can't be queried."""
+def _dumpsys_package(addr: str, package: str) -> str | None:
+    """`dumpsys package` for `package`, or None if the device doesn't know it."""
     addr = _validate_addr(addr)
     package = validate_package(package)
     result = _run("-s", addr, "shell", "dumpsys", "package", package, timeout=20)
     if result.returncode != 0:
         raise AdbError(result.stderr.strip() or "Could not query installed packages")
-    if f"Package [{package}]" not in result.stdout:
+    return result.stdout if f"Package [{package}]" in result.stdout else None
+
+
+def _installed_users(dumpsys: str) -> dict[int, bool]:
+    return {int(u): flag == "true" for u, flag in _USER_INSTALLED_RE.findall(dumpsys)}
+
+
+def current_user(addr: str) -> int:
+    """The profile the phone is showing, 0 unless it says otherwise."""
+    addr = _validate_addr(addr)
+    result = _run("-s", addr, "shell", "am", "get-current-user", timeout=10)
+    out = result.stdout.strip()
+    return int(out) if result.returncode == 0 and out.isdigit() else 0
+
+
+def package_info(addr: str, package: str) -> PackageInfo | None:
+    """What the device at `addr` reports for `package`, or None if it isn't
+    installed in the profile in use. A copy only in another profile (Private
+    space, a work profile) counts as not installed here. Raises AdbError if it
+    can't be queried."""
+    out = _dumpsys_package(addr, package)
+    if out is None:
         return None
-    code = _VERSION_CODE_RE.search(result.stdout)
-    name = _VERSION_NAME_RE.search(result.stdout)
-    updated = _UPDATE_TIME_RE.search(result.stdout)
+    users = _installed_users(out)
+    if users and not all(users.values()):
+        if not any(users.values()) or not users.get(current_user(addr), False):
+            return None
+    code = _VERSION_CODE_RE.search(out)
+    name = _VERSION_NAME_RE.search(out)
+    updated = _UPDATE_TIME_RE.search(out)
     return PackageInfo(
         int(code.group(1)) if code else None,
         name.group(1) if name else None,
         updated.group(1) if updated else None,
     )
+
+
+def profiles_holding(addr: str, package: str) -> list[tuple[int, str]]:
+    """Every profile that has `package` installed, as (user id, name): the
+    main profile, Private space, a work profile. Empty if none has it."""
+    out = _dumpsys_package(addr, package)
+    if out is None:
+        return []
+    users = [u for u, installed in _installed_users(out).items() if installed]
+    if not users:
+        return []
+    result = _run("-s", addr, "shell", "pm", "list", "users", timeout=10)
+    names = {int(u): _USER_NAME_UNSAFE.sub("", n)[:40] for u, n in _USER_INFO_RE.findall(result.stdout or "")}
+    return [(u, names.get(u) or f"profile {u}") for u in sorted(users)]
+
+
+def uninstall_everywhere(addr: str, package: str) -> None:
+    """Removes `package` from every profile on the phone, with its data."""
+    addr = _validate_addr(addr)
+    package = validate_package(package)
+    result = _run("-s", addr, "shell", "pm", "uninstall", package, timeout=60)
+    if result.returncode != 0 or "Success" not in result.stdout:
+        raise AdbError(result.stdout.strip() or result.stderr.strip() or "Uninstall failed")
 
 
 _MODEL_UNSAFE = re.compile(r"[^A-Za-z0-9 ._()+/-]")

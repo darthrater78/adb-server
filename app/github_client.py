@@ -1,7 +1,9 @@
+import asyncio
 import fnmatch
 import hashlib
 import os
 import re
+import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -84,6 +86,22 @@ def forget_cached(owner: str, repo: str) -> int:
     return len(stale)
 
 
+# One pooled client per event loop for API reads: requests reuse an open
+# HTTPS connection instead of paying a TLS handshake each, which is most of
+# the time a page like Builds spends waiting on GitHub. Keyed by the client
+# class too, so a replaced httpx.AsyncClient (the tests' fakes) gets its own.
+_api_clients: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _api_client() -> httpx.AsyncClient:
+    per_loop = _api_clients.setdefault(asyncio.get_running_loop(), {})
+    client = per_loop.get(httpx.AsyncClient)
+    if client is None or client.is_closed:
+        client = per_loop[httpx.AsyncClient] = httpx.AsyncClient(
+            timeout=15.0, limits=httpx.Limits(max_connections=8, max_keepalive_connections=4))
+    return client
+
+
 async def _get_json(url: str, token: str | None):
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
@@ -92,8 +110,7 @@ async def _get_json(url: str, token: str | None):
     if cached:
         headers["If-None-Match"] = cached[0]
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=headers)
+        resp = await _api_client().get(url, headers=headers)
     except httpx.HTTPError as exc:
         raise GithubError(f"Could not reach GitHub: {type(exc).__name__}") from exc
     if resp.status_code == 304 and cached:
@@ -437,20 +454,41 @@ async def get_artifact(owner: str, repo: str, artifact_id: int, github_id: int, 
 MAX_NOTES_CHARS = 20_000
 
 
-async def list_runs(owner: str, repo: str, token: str | None, per_page: int = 50) -> dict[int, dict]:
-    """Recent workflow runs by ID: title, trigger, number and commit message,
-    so a list of artifacts can say what each build is without a call per run."""
+def _parse_run(run) -> dict | None:
+    """A workflow run's title, trigger, number and commit message."""
+    if not isinstance(run, dict) or not isinstance(run.get("id"), int):
+        return None
+    message = str((run.get("head_commit") or {}).get("message") or "").strip()[:MAX_NOTES_CHARS]
+    return {"title": str(run.get("display_title") or run.get("name") or "")[:200],
+            "event": str(run.get("event") or ""), "number": run.get("run_number"),
+            "message": message, "subject": message.split("\n", 1)[0][:200]}
+
+
+# How many workflow runs are fetched at once.
+RUNS_CONCURRENCY = 6
+
+
+async def get_runs(owner: str, repo: str, run_ids, token: str | None) -> dict[int, dict]:
+    """The workflow runs that built the listed artifacts, by ID, so each build
+    can say what it is. Only those runs, fetched side by side: listing a
+    repo's recent runs instead costs more than a second for 50 of them, and
+    still misses any build older than the list. Each is ETag-cached, so
+    showing the page again costs 304s. A run that can't be fetched is left out."""
     validate_owner_repo(owner, repo)
-    data = await _get_json(f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs?per_page={int(per_page)}", token)
-    runs = data.get("workflow_runs") if isinstance(data, dict) else None
+    gate = asyncio.Semaphore(RUNS_CONCURRENCY)
+
+    async def one(run_id: int):
+        async with gate:
+            try:
+                return await _get_json(f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs/{int(run_id)}", token)
+            except GithubError:
+                return None
+
     out: dict[int, dict] = {}
-    for run in runs if isinstance(runs, list) else []:
-        if not isinstance(run, dict) or not isinstance(run.get("id"), int):
-            continue
-        message = str((run.get("head_commit") or {}).get("message") or "").strip()[:MAX_NOTES_CHARS]
-        out[run["id"]] = {"title": str(run.get("display_title") or run.get("name") or "")[:200],
-                          "event": str(run.get("event") or ""), "number": run.get("run_number"),
-                          "message": message, "subject": message.split("\n", 1)[0][:200]}
+    for run in await asyncio.gather(*(one(r) for r in sorted(set(run_ids)))):
+        parsed = _parse_run(run)
+        if parsed is not None:
+            out[run["id"]] = parsed
     return out
 
 

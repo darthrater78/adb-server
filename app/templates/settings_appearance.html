@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_push.html" import confirm_delete, confirm_modal with context %}
 {% block title %}Appearance — Settings — ADB Server{% endblock %}
 {% block content %}
 {% include "_settings_nav.html" %}
@@ -30,12 +31,19 @@
     </button>
     {% endfor %}
   </form>
+  {# Outside the form above: each dialog carries its own. #}
+  {% for s in saved_colours %}
+  {% call confirm_modal("delete-saved-" ~ s.id, "saved-colours", "Delete " ~ s.name ~ "?",
+      "/settings/appearance/saved/" ~ s.id ~ "/delete", {}, "Delete", note="", submit_class="danger") %}
+  <p>Removes it from your saved colours. The colour in use stays as it is.</p>
+  {% endcall %}
+  {% endfor %}
   </details>
 
   {% if saved_colours %}
   <details class="fold sub" open>
   <summary><h3>Saved</h3></summary>
-  <form method="post" action="/settings/appearance" class="presets" aria-label="Saved colours">
+  <form method="post" action="/settings/appearance" class="presets" aria-label="Saved colours" id="saved-colours">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for s in saved_colours %}
     {% set is_current = current_preset is none and accent == s.primary_color %}
@@ -46,11 +54,17 @@
         <span class="preset-dot swatch-saved-{{ s.id }}" aria-hidden="true"></span>
         {{ s.name }}
       </button>
-      <button type="submit" class="preset-delete" formaction="/settings/appearance/saved/{{ s.id }}/delete"
-              aria-label="Delete {{ s.name }}" title="Delete {{ s.name }}">×</button>
+      <a href="#delete-saved-{{ s.id }}" class="preset-delete" aria-label="Delete {{ s.name }}" title="Delete {{ s.name }}">×</a>
     </span>
     {% endfor %}
   </form>
+  {# Outside the form above: each dialog carries its own. #}
+  {% for s in saved_colours %}
+  {% call confirm_modal("delete-saved-" ~ s.id, "saved-colours", "Delete " ~ s.name ~ "?",
+      "/settings/appearance/saved/" ~ s.id ~ "/delete", {}, "Delete", note="", submit_class="danger") %}
+  <p>Removes it from your saved colours. The colour in use stays as it is.</p>
+  {% endcall %}
+  {% endfor %}
   </details>
   {% endif %}
 

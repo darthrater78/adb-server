@@ -1,4 +1,4 @@
-"""Sources: watched repos review, confirm, remove, check now, re-pin a signer and APK uploads."""
+"""Apps: watched repos review, confirm, remove, check now, re-pin a signer and APK uploads."""
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -11,6 +11,7 @@ import auth
 import db
 import github_client
 import poller
+import routes_install
 import signing
 import staging
 import uploads
@@ -33,18 +34,20 @@ def _check_result(repo) -> dict:
         return {"error": f"{name}: {repo['last_error']}"}
     if not repo["last_tag"]:
         return {"ok": f"{name} has no releases yet, only workflow builds: stage one from Builds."}
-    return {"ok": f"{name} checked: its latest release is {repo['last_tag']}."}
+    return {"ok": f"{name} checked: its latest release is {repo['last_tag']}, ready to push from its card or update on Status."}
 
 
-@router.get("/sources", response_class=HTMLResponse)
-def sources_page(
+@router.get("/apps", response_class=HTMLResponse)
+def apps_page(
     request: Request, session: dict = Depends(auth.require_auth),
     error: str | None = None, ok: str | None = None, warn: str | None = None,
-    checking: int | None = None, since: str | None = None,
+    checking: int | None = None, since: str | None = None, to: str | None = None, tick: int = 0,
 ):
     """While a Check now runs (?checking=<repo>&since=<when it started>) the
     page reloads itself every 2 seconds with a meta refresh (no JavaScript
-    here), then shows what the check found."""
+    here), then shows what the check found, on the repo's card. Each reload
+    counts up `tick`: a refresh to the exact URL the page is on, #fragment and
+    all, is only a scroll to the browser, never a reload."""
     refresh = None
     since = since.replace(" ", "+") if since else since  # a "+" left unencoded in the URL arrives as a space
     if checking is not None and since:
@@ -59,17 +62,19 @@ def sources_page(
                 flash = _check_result(repo)
                 error, ok = flash.get("error"), flash.get("ok")
             elif waited < CHECK_WAIT_SECONDS:
-                refresh = f"/sources?checking={int(checking)}&since={quote(since)}"
+                refresh = (f"/apps?checking={int(checking)}&since={quote(since)}&open=repo-{int(checking)}"
+                           f"&tick={min(max(tick, 0), 999) + 1}#repo-{int(checking)}")
                 ok = f"Checking {repo['owner']}/{repo['repo']}…"
             else:
                 warn = "The check is taking a while (a large download?). This page will show the result when you reload it."
-    return _sources_page(request, session, error=error, ok=ok, warn=warn, auto_refresh=refresh)
+    return _sources_page(request, session, to=to, error=error, ok=ok, warn=warn, auto_refresh=refresh)
 
 
+@router.get("/sources")
 @router.get("/repos")
 @router.get("/upload")
 def old_sources_pages(request: Request, session: dict = Depends(auth.require_auth)):
-    return moved(request, "/sources")
+    return moved(request, "/apps")
 
 
 # Newer than this and a repo gets a "just created" warning on review: a
@@ -131,16 +136,7 @@ async def _apk_evidence(info: github_client.RepoInfo, asset_glob: str) -> tuple[
 
 
 def _sources_page(request: Request, session: dict, **extra) -> HTMLResponse:
-    uploaded = [a for a in db.list_staged_apks() if a["repo_id"] is None]
-    # Each repo's most recent staged release, shown on its folded card's head.
-    latest: dict[int, list] = {}
-    for a in db.list_latest_variants():
-        latest.setdefault(a["repo_id"], []).append(a)
-    return templates.TemplateResponse(
-        request, "sources.html",
-        context(request, session, repos=db.list_repos(), latest=latest, uploads=uploaded,
-              max_upload_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), **extra),
-    )
+    return routes_install.render_apps(request, session, **extra)
 
 
 @router.post("/repos", response_class=HTMLResponse)
@@ -161,12 +157,12 @@ async def review_repo(
         owner, repo = github_client.parse_repo_reference(repo_url)
         info = await github_client.get_repo_info(owner, repo, poller.github_token())
     except github_client.GithubError as exc:
-        return redirect("/sources", error=str(exc))
+        return redirect("/apps", error=str(exc))
     if db.get_repo_by_github_id(info.id) is not None:
-        return redirect("/sources", error="That repo is already registered")
+        return redirect("/apps", error="That repo is already registered")
     kind, reason = await _apk_evidence(info, asset_glob)
     if kind is None:
-        return redirect("/sources", error=reason)
+        return redirect("/apps", error=reason)
     return _sources_page(request, session, review={
         "info": info, "asset_glob": asset_glob, "include_prereleases": include_prereleases == "1",
         "warnings": _repo_warnings(info, kind),
@@ -176,6 +172,7 @@ async def review_repo(
 @router.post("/repos/confirm")
 async def confirm_repo(
     request: Request,
+    background_tasks: BackgroundTasks,
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
     owner: str = Form(...),
@@ -183,31 +180,43 @@ async def confirm_repo(
     github_id: int = Form(...),
     asset_glob: str = Form("*.apk"),
     include_prereleases: str = Form(""),
+    follow: list[str] = Form([]),
 ):
     """Step two: watch the repo that was reviewed, and pin its identity. It is
     looked up again, and refused if the name now points at a different repo
-    than the one on the review page."""
+    than the one on the review page. Its first check runs straight away, and
+    the trusted devices ticked in `follow` auto-update it, which installs its
+    first release on them as soon as that is staged."""
     check_csrf(request, session, csrf_token)
     asset_glob = asset_glob.strip() or "*.apk"
     try:
         info = await github_client.get_repo_info(owner, repo, poller.github_token())
     except github_client.GithubError as exc:
-        return redirect("/sources", error=str(exc))
+        return redirect("/apps", error=str(exc))
     if info.id != github_id:
-        return redirect("/sources", error="That name points at a different repo than the one you reviewed "
+        return redirect("/apps", error="That name points at a different repo than the one you reviewed "
                                            "— nothing was added. Look it up again.")
     if db.get_repo_by_github_id(info.id) is not None:
-        return redirect("/sources", error="That repo is already registered")
+        return redirect("/apps", error="That repo is already registered")
     kind, reason = await _apk_evidence(info, asset_glob)  # confirm can be posted without a review
     if kind is None:
-        return redirect("/sources", error=reason)
+        return redirect("/apps", error=reason)
     try:
-        db.create_repo(info.owner, info.repo, asset_glob, include_prereleases == "1",
-                       github_id=info.id, owner_id=info.owner_id, owner_type=info.owner_type)
+        repo_id = db.create_repo(info.owner, info.repo, asset_glob, include_prereleases == "1",
+                                 github_id=info.id, owner_id=info.owner_id, owner_type=info.owner_type)
     except sqlite3.IntegrityError:
-        return redirect("/sources", error="That repo is already registered")
+        return redirect("/apps", error="That repo is already registered")
     record_audit(request, "repo_add", f"{info.owner}/{info.repo} id={info.id} owner={info.owner_type} glob={asset_glob}")
-    return redirect("/sources", ok=f"Watching {info.owner}/{info.repo}")
+    trusted = {d["serial"]: d for d in db.list_devices() if d["trusted"]}
+    for serial in dict.fromkeys(follow):
+        if serial in trusted:
+            db.set_follow(serial, repo_id, True)
+            record_audit(request, "auto_update_on",
+                         f"{info.owner}/{info.repo} → {trusted[serial]['nickname'] or serial}")
+    since = db.now()
+    background_tasks.add_task(poller.check_repo, db.get_repo(repo_id), True)
+    # The page then reloads itself until that first check has finished.
+    return redirect("/apps", card=f"repo-{repo_id}", checking=repo_id, since=since)
 
 
 @router.post("/repos/{repo_id}/delete")
@@ -218,7 +227,7 @@ def delete_repo(repo_id: int, request: Request, session: dict = Depends(auth.req
     staging.remove_repo_dir(repo_id)
     if repo_row is not None:
         record_audit(request, "repo_remove", f"{repo_row['owner']}/{repo_row['repo']}")
-    return redirect("/sources", ok="Repo removed")
+    return redirect("/apps", ok="Repo removed")
 
 
 @router.post("/repos/{repo_id}/check-now")
@@ -234,8 +243,8 @@ def check_repo_now(
         raise HTTPException(status_code=404)
     # Check now also restages the current release if its files were deleted.
     background_tasks.add_task(poller.check_repo, repo_row, True)
-    # The Sources page then reloads itself until this check has finished.
-    return redirect("/sources", checking=repo_id, since=db.now())
+    # The Apps page then reloads itself until this check has finished.
+    return redirect("/apps", card=f"repo-{repo_id}", checking=repo_id, since=db.now())
 
 
 @router.post("/repos/{repo_id}/prereleases")
@@ -249,7 +258,8 @@ def toggle_prereleases(
         raise HTTPException(status_code=404)
     db.set_include_prereleases(repo_id, include == "1")
     record_audit(request, "repo_prereleases", f"{repo_row['owner']}/{repo_row['repo']} include={include == '1'}")
-    return redirect("/sources", ok="Updated")
+    return redirect("/apps", card=f"repo-{int(repo_id)}",
+                    ok="Pre-releases " + ("included" if include == "1" else "left out"))
 
 
 @router.post("/repos/{repo_id}/accept-signer")
@@ -260,10 +270,10 @@ def accept_signer(
 ):
     check_csrf(request, session, csrf_token)
     if confirm != "yes":
-        return redirect("/sources", error="Tick the confirmation box to accept a new signer")
+        return redirect("/apps", error="Tick the confirmation box to accept a new signer")
     before = db.get_repo(repo_id)
     if before is None or not db.accept_pending_signer(repo_id):
-        return redirect("/sources", error="No pending signer change for that repo")
+        return redirect("/apps", error="No pending signer change for that repo")
     logger.warning("repo %s: operator accepted a new signing certificate", repo_id)
     record_audit(
         request, "signer_accepted",
@@ -271,7 +281,7 @@ def accept_signer(
         f"package={before['pending_package']} lineage_proven={bool(before['pending_lineage_ok'])}",
     )
     background_tasks.add_task(poller.check_repo, db.get_repo(repo_id))
-    return redirect("/sources", ok="New signer pinned — re-checking the release now")
+    return redirect("/apps", card=f"repo-{int(repo_id)}", ok="New signer pinned — re-checking the release now")
 
 
 @router.post("/staged/upload")
@@ -303,7 +313,7 @@ def upload_apk(
         digest = receive_upload(apk, tmp_path)
     except UploadRejected as exc:
         staging.remove_file(tmp_path)
-        return redirect("/sources", error=f"Upload refused: {exc}")
+        return redirect("/apps", error=f"Upload refused: {exc}")
     except BaseException:
         staging.remove_file(tmp_path)
         raise

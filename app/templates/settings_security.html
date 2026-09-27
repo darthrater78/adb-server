@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_push.html" import confirm_delete with context %}
 {% block title %}Security — Settings — ADB Server{% endblock %}
 {% block content %}
 {% include "_settings_nav.html" %}
@@ -38,7 +39,7 @@
   <details class="fold sub" open>
   <summary><h3>Trusted browsers</h3></summary>
   {% if trusted_browsers %}
-  <div class="table-wrap">
+  <div class="table-wrap" id="trusted-browsers">
   <table>
     <thead><tr><th>Browser</th><th>From</th><th>Trusted since</th><th>Last used</th><th>Until</th><th></th></tr></thead>
     <tbody>
@@ -50,21 +51,22 @@
         <td data-label="Last used">{{ b.last_used_at | when("—") }}</td>
         <td data-label="Until">{{ b.expires_at | when }}</td>
         <td>
-          <form method="post" action="/settings/mfa/trusted/revoke">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="browser" value="{{ b.token_hash }}">
-            <button type="submit" class="danger">Revoke</button>
-          </form>
+          {% call confirm_delete("revoke-" ~ b.token_hash[:16], "trusted-browsers", "Revoke " ~ b.label ~ "?", "/settings/mfa/trusted/revoke",
+              {"browser": b.token_hash}, "Revoke", trigger_class="secondary danger-link") %}
+          <p>That browser is asked for a two-factor code at its next login.</p>
+          {% endcall %}
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
-  <form method="post" action="/settings/mfa/trusted/revoke">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="secondary">Revoke all</button>
-  </form>
+  <div class="actions">
+  {% call confirm_delete("revoke-all", "trusted-browsers", "Revoke every trusted browser?", "/settings/mfa/trusted/revoke",
+      {}, "Revoke all", trigger_class="secondary danger-link") %}
+  <p>Every browser, this one included, is asked for a two-factor code at its next login.</p>
+  {% endcall %}
+  </div>
   {% else %}
   <p class="muted small">None. Tick "Trust this browser" when entering a code to skip it for {{ trust_days }} days.</p>
   {% endif %}

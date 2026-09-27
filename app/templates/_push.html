@@ -1,22 +1,50 @@
-{# Every push on Status and Install goes through this: a link that opens a
-   CSS :target dialog (the CSP allows no JavaScript), and a CSRF-protected
-   POST inside it. `back_to` is the id the dialog's Cancel returns to.
-   Import it `with context` so csrf_token is in scope. #}
-{% macro confirm_dialog(id, back_to, title, action, fields, submit, trigger, trigger_class="") %}
-<a href="#{{ id }}" class="button-link{{ ' ' ~ trigger_class if trigger_class }}">{{ trigger }}</a>
+{# Every push, and every remove or delete, goes through a confirm: a link
+   that opens a CSS :target dialog (the CSP allows no JavaScript), and a
+   CSRF-protected POST inside it. `back_to` is the id the dialog's Cancel
+   returns to. Import it `with context` so csrf_token is in scope. #}
+
+{# The dialog alone, for a trigger that has to live elsewhere (inside another form). #}
+{% macro confirm_modal(id, back_to, title, action, fields, submit,
+    note="Apps keep their data. Its progress shows on this page.", submit_class="") %}
 <div id="{{ id }}" class="modal" role="dialog" aria-modal="true" aria-labelledby="{{ id }}-title">
   <a href="#{{ back_to }}" class="modal-backdrop" aria-label="Cancel" tabindex="-1"></a>
   <div class="modal-card">
     <h2 id="{{ id }}-title">{{ title }}</h2>
     {{ caller() }}
-    <p class="muted small">Apps keep their data. You'll see the progress, then come back here.</p>
+    {% if note %}<p class="muted small">{{ note }}</p>{% endif %}
     <form method="post" action="{{ action }}" class="modal-actions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% for name, value in fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">
       {% endfor %}
       <a href="#{{ back_to }}" class="button-link secondary">Cancel</a>
-      <button type="submit">{{ submit }}</button>
+      <button type="submit"{% if submit_class %} class="{{ submit_class }}"{% endif %}>{{ submit }}</button>
     </form>
   </div>
 </div>
+{% endmacro %}
+
+{% macro confirm_dialog(id, back_to, title, action, fields, submit, trigger, trigger_class="",
+    note="Apps keep their data. Its progress shows on this page.", submit_class="") %}
+{% set body = caller() %}
+<a href="#{{ id }}" class="button-link{{ ' ' ~ trigger_class if trigger_class }}">{{ trigger }}</a>
+{% call confirm_modal(id, back_to, title, action, fields, submit, note, submit_class) %}{{ body }}{% endcall %}
+{% endmacro %}
+
+{# A remove or delete: a red trigger and a red confirm, no push note. #}
+{% macro confirm_delete(id, back_to, title, action, fields, submit, trigger=none, trigger_class="danger-link") %}
+{% set body = caller() %}
+{% call confirm_dialog(id, back_to, title, action, fields, submit, trigger or submit, trigger_class, note="",
+    submit_class="danger") %}{{ body }}{% endcall %}
+{% endmacro %}
+
+{# How the row's push is going: a moving bar while it runs, then a full
+   green or red one saying how it went (the page stops refreshing then). #}
+{% macro push_state(busy, done, failed) %}
+{% if busy %}<span class="push-state"><span class="row-progress"><span class="progress-bar indeterminate"></span></span>
+  <span class="status-installing">{{ "Queued…" if busy.status == "pending" else "Installing " ~ (busy.version_name or busy.tag) ~ "…" }}</span></span>
+{%- elif done %}<span class="push-state"><span class="row-progress"><span class="progress-bar success"></span></span>
+  <span class="status-success">✓ Installed {{ done.version_name or done.tag }} {{ done.finished_at | when }}</span></span>
+{%- elif failed %}<span class="push-state"><span class="row-progress"><span class="progress-bar failed"></span></span>
+  <span><span class="status-failed">Push failed</span> · <a href="/installs/{{ failed.id }}">why</a></span></span>
+{%- endif %}
 {% endmacro %}

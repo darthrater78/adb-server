@@ -325,3 +325,89 @@ def test_insert_still_refuses_a_live_duplicate():
                 package_name="p", signer_sha256=SIGNER_A, path="/data/staging/1/x.apk")
     assert db.insert_staged_apk(**args) is not None
     assert db.insert_staged_apk(**args) is None
+
+
+# ---- speed without losing order ----
+
+def test_a_check_is_recorded_only_once_its_files_are_staged(upstream, monkeypatch):
+    """A page waiting on Check now stops at last_checked_at: the files must already be there."""
+    rid = db.create_repo("o", "r", "*.apk")
+    seen = []
+    real = db.update_repo_check
+
+    def record(repo_id, **kw):
+        if kw.get("last_tag"):
+            seen.append(db.has_staged_release(repo_id, kw["last_tag"]))
+        return real(repo_id, **kw)
+    monkeypatch.setattr(db, "update_repo_check", record)
+    _poll(rid)
+    assert seen == [True]
+
+
+def test_a_releases_builds_download_side_by_side(upstream, monkeypatch):
+    upstream.assets = {"app-arm64.apk": ("arm64-v8a",), "app-x86.apk": ("x86_64",), "app-v7.apk": ("armeabi-v7a",)}
+    running, peak = 0, 0
+    real = upstream._download
+
+    async def slow(asset, dest, token):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return await real(asset, dest, token)
+    monkeypatch.setattr(github_client, "download_asset", slow)
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    assert peak > 1 and len(db.list_staged_apks()) == 3
+    # Staged in the release's own order, whatever finished first.
+    assert [a["filename"] for a in sorted(db.list_staged_apks(), key=lambda a: a["id"])] == list(upstream.assets)
+
+
+def test_one_failed_build_leaves_no_files_behind(upstream, monkeypatch):
+    upstream.assets = {"a.apk": (), "b.apk": ()}
+    real = upstream._download
+
+    async def half(asset, dest, token):
+        if asset["name"] == "b.apk":
+            raise github_client.GithubError("boom")
+        return await real(asset, dest, token)
+    monkeypatch.setattr(github_client, "download_asset", half)
+    rid = db.create_repo("o", "r", "*.apk")
+    _poll(rid)
+    assert db.list_staged_apks() == []
+    leftovers = [f for f in os.listdir(staging.repo_dir(rid)) if f.startswith("_download_")]
+    assert leftovers == [] and "boom" in db.get_repo(rid)["last_error"]
+
+
+def test_a_poll_checks_repos_side_by_side(monkeypatch):
+    running, peak = 0, 0
+
+    async def check(repo_row, restage=False):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+    monkeypatch.setattr(poller, "check_repo", check)
+    for n in range(5):
+        db.create_repo("o", f"r{n}", "*.apk")
+    asyncio.run(poller.poll_all_repos())
+    assert 1 < peak <= poller.POLL_CONCURRENCY
+
+
+def test_api_reads_share_one_connection_pool(monkeypatch):
+    import httpx
+    made = []
+    real = httpx.AsyncClient
+
+    def factory(**kw):
+        made.append(kw)
+        return real(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={"ok": 1})), **kw)
+    monkeypatch.setattr(github_client.httpx, "AsyncClient", factory)
+
+    async def three():
+        for n in range(3):
+            await github_client._get_json(f"https://api.github.com/x/{n}", None)
+    asyncio.run(three())
+    assert len(made) == 1  # one client, its connections kept open between requests
