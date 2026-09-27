@@ -41,7 +41,10 @@ def test_foreign_origin_is_rejected(authed):
     assert r.status_code == 403
 
 
-@pytest.mark.parametrize("nxt,expected", [("/devices", "/devices"), ("https://evil.example", "/status"), ("//evil.example", "/status")])
+@pytest.mark.parametrize("nxt,expected", [("/devices", "/devices"), ("/repos/3/artifacts", "/repos/3/artifacts"),
+                                          ("/installs/7", "/installs/7"), ("https://evil.example", "/status"),
+                                          ("//evil.example", "/status"), ("/\\evil.example", "/status"),
+                                          ("/status?next=//evil.example", "/status")])
 def test_theme_redirect_is_allow_listed(authed, nxt, expected):
     r = authed.post("/theme", data={"csrf_token": CSRF, "theme": "dark", "next": nxt}, follow_redirects=False)
     assert r.headers["location"] == expected
@@ -120,3 +123,8 @@ def test_header_links_to_the_repo_and_this_versions_release_notes(authed):
 def test_ui_fonts_are_served_as_fonts(client):
     r = client.get("/static/fonts/figtree-latin-wght-normal.woff2")
     assert r.status_code == 200 and r.headers["content-type"] == "font/woff2"
+
+
+def test_the_theme_switcher_comes_back_to_the_page_it_was_pressed_on(authed):
+    page = authed.get("/installs?ok=hi").text
+    assert '<input type="hidden" name="next" value="/installs">' in page

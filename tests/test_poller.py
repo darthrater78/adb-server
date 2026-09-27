@@ -344,6 +344,42 @@ def test_a_check_is_recorded_only_once_its_files_are_staged(upstream, monkeypatc
     assert seen == [True]
 
 
+def test_auto_updates_are_queued_before_the_check_is_recorded(upstream, monkeypatch):
+    """Watching a repo with a device ticked: the page waiting on its first
+    check must see the install pending, or it stops reloading before it starts."""
+    import pushes
+    rid = db.create_repo("o", "r", "*.apk")
+    db.upsert_paired_device("SER", "192.168.1.50:37000")
+    db.set_device_trusted("SER", True)
+    db.set_follow("SER", rid, True)
+    seen, ran = [], []
+    real = db.update_repo_check
+
+    def record(repo_id, **kw):
+        if kw.get("last_tag"):
+            seen.append([i["status"] for i in db.list_installs()])
+        return real(repo_id, **kw)
+    monkeypatch.setattr(db, "update_repo_check", record)
+    monkeypatch.setattr(pushes, "run_push", lambda install_id, device, apk: ran.append(install_id))
+
+    async def check_and_let_pushes_run():
+        await poller.check_repo(db.get_repo(rid))
+        await asyncio.gather(*poller._background)
+    asyncio.run(check_and_let_pushes_run())
+    assert seen == [["pending"]] and ran == [db.list_installs()[0]["id"]]
+
+
+def test_a_crashed_check_is_recorded_so_check_now_stops_waiting(upstream, monkeypatch):
+    rid = db.create_repo("o", "r", "*.apk")
+
+    async def boom(owner, repo, token, include_prereleases=False):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(github_client, "get_latest_release", boom)
+    _poll(rid)
+    repo = db.get_repo(rid)
+    assert repo["last_checked_at"] and "Internal error" in repo["last_error"]
+
+
 def test_a_releases_builds_download_side_by_side(upstream, monkeypatch):
     upstream.assets = {"app-arm64.apk": ("arm64-v8a",), "app-x86.apk": ("x86_64",), "app-v7.apk": ("armeabi-v7a",)}
     running, peak = 0, 0

@@ -269,8 +269,9 @@ def accept_signer(
     csrf_token: str = Form(...), confirm: str = Form(""),
 ):
     check_csrf(request, session, csrf_token)
+    card = f"repo-{int(repo_id)}"
     if confirm != "yes":
-        return redirect("/apps", error="Tick the confirmation box to accept a new signer")
+        return redirect("/apps", card=card, error="Tick the confirmation box to accept a new signer")
     before = db.get_repo(repo_id)
     if before is None or not db.accept_pending_signer(repo_id):
         return redirect("/apps", error="No pending signer change for that repo")
@@ -280,8 +281,10 @@ def accept_signer(
         f"{before['owner']}/{before['repo']} {before['signer_sha256']} -> {before['pending_signer']} "
         f"package={before['pending_package']} lineage_proven={bool(before['pending_lineage_ok'])}",
     )
+    since = db.now()
     background_tasks.add_task(poller.check_repo, db.get_repo(repo_id))
-    return redirect("/apps", card=f"repo-{int(repo_id)}", ok="New signer pinned — re-checking the release now")
+    # Apps then reloads itself until the release is staged, like Check now.
+    return redirect("/apps", card=card, checking=int(repo_id), since=since)
 
 
 @router.post("/staged/upload")

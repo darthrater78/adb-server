@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Install history — ADB Server{% endblock %}
+{# Reloads itself while a push runs, so its row ends up saying how it went. #}
+{% block head %}{% if running %}<meta http-equiv="refresh" content="2; url={{ reload_url }}">{% endif %}{% endblock %}
 {% block content %}
 <p class="breadcrumb"><a href="/status">Status</a> /</p>
 <h1>Install history</h1>

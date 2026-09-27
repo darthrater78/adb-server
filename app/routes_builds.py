@@ -144,10 +144,11 @@ async def artifacts_page(
             staged_builds = _staged_builds(repo_id, shown)
         except github_client.GithubError as exc:
             problem = str(exc)
+    card_ids = ["signing", *(f"artifact-{item['a'].id}" for c in artifacts for item in c["artifacts"])]
     return templates.TemplateResponse(
         request, "artifacts.html",
-        context(request, session, repo=repo, artifacts=artifacts, releases=releases, problem=problem, signing=signing,
-                staged_builds=staged_builds,
+        context(request, session, card_ids=card_ids, repo=repo, artifacts=artifacts, releases=releases,
+                problem=problem, signing=signing, staged_builds=staged_builds,
                 devices=[d for d in db.list_devices() if d["trusted"]],
                 max_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), error=error, ok=ok, warn=warn),
     )
@@ -165,12 +166,13 @@ def set_sign_unsigned(
     if repo is None:
         raise HTTPException(status_code=404)
     turn_on = on == "1"
+    back = f"/repos/{int(repo_id)}/artifacts"
     if turn_on and understood != "yes":
-        return redirect(f"/repos/{int(repo_id)}/artifacts#signing",
-                         error="Tick that you understand what signing with this server's key means first")
+        return redirect(back, card="signing",
+                        error="Tick that you understand what signing with this server's key means first")
     db.set_sign_unsigned(repo_id, turn_on)
     record_audit(request, "sign_unsigned_on" if turn_on else "sign_unsigned_off", f"{repo['owner']}/{repo['repo']}")
-    return redirect(f"/repos/{int(repo_id)}/artifacts#signing",
+    return redirect(back, card="signing",
                      ok=("Unsigned builds from this repo will be signed with this server's key for this repo" if turn_on
                          else "Unsigned builds from this repo will be refused again"))
 
@@ -327,7 +329,7 @@ async def check_artifact_signing(
     finally:
         staging.remove_file(tmp_path)
     db.record_artifact_signing(artifact.id, repo_id, kind, signer, detail)
-    return redirect(f"{back}#artifact-{artifact.id}", ok=f"{artifact.name}: {SIGNING_LABELS[kind]}")
+    return redirect(back, card=f"artifact-{artifact.id}", ok=f"{artifact.name}: {SIGNING_LABELS[kind]}")
 
 
 def artifact_filter() -> dict:

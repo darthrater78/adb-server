@@ -191,7 +191,7 @@ def test_status_offers_test_builds_and_uploads_per_device(authed, device, queued
     assert "o/r" in artifact[:600] and "main @ abc1234" in artifact[:600] and "Test build" in artifact[:1500]
     r = authed.post("/push", data={"csrf_token": CSRF, "device_serial": "SER", "apk_id": up, "back": "/status"},
                     follow_redirects=False)
-    assert r.headers["location"] == f"/status?open={DOM}#upload-{up}-{DOM}" and queued == [up]
+    assert r.headers["location"] == f"/status?at=upload-{up}-{DOM}&open={DOM}#upload-{up}-{DOM}" and queued == [up]
 
 
 def test_an_installed_upload_is_its_row_not_an_other_app(authed, device):
@@ -220,7 +220,7 @@ def test_library_shows_a_push_running_on_its_row(authed, device):
     row = page[page.index(f'id="repo-{rid}"'):]
     row = row[:row.index("app-card-more")]
     assert "Installing 2.0…" in row and 'action="/push-latest"' not in row
-    assert '<meta http-equiv="refresh" content="2">' in page
+    assert '<meta http-equiv="refresh" content="2; url=/apps?tick=1">' in page
 
 
 def test_deleting_a_file_comes_back_to_its_kind(authed, device):
@@ -284,6 +284,16 @@ def test_a_check_waits_on_the_repos_card(authed, device):
     assert "Checking o/r…" in card
 
 
+def test_accepting_a_new_signer_waits_for_its_recheck(authed, lookup):
+    rid = db.create_repo("o", "r", "*.apk")
+    db.set_rejected_tag(rid, "v2", "Pin mismatch", "com.example", "b" * 64, True)
+    r = authed.post(f"/repos/{rid}/accept-signer", data={"csrf_token": CSRF, "confirm": "yes"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith(f"/apps?checking={rid}&since=")
+    assert r.headers["location"].endswith(f"&open=repo-{rid}#repo-{rid}")
+    assert lookup == [(rid, False)]
+
+
 def test_check_now_and_prereleases_come_back_to_the_card(authed, lookup):
     rid = db.create_repo("o", "r", "*.apk")
     r = authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF}, follow_redirects=False)
@@ -322,7 +332,7 @@ def test_stage_and_install_a_release_pushes_the_build_for_the_cpu(authed, device
                     follow_redirects=False)
     [x86] = [a for a in db.list_staged_apks(past_release) if a["filename"] == "x86.apk"]
     assert queued == [x86["id"]]
-    assert r.headers["location"] == f"/status?ok=Staged%20v1%20%282%20APKs%29&open={DOM}#app-{past_release}-{DOM}"
+    assert r.headers["location"] == f"/status?at=app-{past_release}-{DOM}&ok=Staged%20v1%20%282%20APKs%29&open={DOM}#app-{past_release}-{DOM}"
 
 
 def test_stage_and_install_needs_a_known_device(authed, past_release):

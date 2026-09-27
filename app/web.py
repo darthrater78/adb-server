@@ -7,7 +7,7 @@ import os
 import re
 import zoneinfo
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -115,12 +115,7 @@ templates.env.filters["siblings"] = siblings
 
 
 VALID_THEMES = {"flashbang", "dark", "oled"}
-# Exact allow-list, not a prefix/startswith check — the "next" field on the
-# theme form is client-supplied, and an open redirect is exactly what a
-# permissive check here would hand an attacker.
 SETTINGS_PAGES = ("general", "security", "notifications", "github", "appearance")
-KNOWN_NAV_PATHS = {"/status", "/apps", "/devices", "/settings", "/installs", "/audit",
-                   *(f"/settings/{p}" for p in SETTINGS_PAGES)}
 # Pages reached from another page rather than the top bar highlight that page.
 NAV_SECTION = {"/installs": "/status", "/audit": "/settings", **{f"/settings/{p}": "/settings" for p in SETTINGS_PAGES}}
 # ...and so do the pages under one: a repo's Builds, one push's progress.
@@ -136,6 +131,37 @@ def nav_section(path: str) -> str:
 # The card a redirect asks a page to open (and scroll to, with the same id
 # as its fragment). Only ids the page itself offers are honoured.
 _CARD_ID = re.compile(r"[a-z][a-z0-9-]{0,63}")
+
+
+# A path on this server, and nothing else: never "//host" or "/\\host",
+# which a browser would take for another site. The theme form's "next" is
+# client-supplied, and an open redirect is what a looser check would hand
+# an attacker.
+_LOCAL_PATH = re.compile(r"/(?![/\\])[A-Za-z0-9/_.\-]{0,200}")
+
+
+def safe_local_url(url: str | None) -> str | None:
+    return url if url and _LOCAL_PATH.fullmatch(url) else None
+
+
+# What a reloading page keeps of its URL: the parameters those pages read.
+_RELOAD_PARAMS = ("ok", "error", "warn", "open", "at", "to", "checking", "since", "back", "ids")
+
+
+def reload_url(request: Request, fragment: str | None = None) -> str:
+    """Where a page that reloads itself (a meta refresh: the CSP allows no
+    JavaScript) goes next: its own URL with `tick` counted up. A refresh to
+    the exact URL the page is on, #fragment and all, is only a scroll to a
+    browser, never a reload, so the URL must change each time. The browser
+    never sends the #fragment, so it's the row named by ?at=, else `fragment`
+    (the card the page was opened on)."""
+    tick = request.query_params.get("tick", "")
+    tick = min(int(tick), 999) + 1 if tick.isdigit() else 1
+    at = request.query_params.get("at", "")
+    fragment = at if _CARD_ID.fullmatch(at) else fragment
+    params = [(k, v) for k, v in request.query_params.multi_items() if k in _RELOAD_PARAMS]
+    query = urlencode([*params, ("tick", tick)])
+    return f"{request.url.path}?{query}" + (f"#{fragment}" if fragment else "")
 
 
 def _get_theme(request: Request) -> str:
@@ -172,10 +198,13 @@ def context(request: Request, session: dict | None = None, card_ids=(), **extra)
         # Changes whenever the accent does, so browsers refetch /accent.css.
         "accent_version": (db.get_meta("accent_color") or "default").replace("#", ""),
         "theme": _get_theme(request),
-        "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/status",
+        # Where the theme switcher comes back to: this page (never its query,
+        # so nothing a link put in it is written into the page).
+        "current_path": safe_local_url(request.url.path) or "/status",
         "nav_path": nav_section(request.url.path),
         "open_card": wanted if _CARD_ID.fullmatch(wanted) and wanted in set(card_ids) else None,
     }
+    ctx["reload_url"] = reload_url(request, ctx["open_card"])
     if session is not None:
         ctx["csrf_token"] = session.get("csrf", "")
     ctx.update(extra)

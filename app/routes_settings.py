@@ -39,7 +39,8 @@ def set_theme(
     check_csrf(request, session, csrf_token)
     if theme not in web.VALID_THEMES:
         raise HTTPException(status_code=400, detail="Unknown theme")
-    next_path = next if next in web.KNOWN_NAV_PATHS else "/status"
+    # Back to the page it was pressed on, reloaded in the new theme.
+    next_path = web.safe_local_url(next) or "/status"
     response = RedirectResponse(next_path, status_code=303)
     # Cosmetic preference, not session state — plain cookie, not httponly, so
     # it stays simple and separate from the signed auth session.

@@ -998,10 +998,11 @@ def test_check_signing_downloads_checks_and_forgets_the_file(authed, artifact_en
     page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
     assert f'action="/repos/{artifact_env["rid"]}/artifacts/5/check"' in page
     r = authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/check", data={"csrf_token": CSRF}, follow_redirects=False)
-    assert r.headers["location"].endswith("#artifact-5") and "ok=" in r.headers["location"]
+    assert r.headers["location"].endswith("&open=artifact-5#artifact-5") and "ok=" in r.headers["location"]
     assert artifact_env["downloads"] == 1 and _uploads() == [] and db.list_staged_apks() == []  # nothing kept
-    page = authed.get(f"/repos/{artifact_env['rid']}/artifacts").text
+    page = authed.get(r.headers["location"]).text
     assert expected in page and "/artifacts/5/check" not in page  # known now: no second download
+    assert '<div class="build-row" id="artifact-5">\n      <div class="card-flash">' in page  # said on its row
 
 
 def test_a_broken_artifact_is_marked_invalid(authed, artifact_env):

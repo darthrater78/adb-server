@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_push.html" import confirm_dialog, confirm_delete, push_state with context %}
 {% block title %}Apps — ADB Server{% endblock %}
-{% block head %}{% if auto_refresh %}<meta http-equiv="refresh" content="2; url={{ auto_refresh }}">{% elif running %}<meta http-equiv="refresh" content="2">{% endif %}{% endblock %}
+{% block head %}{% if auto_refresh %}<meta http-equiv="refresh" content="2; url={{ auto_refresh }}">{% elif running %}<meta http-equiv="refresh" content="2; url={{ reload_url }}">{% endif %}{% endblock %}
 {% block content %}
 <h1>Apps</h1>
 <p class="page-intro muted">Every app this server installs, and where it comes from. Watch a GitHub repo and each new

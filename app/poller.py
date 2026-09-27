@@ -173,16 +173,24 @@ async def check_repo(repo_row, restage: bool = False) -> None:
     async with lock:
         # Re-read: the row passed in may be stale by the time the lock is held.
         fresh = db.get_repo(repo_row["id"])
-        if fresh is not None:
+        if fresh is None:
+            return
+        try:
             await _check_repo(fresh, restage)
+        except Exception:
+            # Recorded as a checked error, so a page waiting on this check
+            # (Check now) shows it instead of waiting until it gives up.
+            logger.exception("%s/%s: check crashed", fresh["owner"], fresh["repo"])
+            db.update_repo_check(fresh["id"], last_error="Internal error while checking — see server logs")
 
 
 async def _notify(event: str, title: str, body: str) -> None:
     await asyncio.to_thread(notify.send, event, title, body)
 
 
-async def _auto_update(repo_id: int) -> None:
-    for install_id, device, apk in pushes.auto_push_targets(repo_id):
+async def _auto_update(queued: list[tuple[int, dict, dict]]) -> None:
+    """Runs the pushes auto_push_targets() queued, one after another."""
+    for install_id, device, apk in queued:
         logger.info("auto-update: %s %s -> %s", apk["repo"], apk["tag"], device["serial"])
         await asyncio.to_thread(pushes.run_push, install_id, device, apk)
 
@@ -392,9 +400,12 @@ async def _check_repo(repo_row, restage: bool = False) -> None:
         await _notify("rejected", f"{label} {tag} rejected", str(exc))
         return
 
-    # Staged first, then recorded as checked: a page waiting on the check
-    # (Check now) stops waiting at last_checked_at, so the files must be there by then.
+    # Staged, and its auto-updates queued, before it's recorded as checked: a
+    # page waiting on the check (Check now, watching a repo) stops waiting at
+    # last_checked_at, so the files must be there by then, and the pushes
+    # already pending for the page to keep reloading until they're done.
     staged = _stage(repo_row, tag, release, variants, repo_dir)
+    queued = pushes.auto_push_targets(repo_row["id"]) if staged else []
     if repo_row["expected_package"] is None:
         # First release ever staged for this repo — pin it. Every later
         # release must match both, or it's a rejected, surfaced mismatch.
@@ -411,7 +422,8 @@ async def _check_repo(repo_row, restage: bool = False) -> None:
     if staged:
         version = first.info.version_name or tag
         await _notify("staged", f"{label} {version} ready", f"{staged} APK(s) verified and staged.")
-        _spawn(_auto_update(repo_row["id"]))
+    if queued:
+        _spawn(_auto_update(queued))
 
 
 TOKEN_EXPIRY_WARN_DAYS = 7
@@ -447,12 +459,8 @@ async def poll_all_repos() -> None:
 
     async def one(repo_row) -> None:
         async with gate:
-            try:
-                await check_repo(repo_row)
-            except Exception:
-                # One repo failing in an unexpected way must not stop any
-                # other repo from being polled.
-                logger.exception("%s/%s: poll crashed", repo_row["owner"], repo_row["repo"])
-                db.update_repo_check(repo_row["id"], last_error="Internal error while checking — see server logs")
+            # check_repo records its own crash, so one repo failing can't
+            # stop any other from being polled.
+            await check_repo(repo_row)
 
     await asyncio.gather(*(one(r) for r in db.list_repos()))

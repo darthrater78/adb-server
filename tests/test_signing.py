@@ -180,8 +180,14 @@ def test_the_repo_opt_in_needs_the_explanation_acknowledged(authed):
     rid = db.create_repo("o", "r", "*.apk", github_id=1, owner_id=2, owner_type="User")
     r = authed.post(f"/repos/{rid}/sign-unsigned", data={"csrf_token": CSRF, "on": "1"}, follow_redirects=False)
     assert "understand" in r.headers["location"] and db.get_repo(rid)["sign_unsigned"] == 0
-    authed.post(f"/repos/{rid}/sign-unsigned", data={"csrf_token": CSRF, "on": "1", "understood": "yes"})
+    r = authed.post(f"/repos/{rid}/sign-unsigned", data={"csrf_token": CSRF, "on": "1", "understood": "yes"},
+                    follow_redirects=False)
     assert db.get_repo(rid)["sign_unsigned"] == 1
+    # Back on the section, open, saying so: not a folded section with the message out of view.
+    assert r.headers["location"].endswith("&open=signing#signing")
+    page = authed.get(r.headers["location"]).text
+    section = page[page.index('id="signing"'):]
+    assert section.startswith('id="signing" open>') and "will be signed with this server" in section
     assert any(a["action"] == "sign_unsigned_on" for a in db.list_audit())
     authed.post(f"/repos/{rid}/sign-unsigned", data={"csrf_token": CSRF, "on": "0"})
     assert db.get_repo(rid)["sign_unsigned"] == 0
