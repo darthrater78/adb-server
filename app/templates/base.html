@@ -23,7 +23,7 @@
           ("/status", "Status", '<path d="M3 12h4l3-7 4 14 3-7h4"/>'),
           ("/sources", "Sources", '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
           ("/devices", "Devices", '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/>'),
-          ("/install", "Install", '<path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 20h14"/>'),
+          ("/library", "Library", '<path d="M4 4h4v16H4zM10 4h4v16h-4z"/><path d="M15.8 5.2l3.4-.9 3.3 15.4-3.4.9z"/>'),
           ("/settings", "Settings", '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>')] %}
       <a href="{{ href }}"{% if href == nav_path %} class="active"{% if href == request.url.path %} aria-current="page"{% endif %}{% endif %}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon | safe }}</svg>{{ label }}</a>
       {% endfor %}
@@ -54,11 +54,9 @@
 
   <main>
     {% if csrf_token is defined %}{% for w in weak_settings + version_problems %}<p class="flash flash-warn">{{ w }}</p>{% endfor %}{% endif %}
-    {% block flashes %}
-    {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
-    {% if ok %}<p class="flash flash-ok">{{ ok }}</p>{% endif %}
-    {% if warn %}<p class="flash flash-warn">{{ warn }}</p>{% endif %}
-    {% endblock %}
+    {# A page opened on one card (?open=) shows the message inside that card,
+       where the action was, instead of up here. #}
+    {% block flashes %}{% if not open_card %}{% include "_flash.html" %}{% endif %}{% endblock %}
     {% block content %}{% endblock %}
   </main>
 </body>

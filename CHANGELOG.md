@@ -1,5 +1,58 @@
 # Changelog
 
+## 3.8.0 — 2026-09-27
+
+- Changed: **every action brings you back where you were.** Saving a name,
+  **Find**, **Reconnect**, **Trust**, auto-update, **Check now**, pre-releases,
+  **Update all** and deleting a file used to reload the page at the top with
+  every card folded, so you had to scroll back and open the card again. Now
+  the page comes back with that card open, scrolled to it (or to the row you
+  used), and the result is shown inside the card instead of at the top.
+- Changed: **cards that want you start open.** A device with updates, an
+  untrusted device, a device with a push running, a repo whose last check
+  failed, the setup checklist, or the only card on a page start open; quiet
+  ones stay folded. Before, everything outside Settings started folded, so
+  even seeing your updates took a click.
+- Changed: **Status is where you install, and Install is now the Library.**
+  Each device's card on Status now offers everything you can put on it:
+  every watched app (**Update** or **Install**, with **What's in …** release
+  notes folded under the row instead of a link to another page), and every
+  test build and upload staged (**Push** or **Install**). The Install page
+  becomes the **Library** (`/library`; `/install` still leads there): every
+  staged APK, for older versions, a specific CPU's build and deleting files.
+  The nav reads **Status · Sources · Devices · Library · Settings**.
+- Changed: **a push stays on the row you pushed from.** No more separate
+  progress page that bounced you back after the install: the row shows
+  **Installing…**, the page refreshes itself until it's done, and a strip at
+  the top lists pushes running now and those just finished, each with its
+  log. A row whose last push failed says so, with the log. Each push's own
+  page (from its log link or install history) no longer sends you away.
+- Added: **a device's tools on its Status card.** **Find** (for a phone whose
+  port changed), **Auto-update all** (on for every watched app it has, or
+  off for all), and, for an untrusted device, **Trust** right there. When
+  **Refresh installed versions** can't reach a phone, its card opens with
+  **Find** at hand.
+- Added: **trusting a phone takes you to it.** Trust after pairing goes on
+  to the device's card on Status, ready to install.
+- Added: **watching a repo gets you its app sooner.** Its first check starts
+  as soon as you confirm it (the page waits on its card), and you can tick
+  the trusted devices to install it on and keep updated.
+- Added: **Stage and install** on Builds. Beside each **Stage**, pick a
+  trusted device, and the release or test build is staged, then installed on
+  it; you land on its row on Status. Staged only, you land on it in the
+  Library rather than at the top of the page.
+- Changed: **Install history** sits under Status (a **History** button there),
+  still linked from Settings. Devices folds its explanation of **Find** and
+  **Reconnect**, and puts **Find** first.
+- Security: **images are scanned before they're published.** A release now
+  pushes each image by digest, scans it with Trivy (fixable HIGH and
+  CRITICAL in its OS packages), and only then tags it; it then checks every
+  tag points at the scanned image and that the image reports its version.
+  Each image also carries a signed build provenance attestation.
+- Security: **CodeQL** scans the code and workflows, **dependency review**
+  fails a pull request that adds a vulnerable dependency, and a weekly scan
+  re-checks the released images and the Python lockfile.
+
 ## 3.7.1 — 2026-09-25
 
 - Fixed: **Builds opens on the newest.** Releases and Test builds were both

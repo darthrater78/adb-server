@@ -33,7 +33,7 @@ def _check_result(repo) -> dict:
         return {"error": f"{name}: {repo['last_error']}"}
     if not repo["last_tag"]:
         return {"ok": f"{name} has no releases yet, only workflow builds: stage one from Builds."}
-    return {"ok": f"{name} checked: its latest release is {repo['last_tag']}."}
+    return {"ok": f"{name} checked: its latest release is {repo['last_tag']}, ready to install from Status."}
 
 
 @router.get("/sources", response_class=HTMLResponse)
@@ -44,7 +44,7 @@ def sources_page(
 ):
     """While a Check now runs (?checking=<repo>&since=<when it started>) the
     page reloads itself every 2 seconds with a meta refresh (no JavaScript
-    here), then shows what the check found."""
+    here), then shows what the check found, on the repo's card."""
     refresh = None
     since = since.replace(" ", "+") if since else since  # a "+" left unencoded in the URL arrives as a space
     if checking is not None and since:
@@ -59,7 +59,7 @@ def sources_page(
                 flash = _check_result(repo)
                 error, ok = flash.get("error"), flash.get("ok")
             elif waited < CHECK_WAIT_SECONDS:
-                refresh = f"/sources?checking={int(checking)}&since={quote(since)}"
+                refresh = f"/sources?checking={int(checking)}&since={quote(since)}&open=repo-{int(checking)}#repo-{int(checking)}"
                 ok = f"Checking {repo['owner']}/{repo['repo']}…"
             else:
                 warn = "The check is taking a while (a large download?). This page will show the result when you reload it."
@@ -136,10 +136,12 @@ def _sources_page(request: Request, session: dict, **extra) -> HTMLResponse:
     latest: dict[int, list] = {}
     for a in db.list_latest_variants():
         latest.setdefault(a["repo_id"], []).append(a)
+    repos = db.list_repos()
     return templates.TemplateResponse(
         request, "sources.html",
-        context(request, session, repos=db.list_repos(), latest=latest, uploads=uploaded,
-              max_upload_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), **extra),
+        context(request, session, card_ids=[f"repo-{r['id']}" for r in repos], repos=repos, latest=latest,
+                uploads=uploaded, devices=[d for d in db.list_devices() if d["trusted"]],
+                max_upload_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), **extra),
     )
 
 
@@ -176,6 +178,7 @@ async def review_repo(
 @router.post("/repos/confirm")
 async def confirm_repo(
     request: Request,
+    background_tasks: BackgroundTasks,
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
     owner: str = Form(...),
@@ -183,10 +186,13 @@ async def confirm_repo(
     github_id: int = Form(...),
     asset_glob: str = Form("*.apk"),
     include_prereleases: str = Form(""),
+    follow: list[str] = Form([]),
 ):
     """Step two: watch the repo that was reviewed, and pin its identity. It is
     looked up again, and refused if the name now points at a different repo
-    than the one on the review page."""
+    than the one on the review page. Its first check runs straight away, and
+    the trusted devices ticked in `follow` auto-update it, which installs its
+    first release on them as soon as that is staged."""
     check_csrf(request, session, csrf_token)
     asset_glob = asset_glob.strip() or "*.apk"
     try:
@@ -202,12 +208,21 @@ async def confirm_repo(
     if kind is None:
         return redirect("/sources", error=reason)
     try:
-        db.create_repo(info.owner, info.repo, asset_glob, include_prereleases == "1",
-                       github_id=info.id, owner_id=info.owner_id, owner_type=info.owner_type)
+        repo_id = db.create_repo(info.owner, info.repo, asset_glob, include_prereleases == "1",
+                                 github_id=info.id, owner_id=info.owner_id, owner_type=info.owner_type)
     except sqlite3.IntegrityError:
         return redirect("/sources", error="That repo is already registered")
     record_audit(request, "repo_add", f"{info.owner}/{info.repo} id={info.id} owner={info.owner_type} glob={asset_glob}")
-    return redirect("/sources", ok=f"Watching {info.owner}/{info.repo}")
+    trusted = {d["serial"]: d for d in db.list_devices() if d["trusted"]}
+    for serial in dict.fromkeys(follow):
+        if serial in trusted:
+            db.set_follow(serial, repo_id, True)
+            record_audit(request, "auto_update_on",
+                         f"{info.owner}/{info.repo} → {trusted[serial]['nickname'] or serial}")
+    since = db.now()
+    background_tasks.add_task(poller.check_repo, db.get_repo(repo_id), True)
+    # The page then reloads itself until that first check has finished.
+    return redirect("/sources", card=f"repo-{repo_id}", checking=repo_id, since=since)
 
 
 @router.post("/repos/{repo_id}/delete")
@@ -235,7 +250,7 @@ def check_repo_now(
     # Check now also restages the current release if its files were deleted.
     background_tasks.add_task(poller.check_repo, repo_row, True)
     # The Sources page then reloads itself until this check has finished.
-    return redirect("/sources", checking=repo_id, since=db.now())
+    return redirect("/sources", card=f"repo-{repo_id}", checking=repo_id, since=db.now())
 
 
 @router.post("/repos/{repo_id}/prereleases")
@@ -249,7 +264,8 @@ def toggle_prereleases(
         raise HTTPException(status_code=404)
     db.set_include_prereleases(repo_id, include == "1")
     record_audit(request, "repo_prereleases", f"{repo_row['owner']}/{repo_row['repo']} include={include == '1'}")
-    return redirect("/sources", ok="Updated")
+    return redirect("/sources", card=f"repo-{int(repo_id)}",
+                    ok="Pre-releases " + ("included" if include == "1" else "left out"))
 
 
 @router.post("/repos/{repo_id}/accept-signer")
@@ -271,7 +287,7 @@ def accept_signer(
         f"package={before['pending_package']} lineage_proven={bool(before['pending_lineage_ok'])}",
     )
     background_tasks.add_task(poller.check_repo, db.get_repo(repo_id))
-    return redirect("/sources", ok="New signer pinned — re-checking the release now")
+    return redirect("/sources", card=f"repo-{int(repo_id)}", ok="New signer pinned — re-checking the release now")
 
 
 @router.post("/staged/upload")

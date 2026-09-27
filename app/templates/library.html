@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Install — ADB Server{% endblock %}
+{% block title %}Library — ADB Server{% endblock %}
+{% block head %}{% if running %}<meta http-equiv="refresh" content="2">{% endif %}{% endblock %}
 {% block content %}
-<h1>Install</h1>
-<p class="page-intro install-intro">Every verified APK, by app. The newest release picks the right build for the device's
-  CPU. Add more apps on <a href="/sources">Sources</a>.</p>
+<h1>Library</h1>
+<p class="page-intro install-intro">Every verified APK this server has staged, by app: older versions, each CPU's
+  build, test builds and uploads, and deleting files. Updates and installs day to day are on
+  <a href="/status">Status</a>; add more apps on <a href="/sources">Sources</a>.</p>
 
 {% if not devices %}
 <p class="flash flash-warn">No trusted devices yet. <a href="/devices">Pair and trust one</a> to push to it.</p>
@@ -22,7 +24,7 @@
       <summary><span class="push-target-label">Pushing to</span> <strong>{{ target | device_name }}</strong> <span class="caret" aria-hidden="true">▾</span></summary>
       <ul>
         {% for d in devices %}
-        <li><a href="/install?to={{ d.serial | urlencode }}{{ '&show=' ~ show if show else '' }}"{% if d.serial == target.serial %} aria-current="true"{% endif %}>{{ d | device_name }}</a></li>
+        <li><a href="/library?to={{ d.serial | urlencode }}{{ '&show=' ~ show if show else '' }}"{% if d.serial == target.serial %} aria-current="true"{% endif %}>{{ d | device_name }}</a></li>
         {% endfor %}
       </ul>
     </details>
@@ -35,18 +37,20 @@
   <nav class="filter-pills" aria-label="Show">
     {% for k, label in [(none, "All"), ("release", "Releases"), ("artifact", "Test builds"), ("upload", "Uploads")] if not k or k in kinds %}
     {% set q = [to_q, "show=" ~ k if k else ""] | select | join("&") %}
-    <a href="/install{{ '?' ~ q if q else '' }}"{% if show == k %} aria-current="page"{% endif %}>{{ label }}</a>
+    <a href="/library{{ '?' ~ q if q else '' }}"{% if show == k %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
   {% endif %}
 </div>
 {% endif %}
 
+{% include "_activity.html" %}
+
 {# The confirm dialog every push shares with Status; the version in the
    button is left off on phones, where the row shows it already. #}
 {% from "_push.html" import confirm_dialog with context %}
 {% macro push_confirm(id, back_to, label, version, action, fields, has=none, trigger="Push", secondary=false) %}
-{% call confirm_dialog(id, back_to, "Push " ~ label ~ "?", action, dict(fields, device_serial=target.serial, back="/install"),
+{% call confirm_dialog(id, back_to, "Push " ~ label ~ "?", action, dict(fields, device_serial=target.serial, back="/library"),
     "Push now", trigger ~ ("<span class=\"push-what\"> " | safe) ~ version ~ ("</span>" | safe) if version else trigger,
     "push-link" ~ (" secondary" if secondary else "")) %}
 <p>
@@ -76,7 +80,8 @@
   {% elif k.target_has.version_code and kf.version_code and k.target_has.version_code < kf.version_code %}{% set st.behind = st.behind + 1 %}
   {% else %}{% set st.other = st.other + 1 %}{% endif %}
 {% endfor %}
-<details class="card row-card device-card item-card kind-group" id="kind-{{ g.kind }}"{% if show %} open{% endif %}>
+{% set cid = "kind-" ~ g.kind %}
+<details class="card row-card device-card item-card kind-group" id="{{ cid }}"{% if show or open_card == cid or kinds | length == 1 %} open{% endif %}>
   <summary>
     <span class="device-icon" aria-hidden="true">{% if g.kind == "release" %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>{% elif g.kind == "artifact" %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/></svg>{% else %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>{% endif %}</span>
     <div>
@@ -96,6 +101,7 @@
       <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
     </span>
   </summary>
+  {% if open_card == cid %}<div class="card-flash">{% include "_flash.html" %}</div>{% endif %}
   <div class="row-grid install-grid row-head" aria-hidden="true"><span>App</span><span>Version</span><span>{{ "On " ~ (target | device_name) if target else "Staged" }}</span><span></span></div>
 {% endif %}
 <section class="row-item app-card app-card-{{ g.kind }}" id="{{ 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id }}">
@@ -123,6 +129,7 @@
       {% set a = first %}{% include "_signing_badges.html" %}
     </div>
     <div class="row-state">
+      {% if g.busy %}<span class="status-installing">{{ "Queued" if g.busy.status == "pending" else "Installing" }} {{ g.busy.version_name or g.busy.tag }}…</span> · {% endif %}
       {% if target %}{% if not has %}Not installed{% elif has.version_code == first.version_code %}Installed{% else %}Has {{ has.version_name or "another version" }}{% endif %} · {% endif %}
       {{- "uploaded" if g.kind == "upload" else "staged" }} {{ first.downloaded_at | when }}
       · {{ latest.apks | length }} build{{ "" if latest.apks | length == 1 else "s" }}
@@ -130,7 +137,7 @@
       {%- if others %} · {{ "also " if has else "" }}on {% for d in others %}{{ d | device_name }}{{ ", " if not loop.last }}{% endfor %}{% endif %}
     </div>
     <div class="row-actions">
-      {% if target %}
+      {% if target and not g.busy %}
       {% set primary = not has or has.version_code != first.version_code %}
       {% set sid = 'app-' ~ g.repo_id if g.repo_id else 'upload-' ~ first.id %}
       {% if g.repo_id %}

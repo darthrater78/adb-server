@@ -143,7 +143,7 @@ def test_uploaded_apk_push_and_install_history(authed, verify, monkeypatch):
     assert "Manual upload" in authed.get("/installs").text
 
 
-def test_release_notes_are_on_the_install_page_and_linked_from_status(authed):
+def test_release_notes_are_in_the_library_and_on_status(authed):
     rid = db.create_repo("o", "r", "*.apk")
     os.makedirs(staging.repo_dir(rid), exist_ok=True)
     path = os.path.join(staging.repo_dir(rid), "a.apk")
@@ -152,10 +152,13 @@ def test_release_notes_are_on_the_install_page_and_linked_from_status(authed):
                                   release_notes="Long notes", version_name="1.0")
     db.upsert_paired_device("SER", "192.168.1.50:37000")
     db.set_device_trusted("SER", True)
-    page = authed.get("/install").text
+    page = authed.get("/library").text
     assert f'id="app-{rid}"' in page and f'id="apk-{apk_id}"' in page
     assert "Release notes for 1.0" in page and "Long notes" in page
-    assert f'href="/install#app-{rid}"' in authed.get("/status").text
+    # Status folds them under the row, rather than sending you off to read them.
+    status = authed.get("/status").text
+    row = status[status.index(f'id="app-{rid}-'):]
+    assert "What's in 1.0</summary>" in row and "Long notes" in row
 
 
 def test_migration_from_pre_upload_schema(tmp_path, monkeypatch):

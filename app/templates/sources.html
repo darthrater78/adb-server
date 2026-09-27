@@ -4,8 +4,8 @@
 {% block content %}
 <h1>Sources</h1>
 <p class="page-intro muted">Where APKs come from. Watch a GitHub repo and every new release is verified and
-  staged automatically, or upload an APK you built yourself. Staged APKs show up on
-  <a href="/install">Install</a>.</p>
+  staged automatically, or upload an APK you built yourself. Staged APKs are ready to install on
+  <a href="/status">Status</a>, and all of them are kept in the <a href="/library">Library</a>.</p>
 
 <div class="add-grid">
   <details class="panel fold">
@@ -61,6 +61,16 @@
     <input type="hidden" name="github_id" value="{{ i.id }}">
     <input type="hidden" name="asset_glob" value="{{ review.asset_glob }}">
     {% if review.include_prereleases %}<input type="hidden" name="include_prereleases" value="1">{% endif %}
+    {% if devices %}
+    <fieldset class="follow-pick">
+      <legend>Install it and keep it updated on</legend>
+      {% for d in devices %}
+      <label class="check"><input type="checkbox" name="follow" value="{{ d.serial }}"> {{ d | device_name }}</label>
+      {% endfor %}
+      <p class="muted small">Optional. Each ticked device gets its first release as soon as it's staged, then every
+        new one (auto-update, which you can turn off per app on Status).</p>
+    </fieldset>
+    {% endif %}
     <button type="submit">Watch {{ i.owner }}/{{ i.repo }}</button>
     <a href="/sources" class="button-link secondary">Cancel</a>
   </form>
@@ -108,7 +118,8 @@
 {% for r in repos %}
 {% set rel = latest.get(r.id, []) %}
 {% set first = rel[0] if rel else None %}
-<details class="card row-card device-card item-card" id="repo-{{ r.id }}">
+{% set cid = "repo-" ~ r.id %}
+<details class="card row-card device-card item-card" id="{{ cid }}"{% if open_card == cid or r.last_error or repos | length == 1 %} open{% endif %}>
   <summary>
     <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/></svg></span>
     <div>
@@ -130,13 +141,14 @@
     </span>
   </summary>
   <div class="item-body">
+    {% if open_card == cid %}{% include "_flash.html" %}{% endif %}
     <div class="more-label">Most recent release</div>
     {% if first %}
     <p class="release-line">
       <span class="version">{{ first.version_name or first.tag }}</span>
       {% if first.version_name and first.version_name != first.tag.lstrip('v') %}<span class="muted small mono">{{ first.tag }}</span>{% endif %}
       <span class="muted small">staged {{ first.downloaded_at | when }} · {{ rel | length }} build{{ "" if rel | length == 1 else "s" }}</span>
-      <a href="/install#app-{{ r.id }}" class="small">Install</a>
+      <a href="/status" class="small">Install from Status</a> · <a href="/library?open=kind-release#app-{{ r.id }}" class="small">Library</a>
     </p>
     <ul class="build-list">
       {% for a in rel %}<li><span class="mono small">{{ a.filename }}</span> <span class="muted small">{{ a.abis or "any CPU" }}</span></li>{% endfor %}
@@ -190,6 +202,6 @@
    page is only where they're added. #}
 {% if uploads %}
 <p class="muted">{{ uploads | length }} upload{{ "" if uploads | length == 1 else "s" }} and test build{{ "" if uploads | length == 1 else "s" }} staged:
-  see them on <a href="/install">Install</a>.</p>
+  install them from <a href="/status">Status</a>, or see them in the <a href="/library">Library</a>.</p>
 {% endif %}
 {% endblock %}

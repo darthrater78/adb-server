@@ -4,6 +4,7 @@ uses (CSRF check, audit record, redirect)."""
 import hashlib
 import json
 import os
+import re
 import zoneinfo
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -92,6 +93,15 @@ def device_name(d) -> str:
 templates.env.filters["device_name"] = device_name
 
 
+def dom_id(serial: str) -> str:
+    """A stable, HTML-safe id for a device's card: serials can hold ':' and
+    '.', and the same id is what a redirect opens and scrolls to."""
+    return "dev-" + hashlib.sha256(serial.encode()).hexdigest()[:10]
+
+
+templates.env.filters["dom_id"] = dom_id
+
+
 def siblings(raw: str | None) -> list[dict]:
     """Other builds of an artifact's commit, as stored at staging time."""
     try:
@@ -109,10 +119,14 @@ VALID_THEMES = {"flashbang", "dark", "oled"}
 # theme form is client-supplied, and an open redirect is exactly what a
 # permissive check here would hand an attacker.
 SETTINGS_PAGES = ("general", "security", "notifications", "github", "appearance")
-KNOWN_NAV_PATHS = {"/status", "/sources", "/devices", "/install", "/settings", "/installs", "/audit",
+KNOWN_NAV_PATHS = {"/status", "/sources", "/devices", "/library", "/settings", "/installs", "/audit",
                    *(f"/settings/{p}" for p in SETTINGS_PAGES)}
-# Pages reached from Settings rather than the top bar highlight Settings.
-NAV_SECTION = {"/installs": "/settings", "/audit": "/settings", **{f"/settings/{p}": "/settings" for p in SETTINGS_PAGES}}
+# Pages reached from another page rather than the top bar highlight that page.
+NAV_SECTION = {"/installs": "/status", "/audit": "/settings", **{f"/settings/{p}": "/settings" for p in SETTINGS_PAGES}}
+
+# The card a redirect asks a page to open (and scroll to, with the same id
+# as its fragment). Only ids the page itself offers are honoured.
+_CARD_ID = re.compile(r"[a-z][a-z0-9-]{0,63}")
 
 
 def _get_theme(request: Request) -> str:
@@ -133,7 +147,10 @@ def _file_version(path: str) -> str:
 STYLE_VERSION = _file_version(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "style.css"))
 
 
-def context(request: Request, session: dict | None = None, **extra) -> dict:
+def context(request: Request, session: dict | None = None, card_ids=(), **extra) -> dict:
+    """`card_ids` are the foldable cards the page has: an ?open= naming one of
+    them opens it, and that page shows its flash message inside it."""
+    wanted = request.query_params.get("open", "")
     ctx = {
         "app_version": APP_VERSION,
         "repo_url": REPO_URL,
@@ -148,6 +165,7 @@ def context(request: Request, session: dict | None = None, **extra) -> dict:
         "theme": _get_theme(request),
         "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/status",
         "nav_path": NAV_SECTION.get(request.url.path, request.url.path),
+        "open_card": wanted if _CARD_ID.fullmatch(wanted) and wanted in set(card_ids) else None,
     }
     if session is not None:
         ctx["csrf_token"] = session.get("csrf", "")
@@ -167,8 +185,13 @@ def record_audit(request: Request, action: str, detail: str = "") -> None:
     audit.record(action, detail, client_ip(request))
 
 
-def redirect(path: str, status_code: int = 303, **params) -> RedirectResponse:
+def redirect(path: str, status_code: int = 303, card: str | None = None, **params) -> RedirectResponse:
+    """`card` names the card to open on arrival (as ?open=), and scrolls to it
+    unless the path already carries a fragment (a row inside that card)."""
     path, hash_, fragment = path.partition("#")
+    if card:
+        params = {**params, "open": card}
+        hash_, fragment = hash_ or "#", fragment or card
     if params:
         qs = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v is not None)
         path = f"{path}{'&' if '?' in path else '?'}{qs}" if qs else path

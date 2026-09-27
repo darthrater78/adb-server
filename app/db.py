@@ -758,6 +758,7 @@ def finish_install(install_id: int, status: str, log: str) -> None:
 
 _INSTALL_SELECT = f"""
     SELECT installs.*, devices.nickname, staged_apks.filename, staged_apks.tag,
+           staged_apks.package_name, staged_apks.version_name, staged_apks.repo_id,
            repos.owner, repos.repo, {_SOURCE_LABEL}
     FROM installs
     JOIN devices ON devices.serial = installs.device_serial

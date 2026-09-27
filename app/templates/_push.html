@@ -1,4 +1,4 @@
-{# Every push on Status and Install goes through this: a link that opens a
+{# Every push on Status and Library goes through this: a link that opens a
    CSS :target dialog (the CSP allows no JavaScript), and a CSRF-protected
    POST inside it. `back_to` is the id the dialog's Cancel returns to.
    Import it `with context` so csrf_token is in scope. #}
@@ -9,7 +9,7 @@
   <div class="modal-card">
     <h2 id="{{ id }}-title">{{ title }}</h2>
     {{ caller() }}
-    <p class="muted small">Apps keep their data. You'll see the progress, then come back here.</p>
+    <p class="muted small">Apps keep their data. Its progress shows on this page.</p>
     <form method="post" action="{{ action }}" class="modal-actions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% for name, value in fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">

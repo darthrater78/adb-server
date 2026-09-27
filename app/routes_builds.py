@@ -6,7 +6,7 @@ import json
 import logging
 import sqlite3
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 import apk_verify
@@ -14,6 +14,8 @@ import auth
 import db
 import github_client
 import poller
+import routes_install
+import selection
 import signing
 import staging
 import uploads
@@ -101,7 +103,8 @@ async def artifacts_page(
     return templates.TemplateResponse(
         request, "artifacts.html",
         context(request, session, repo=repo, artifacts=artifacts, releases=releases, problem=problem, signing=signing,
-              max_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), error=error, ok=ok, warn=warn),
+                devices=[d for d in db.list_devices() if d["trusted"]],
+                max_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), error=error, ok=ok, warn=warn),
     )
 
 
@@ -127,35 +130,59 @@ def set_sign_unsigned(
                          else "Unsigned builds from this repo will be refused again"))
 
 
+def _push_target(push_to: str):
+    """The device a Stage and install names, or None for Stage only."""
+    if not push_to:
+        return None
+    device = db.get_device(push_to)
+    if device is None:
+        raise HTTPException(status_code=404)
+    return device
+
+
 @router.post("/repos/{repo_id}/releases/{release_id}/stage")
 async def stage_release(
-    repo_id: int, release_id: int, request: Request,
-    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+    repo_id: int, release_id: int, request: Request, background_tasks: BackgroundTasks,
+    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...), push_to: str = Form(""),
 ):
     """Stages an older release of a watched repo, through every release check
-    (uploader, signature, no debug builds, the pin)."""
+    (uploader, signature, no debug builds, the pin). With `push_to`, it then
+    installs it on that device, the build for its CPU."""
     check_csrf(request, session, csrf_token)
     back = f"/repos/{int(repo_id)}/artifacts"
     if db.get_repo(repo_id) is None:
         raise HTTPException(status_code=404)
+    device = _push_target(push_to)
     ok, message = await poller.stage_past_release(repo_id, release_id)
     repo = db.get_repo(repo_id)
     record_audit(request, "release_stage" if ok else "release_stage_refused",
            f"{repo['owner']}/{repo['repo']} release={int(release_id)}: {message}")
-    return redirect("/install" if ok else back, **({"ok": message} if ok else {"error": message}))
+    if not ok:
+        return redirect(back, error=message)
+    # What was just staged: the repo's newest rows, which share one tag.
+    staged = db.list_staged_apks(repo_id)
+    newest = max(staged, key=lambda a: a["id"])
+    if device is None:
+        return routes_install.library_landing(newest, ok=message)
+    apk = selection.pick_variant([a for a in staged if a["tag"] == newest["tag"]], device["abis"])
+    if apk is None:
+        return routes_install.library_landing(newest, error=f"{message}, but no build of it fits {device['nickname'] or device['serial']}'s CPU")
+    return routes_install.queue_push(request, background_tasks, device, apk, "/status", ok=message)
 
 
 @router.post("/repos/{repo_id}/artifacts/{artifact_id}/stage")
 async def stage_artifact(
-    repo_id: int, artifact_id: int, request: Request,
-    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...),
+    repo_id: int, artifact_id: int, request: Request, background_tasks: BackgroundTasks,
+    session: dict = Depends(auth.require_auth), csrf_token: str = Form(...), push_to: str = Form(""),
 ):
     """Stages the APK inside a workflow artifact, for testing a build that
     isn't released. It is handled exactly like an uploaded zip (debug builds
     allowed and flagged, no repo pin read or written), with the repo, run,
-    branch and commit it came from recorded as its provenance."""
+    branch and commit it came from recorded as its provenance. With
+    `push_to`, it then installs it on that device."""
     check_csrf(request, session, csrf_token)
     back = f"/repos/{int(repo_id)}/artifacts"
+    device = _push_target(push_to)
     repo, problem = await _pinned_repo(repo_id)
     if problem:
         return redirect(back, error=problem)
@@ -200,10 +227,14 @@ async def stage_artifact(
         db.record_artifact_signing(artifact.id, repo_id, kind,
                                    None if verified.server_signed else verified.signer.fingerprint)
 
+    def then(apk_id: int, flash: dict):
+        return routes_install.queue_push(request, background_tasks, device, db.get_staged_apk(apk_id), "/status",
+                                         **flash)
+
     # apksigner and aapt2 block for seconds: keep them off the event loop.
     return await asyncio.to_thread(stage_received, request, tmp_path, digest,
                                    display_filename(f"{artifact.name}.zip"), label, origin, back, notes,
-                                   provenance, sign_as, remember)
+                                   provenance, sign_as, remember, then if device is not None else None)
 
 
 SIGNING_LABELS = {"signed": "signed with a real key", "debug": "signed with a debug key",

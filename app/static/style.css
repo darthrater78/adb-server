@@ -918,11 +918,40 @@ details.fold > summary > .section-title { margin: 0; }
 main > details.panel.fold, .add-grid > details.panel.fold { margin-bottom: 16px; }
 .add-grid { align-items: start; }
 
-/* Status: "Update all" under a device's head; the dialog's list of apps. */
+/* Status: a device's tools (Update all, Auto-update all, Find, or Trust)
+   under its head; the dialog's list of apps. */
 .card-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
   padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .dialog-list { margin: 0 0 10px; padding-left: 20px; }
 .dialog-list li { margin: 2px 0; }
+.card-bar .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.card-bar .actions form { margin: 0; }
+
+/* A card opened by the action just taken on it shows that action's message. */
+.card-flash { padding: 12px 20px 0; }
+.card-flash .flash, .item-body > .flash { margin: 0 0 8px; }
+.item-body > .flash:first-child { margin-top: 12px; }
+
+/* Status: what's new in a release, folded under its row. */
+.row-notes { padding: 0 20px 12px; }
+.row-notes > summary { font-size: 13px; color: var(--link); cursor: pointer; }
+.row-notes .release-notes { margin-top: 8px; }
+.row-notes + .row-grid, .row-notes + .row-item { border-top: 1px solid var(--line); }
+
+/* Status and Library: pushes running now, and those just finished. */
+.activity { padding: 8px 20px; margin-bottom: 16px; }
+.activity-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 6px 0; font-size: 14px; }
+.activity-row + .activity-row { border-top: 1px solid var(--line); }
+.activity-what { flex: 1 1 auto; min-width: 0; }
+
+/* Builds: stage, or stage and install, in one form. */
+.stage-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.stage-form select { width: auto; max-width: 16rem; font-size: 13px; padding: 4px 8px; }
+
+/* Sources: the devices a newly watched repo installs on. */
+fieldset.follow-pick { border: 0; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 6px; flex-basis: 100%; }
+fieldset.follow-pick legend { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+fieldset.follow-pick p { margin: 0; }
 
 /* Push progress: one card per install. */
 .push-progress { margin-bottom: 12px; }
@@ -1284,6 +1313,8 @@ details.panel.fold > summary:focus-visible, .device-card > summary:focus-visible
   details.panel.fold:not(.panel-warn):not([open]) { padding-bottom: 16px; }
   details.panel.fold:not(.panel-warn):not([open]) > summary { margin-bottom: -16px; }
   .item-body { padding: 4px 16px 16px; }
+  .card-flash, .row-notes, .activity { padding-left: 16px; padding-right: 16px; }
+  .card-bar { padding: 12px 16px; }
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .item-actions .inline-form { flex-wrap: wrap; width: 100%; }
   .item-actions input[type="text"] { width: 100%; }

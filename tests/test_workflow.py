@@ -1,6 +1,6 @@
-"""3.7.0 workflow: one confirm-then-progress push flow that leads back where
-it started, Update all per device, trust offered right after pairing, and
-every block collapsible."""
+"""The push workflow: one confirm-then-push flow that stays on the row it
+started from (3.8.0), Update all per device, trust offered right after
+pairing, and every block collapsible, open when it wants you."""
 import os
 import re
 
@@ -10,7 +10,10 @@ import adb_client
 import db
 import pushes
 import staging
+import web
 from conftest import CSRF
+
+DOM = web.dom_id("SER")
 
 
 def _stage(repo_id, tag, filename, package="com.example", version_code=2, version_name="2.0"):
@@ -52,37 +55,64 @@ def _two_updates():
 def test_install_push_confirms_first_like_status(authed, device):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
-    page = authed.get("/install").text
+    page = authed.get("/library").text
     row = page[page.index(f'id="app-{rid}"'):]
     trigger = row.index(f'href="#push-app-{rid}"')
     dialog = row[row.index(f'id="push-app-{rid}" class="modal"'):]
     assert trigger < row.index('action="/push-latest"')  # the button opens a dialog, the form is inside it
     assert "?</h2>" in dialog and "Push <strong>2.0</strong> to <strong>Pixel</strong>" in dialog
-    assert 'name="back" value="/install"' in dialog and 'name="csrf_token"' in dialog
+    assert 'name="back" value="/library"' in dialog and 'name="csrf_token"' in dialog
     assert f'href="#app-{rid}" class="button-link secondary">Cancel' in dialog
 
 
-@pytest.mark.parametrize("back,lands", [("/install", "back=%2Finstall%3Fto%3DSER"), ("/status", "back=%2Fstatus"),
-                                        ("https://evil.example/", "back=%2Fstatus")])
-def test_a_push_goes_to_progress_that_knows_the_way_back(authed, device, queued, back, lands):
+@pytest.mark.parametrize("back,lands", [
+    ("/library", "/library?to=SER&open=kind-release#app-{rid}"),
+    ("/status", "/status?open={dom}#app-{rid}-{dom}"),
+    ("https://evil.example/", "/status?open={dom}#app-{rid}-{dom}")])
+def test_a_push_lands_back_on_the_row_it_came_from(authed, device, queued, back, lands):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
     r = authed.post("/push-latest", data={"csrf_token": CSRF, "device_serial": "SER", "repo_id": rid, "back": back},
                     follow_redirects=False)
-    assert re.fullmatch(r"/installs/\d+\?" + re.escape(lands), r.headers["location"])
+    assert r.headers["location"] == lands.format(rid=rid, dom=DOM)
     assert len(queued) == 1
 
 
-def test_progress_refreshes_while_running_then_returns(authed, device):
+def test_the_row_shows_its_push_running_then_done(authed, device):
     rid = db.create_repo("o", "r", "*.apk")
     apk = _stage(rid, "v2", "app.apk")
     install = db.insert_install("SER", apk, status="installing")
-    page = authed.get(f"/installs/{install}?back=%2Finstall%3Fto%3DSER").text
-    assert '<meta http-equiv="refresh" content="2">' in page and 'href="/install?to=SER"' in page
+    page = authed.get(f"/status?open={DOM}").text
+    assert '<meta http-equiv="refresh" content="2">' in page  # reloads itself while it runs
+    row = page[page.index(f'id="app-{rid}-{DOM}"'):]
+    row = row[:row.index('<div class="row-follow">')]
+    assert "Installing…" in row and 'action="/push-latest"' not in row  # no second push while one runs
+    activity = page[page.index('class="card activity"'):]
+    assert "Installing…" in activity and f'href="/installs/{install}"' in activity
     db.finish_install(install, "success", "Success")
-    page = authed.get(f"/installs/{install}?back=%2Finstall%3Fto%3DSER").text
-    assert '<meta http-equiv="refresh" content="3; url=/install?to=SER&amp;ok=Installed%20' in page
-    assert "Taking you back to Install" in page
+    page = authed.get(f"/status?open={DOM}").text
+    assert "http-equiv" not in page and "Installed" in page[page.index('class="card activity"'):]
+
+
+def test_a_failed_push_says_so_on_its_row(authed, device):
+    rid = db.create_repo("o", "r", "*.apk")
+    install = db.insert_install("SER", _stage(rid, "v2", "app.apk"), status="installing")
+    db.finish_install(install, "failed", "INSTALL_FAILED_VERSION_DOWNGRADE")
+    page = authed.get("/status").text
+    row = page[page.index(f'id="app-{rid}-{DOM}"'):]
+    assert "Last push failed" in row[:2000] and f'href="/installs/{install}"' in row[:2000]
+
+
+def test_the_progress_page_refreshes_while_running_and_never_leaves(authed, device):
+    rid = db.create_repo("o", "r", "*.apk")
+    apk = _stage(rid, "v2", "app.apk")
+    install = db.insert_install("SER", apk, status="installing")
+    page = authed.get(f"/installs/{install}?back=%2Flibrary%3Fto%3DSER").text
+    assert '<meta http-equiv="refresh" content="2">' in page and 'href="/library?to=SER"' in page
+    db.finish_install(install, "success", "Success")
+    page = authed.get(f"/installs/{install}?back=%2Flibrary%3Fto%3DSER").text
+    # Opened from history, a finished push stays put.
+    assert "http-equiv" not in page and 'href="/library?to=SER" class="button-link">Back to Library' in page
 
 
 def test_a_failed_push_stays_put_with_its_log(authed, device):
@@ -95,13 +125,13 @@ def test_a_failed_push_stays_put_with_its_log(authed, device):
 
 
 @pytest.mark.parametrize("back", ["https://evil.example/status", "//evil.example/status", "/settings",
-                                  "/status?ok=<script>", "/install?to=NOPE"])
+                                  "/status?ok=<script>", "/library?to=NOPE", "/install"])
 def test_the_way_back_is_rebuilt_never_echoed(authed, device, back):
     apk = _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
     install = db.insert_install("SER", apk, status="failed")
     page = authed.get(f"/installs/{install}", params={"back": back}).text
     link = re.search(r'href="([^"]*)" class="button-link">Back to', page).group(1)
-    assert link in ("/status", "/install")
+    assert link in ("/status", "/library")
 
 
 # ---- update all ----
@@ -114,16 +144,17 @@ def test_update_all_shows_only_with_two_or_more(authed, device):
     _two_updates()
     page = authed.get("/status").text
     assert 'action="/update-all"' in page and "3 updates ready" in page
-    assert 'href="#confirm-all-1" class="button-link">Update all' in page  # the phone summary card too
+    assert f'href="#confirm-all-{DOM}" class="button-link">Update all' in page  # the phone summary card too
 
 
 def test_update_all_queues_every_update_one_after_another(authed, device, queued):
     _two_updates()
     r = authed.post("/update-all", data={"csrf_token": CSRF, "device_serial": "SER"}, follow_redirects=False)
-    assert re.fullmatch(r"/installs/batch\?ids=\d+,\d+&back=%2Fstatus", r.headers["location"])
+    assert r.headers["location"] == f"/status?open={DOM}#{DOM}"
     assert sorted(p for _, p in queued) == ["com.one", "com.two"]
     page = authed.get(r.headers["location"]).text
-    assert "Updating 2 apps" in page and page.count('class="card push-progress"') == 2
+    activity = page[page.index('class="card activity"'):]
+    assert activity.count('class="activity-row"') == 2 and '<meta http-equiv="refresh" content="2">' in page
 
 
 def test_update_all_refuses_an_untrusted_device(authed, device, queued):
@@ -131,6 +162,7 @@ def test_update_all_refuses_an_untrusted_device(authed, device, queued):
     db.set_device_trusted("SER", False)
     r = authed.post("/update-all", data={"csrf_token": CSRF, "device_serial": "SER"}, follow_redirects=False)
     assert r.headers["location"].startswith("/status?error=") and queued == []
+    assert r.headers["location"].endswith(f"&open={DOM}#{DOM}")
 
 
 def test_update_all_needs_csrf(authed, device, queued):
@@ -168,10 +200,16 @@ def test_pairing_offers_trust_straight_away(authed, monkeypatch):
 
 def test_trusting_from_the_offer_can_name_it(authed, monkeypatch):
     _pair(authed, monkeypatch)
-    r = authed.post("/devices/NEWPHONE1/trust", data={"csrf_token": CSRF, "trusted": "1", "nickname": " Kid's phone "},
-                    follow_redirects=False)
+    page = authed.get("/devices?trust=NEWPHONE1").text
+    offer = page[page.index('id="trust-offer"'):]
+    assert 'name="back" value="/status"' in offer[:offer.index("</form>")]
+    r = authed.post("/devices/NEWPHONE1/trust", data={"csrf_token": CSRF, "trusted": "1", "nickname": " Kid's phone ",
+                                                      "back": "/status"}, follow_redirects=False)
     d = db.get_device("NEWPHONE1")
     assert (d["trusted"], d["nickname"]) == (1, "Kid's phone") and "Trusted" in r.headers["location"]
+    # On to its card on Status, ready to install.
+    dom = web.dom_id("NEWPHONE1")
+    assert r.headers["location"].startswith("/status?") and r.headers["location"].endswith(f"open={dom}#{dom}")
 
 
 @pytest.mark.parametrize("serial", ["SER", "NOPE"])
@@ -188,14 +226,40 @@ def test_add_forms_start_folded_even_when_empty(authed):
     assert '<details class="panel fold" open>' not in page and 'id="upload">' in page
 
 
-@pytest.mark.parametrize("path", ["/status", "/sources", "/devices", "/install"])
-def test_every_block_outside_settings_starts_collapsed(authed, device, path):
-    db.set_device_trusted("SER", True)
-    rid = db.create_repo("o", "r", "*.apk")
-    _stage(rid, "v2", "app.apk")
+def _quiet():
+    """Two trusted devices with every app current, two healthy repos, two
+    kinds staged and setup done: nothing that wants you."""
+    db.upsert_paired_device("SER2", "192.168.1.51:37000")
+    db.set_device_trusted("SER2", True)
+    for n in range(2):
+        rid = db.create_repo("o", f"r{n}", "*.apk")
+        apk = _stage(rid, "v2", "app.apk", package=f"com.r{n}")
+        for serial in ("SER", "SER2"):
+            db.upsert_device_package(serial, f"com.r{n}", True, version_code=2, version_name="2.0")
+    db.finish_install(db.insert_install("SER", apk, status="pending"), "success", "ok")
     db.insert_staged_apk(None, "dev", "dev.apk", "e" * 64, "com.dev", "d" * 64, "/nonexistent", source="upload")
+
+
+@pytest.mark.parametrize("path", ["/status", "/sources", "/devices", "/library"])
+def test_quiet_blocks_start_collapsed(authed, device, path):
+    _quiet()
     page = authed.get(path).text
     assert " open>" not in page, path
+
+
+def test_blocks_that_want_you_start_open(authed, device):
+    _quiet()
+    db.upsert_device_package("SER", "com.r0", True, version_code=1, version_name="1.0")  # an update
+    db.upsert_paired_device("NEW", "192.168.1.52:37000")  # untrusted
+    db.update_repo_check(db.list_repos()[1]["id"], last_error="GitHub said no")
+    status = authed.get("/status").text
+    assert f'id="{DOM}" open>' in status and f'id="{web.dom_id("NEW")}" open>' in status
+    assert f'id="{web.dom_id("SER2")}">' in status
+    sources = authed.get("/sources").text
+    rids = [r["id"] for r in db.list_repos()]
+    assert f'id="repo-{rids[1]}" open>' in sources and f'id="repo-{rids[0]}">' in sources
+    devices = authed.get("/devices").text
+    assert f'id="{web.dom_id("NEW")}" open>' in devices and f'id="{DOM}">' in devices
 
 
 def test_sources_and_devices_have_no_tables(authed, device):
@@ -208,7 +272,7 @@ def test_sources_and_devices_have_no_tables(authed, device):
 def test_each_repo_and_device_is_its_own_folded_card(authed, device):
     db.create_repo("o", "r", "*.apk")
     assert '<details class="card row-card device-card item-card" id="repo-' in authed.get("/sources").text
-    assert '<details class="card row-card device-card item-card" id="dev-1">' in authed.get("/devices").text
+    assert f'<details class="card row-card device-card item-card" id="{DOM}"' in authed.get("/devices").text
 
 
 def test_a_repos_head_shows_its_most_recent_release(authed):
@@ -232,10 +296,11 @@ def test_a_repo_whose_release_was_deleted_says_so(authed):
 
 
 def test_devices_explains_find(authed, device):
-    assert "What Find does" in authed.get("/devices").text
+    page = authed.get("/devices").text
+    assert '<summary>What Find and Reconnect do</summary>' in page  # folded until asked
 
 
-@pytest.mark.parametrize("path", ["/status", "/sources", "/devices", "/install", "/settings", "/settings/general",
+@pytest.mark.parametrize("path", ["/status", "/sources", "/devices", "/library", "/settings", "/settings/general",
                                   "/settings/security", "/settings/notifications", "/settings/github",
                                   "/settings/appearance"])
 def test_every_block_folds(authed, device, path):
@@ -259,9 +324,10 @@ def test_an_apk_cant_inject_markup_through_its_version_or_label(authed, device):
     _stage(rid, "v2", "app.apk", version_name='<img src=x onerror=alert(1)>')
     db.insert_staged_apk(None, '<b>up</b>', "u.apk", "e" * 64, "com.up", "d" * 64, "/nonexistent",
                          version_name='"><script>x</script>', source="upload")
-    page = authed.get("/install").text
-    assert "<img src=x" not in page and "<script>x" not in page and "<b>up</b>" not in page
-    assert "&lt;img src=x onerror=alert(1)&gt;" in page
+    for path in ("/library", "/status"):  # Status lists uploads too, with their push dialogs
+        page = authed.get(path).text
+        assert "<img src=x" not in page and "<script>x" not in page and "<b>up</b>" not in page, path
+        assert "&lt;img src=x onerror=alert(1)&gt;" in page and "&lt;b&gt;up&lt;/b&gt;" in page, path
 
 
 def test_install_kind_heads_sum_up_where_the_apps_stand(authed, device):
@@ -271,7 +337,7 @@ def test_install_kind_heads_sum_up_where_the_apps_stand(authed, device):
         if has:
             db.upsert_device_package("SER", pkg, True, version_code=has, version_name=str(has))
     db.insert_staged_apk(None, "dev", "dev.apk", "e" * 64, "com.dev", "d" * 64, "/nonexistent", source="upload")
-    page = authed.get("/install").text
+    page = authed.get("/library").text
     head = page[page.index('id="kind-release"'):]
     head = head[:head.index("</summary>")]
     assert "3 apps" in head
@@ -283,7 +349,7 @@ def test_picking_a_kind_opens_its_card(authed, device):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
     db.insert_staged_apk(None, "dev", "dev.apk", "e" * 64, "com.dev", "d" * 64, "/nonexistent", source="upload")
-    assert 'id="kind-release" open>' in authed.get("/install?show=release").text
+    assert 'id="kind-release" open>' in authed.get("/library?show=release").text
 
 
 def test_stylesheet_url_changes_with_its_content(authed):

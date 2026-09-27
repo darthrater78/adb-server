@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.7.1](https://github.com/darthrater78/adb-server/releases/tag/v3.7.1)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.8.0](https://github.com/darthrater78/adb-server/releases/tag/v3.8.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.7.1
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.8.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.7.1
+    image: ghcr.io/darthrater78/adb-server/app:3.8.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.7.1), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.8.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -193,7 +193,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.7.1` and add one
+> Then, in your `compose.yaml`, set both images to `3.8.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -208,7 +208,7 @@ the rest:
 
 1. **Sources**: watch the GitHub repos you want to follow, or upload an APK.
 2. **Devices**: pair your phone with its pairing code, and trust it.
-3. **Install**: push an app to it.
+3. **Status**: install an app on it from the device's card.
 
 Then turn on two-factor sign-in under **Settings → Security**.
 
@@ -229,28 +229,51 @@ Then turn on two-factor sign-in under **Settings → Security**.
 ## Features
 
 The app follows the order you use it in: **Status · Sources · Devices ·
-Install · Settings**. Every card, panel and section folds: click its heading.
-Outside Settings everything **starts folded**, so a page opens as a list of
-headings, each summing up what's inside (a device's updates, a repo's newest
-release, how many apps in a group need updating). Only a question waiting on
-you (a repo to confirm, a signing change, a device to trust) starts open.
+Library · Settings**. **Status** is where you work day to day: every device,
+what it has, and everything you can install on it. The others are for
+setting things up (Sources, Devices) and for everything staged (Library).
 
-**Every push works the same way**, from Status or Install: the button asks
-you to confirm (what, to which device, replacing which version), then a
-progress page follows the install and, once it succeeds, takes you back to
-the page you started on. A failed install stays on its log.
+Every card, panel and section folds: click its heading, which sums up
+what's inside (a device's updates, a repo's newest release, how many apps in
+a group need updating). A card **starts open when it wants you**: a device
+with updates, an untrusted device or a push running on it, a repo whose
+last check failed, a question waiting on you (a repo to confirm, a signing
+change, a device to trust), or the only card on its page. Quiet ones start
+folded.
+
+**Every action brings you back to where you took it.** Save a name, press
+**Find**, toggle auto-update or **Check now**, and the page comes back with
+that card open, scrolled to it, and the result shown inside it, not at the
+top of the page.
+
+**Every push works the same way**, from Status or the Library: the button
+asks you to confirm (what, to which device, replacing which version), and
+you stay on the row you pushed from. It shows **Installing…** and the page
+refreshes itself until the push is done; a strip at the top lists pushes
+running now and those that just finished, each with its log. A row whose
+last push failed says so, with a link to the log.
 
 ### Status: the home page
 
-One card per device (tap its header to fold it away), with everything pushed to it: each watched app's
-installed version against the latest staged one, with an **Update** or
-**Install** button, and anything you uploaded and pushed by hand. The button
-picks the right APK for that device's CPU and asks you to confirm first. Each
-card also lists the device's last few installs. When a device has two or more
-updates, **Update all** at the top of its card installs them one after
-another, after one confirmation. **Refresh installed versions**
-asks each device what it has now; versions also refresh after every push.
-Untrusted devices are shown, but offer nothing to push.
+One card per device (tap its header to fold it away), with everything you
+can do for it:
+
+- **Each watched app**: its installed version against the latest staged
+  one, with an **Update** or **Install** button that picks the right APK for
+  the device's CPU and asks you to confirm first. When there's something new
+  to install, **What's in 2.4.0** under the row unfolds its release notes.
+- **Each test build and upload** staged, with what the device has of that
+  app and a **Push** (or **Install**) button.
+- Anything else installed from this server, and the device's last few installs.
+
+The bar at the top of the card holds the device's tools: **Update all** when
+it has two or more updates (one confirmation, installed one after another),
+**Auto-update all** (on for every watched app the device has, or off for
+all of them), and **Find**, which looks for the phone if its port changed.
+An untrusted device offers **Trust** right there instead, and nothing to
+push. **Refresh installed versions** asks each device what it has now (a
+phone it can't reach gets its card opened, with **Find** at hand); versions
+also refresh after every push. **History** lists every push.
 
 Under each installed version is **where it came from**: a **Release** (and
 its tag), a **Test build** (branch @ commit, linked to its workflow run), an
@@ -273,27 +296,31 @@ button for it, or **Update all** when a device has several) and a switcher
 between devices.
 
 <img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
-<img src="docs/screenshots/phone-install.png" alt="Install page on a phone" width="195">
+<img src="docs/screenshots/phone-library.png" alt="Library page on a phone" width="195">
 
 ### Sources: repos and uploads
 
-Everything APKs come from, on one page. What they staged is listed on
-[Install](#install), which is where uploads and test builds are pushed or
-deleted; Sources only says how many there are.
+Everything APKs come from, on one page. What they stage is installed from
+[Status](#status-the-home-page) and kept in the [Library](#library); Sources
+only says how many uploads there are.
 
 **Watch a GitHub repo** as a URL, `owner/repo` or an SSH remote, plus an asset
 glob (default `*.apk`). **Look up repo** first shows what GitHub says it is:
 owner (user or organization), description, created date, stars and its
 GitHub ID, with a warning if it's a fork, archived, under 30 days old, or has
 no release yet. Nothing is watched until you confirm it's the repo you meant
-(see [Source verification](#source-verification)).
+(see [Source verification](#source-verification)). When you confirm, you can
+tick the trusted devices to **install it and keep it updated on**: its first
+release goes to them as soon as it's staged, then each new one
+(auto-update). Its first check starts straight away, and the page waits on
+its card until the check is done.
 
 <img src="docs/screenshots/repo-review.png" alt="Reviewing a repo before watching it: a days-old fork is flagged" width="640">
 
 Repos are polled every `POLL_INTERVAL_MINUTES`
 (default 10). **Check now** checks immediately, in the background: the page
 reloads itself until the check is done, then says what it found. If you
-deleted the current release's files on Install, **Check now** downloads and
+deleted the current release's files in the Library, **Check now** downloads and
 verifies it again; the scheduled poll leaves a deleted release alone.
 
 Each watched repo is one folded card. Its heading shows the most recent
@@ -310,7 +337,11 @@ the new APK proves the rotation (see [Release verification](#release-verificatio
 
 **Builds** on a watched repo has two lists. Each opens on its newest item,
 with **Stage** right there; the rest sit under a fold below it
-(**N older releases**, **N older commits**):
+(**N older releases**, **N older commits**). Beside each **Stage** is a
+choice of **Stage only** or **Stage and install on** a trusted device: pick a
+device and it's staged, then installed on it (the build for its CPU), and you
+land on its row on Status watching it install. Staged only, you land on it in
+the Library:
 
 - **Releases**: its published releases. The newest shows its name, date,
   APK count and release notes. **Stage** an older one and it goes
@@ -320,7 +351,7 @@ with **Stage** right there; the rest sit under a fold below it
 - **Test builds from workflow artifacts**: builds from its recent workflow
   runs, grouped by commit, each commit with its message. **Stage** treats
   one exactly like an uploaded zip (below) and records the repo, run, branch
-  and commit it came from. Its **build notes** on Install stand in for
+  and commit it came from. Its **build notes** in the Library stand in for
   release notes: the run, the pull request's description if it was built for
   one, and the full commit message. Each build is badged by how it's signed
   (**signed · same key as releases**, **signed · different key**, **debug
@@ -387,8 +418,9 @@ enter the pairing address and 6-digit code the phone shows, plus its connect
 address. A new device starts **untrusted**. As soon as it's paired, the page
 asks **Trust it?**, showing its model, serial, CPU and address so you can
 check it's the phone you just paired, with a box to name it at the same
-time. **Not now** leaves it untrusted; **Trust** on its card does the same
-later. Each paired device is one folded card: its heading shows its name,
+time. **Trust** then takes you to its card on Status, ready to install.
+**Not now** leaves it untrusted; **Trust** on its card here or on Status does
+the same later. Each paired device is one card: its heading shows its name,
 serial and trust, and it opens to its details, naming and trust, and its
 connection. Nothing is pushed to an untrusted device.
 
@@ -396,17 +428,20 @@ The connect port changes whenever wireless debugging restarts. Before every
 push, the app reconnects to the device. If the stored port is dead, it scans
 the device's last known IP (`ADB_SCAN_PORTS`, default `30000-49999`) and
 accepts a port only if the device there reports the **same hardware serial**.
-**Find** does this on demand (each device card explains it): use it to check
-a phone is reachable before you install, or after turning wireless debugging
-back on. If the phone's IP itself changed, use
-**Reconnect** with its new address. Nicknames, trust and forgetting a device
+**Find** does this on demand, here or on the device's card on Status (**What
+Find and Reconnect do** on each card explains it): use it to check a phone is
+reachable before you install, or after turning wireless debugging back on.
+If the phone's IP itself changed, use **Reconnect** with its new address. Nicknames, trust and forgetting a device
 are all on this page. Phones list this server as `@adbserver`.
 
 ![Devices: pairing folded away, and each paired device as a folded card, the first one opened](docs/screenshots/devices.png)
 
-### Install
+### Library
 
-Every verified APK, one row per app, showing just the essentials: name,
+Every verified APK this server has staged, for when you want more than the
+latest: an older version, a specific CPU's build, a test build or upload on
+its own, or deleting files. (Installing the latest on a device is done from
+[Status](#status-the-home-page).) One row per app, showing just the essentials: name,
 version, where it's from, signing, what the chosen device has of it now,
 when it was staged, and which other devices already have it. **Pushing to ▾** at the top picks the device every **Push**
 on the page goes to (the most recently paired one to start). For a watched
@@ -431,10 +466,11 @@ Only the newest `KEEP_RELEASES_PER_REPO` releases per repo (default 3) are
 kept on disk. Older ones are deleted automatically. Install history is kept
 either way.
 
-![Install: every app with its latest version and a push button](docs/screenshots/install.png)
+![Library: every app with its latest version and a push button](docs/screenshots/library.png)
 
-Every push runs in the background. Submitting one takes you to a live status
-page that refreshes until the install finishes, including `adb`'s own output.
+Every push runs in the background, and its row shows it running (see
+above). Each one's own page, reached from its **log** link or from install
+history, has `adb`'s output.
 
 ![A failed push, with adb's output](docs/screenshots/install-status.png)
 
@@ -476,8 +512,9 @@ the token may download it, proves the repo was included. A token in
 
 ### Activity: install history and audit log
 
-Both are linked from the **Settings** overview. **Install history** keeps every push
-and its log.
+**Install history** (**History** on Status, and in the **Settings** overview)
+keeps every push and its log. The **audit log** is linked from the Settings
+overview.
 
 **Audit log**: logins (including failed ones and how the second step was
 passed), two-factor changes, trust changes, signer re-pins, repo and device
@@ -526,7 +563,7 @@ checks both ways, when it starts and every 5 minutes:
 
 - **Image version.** On start, the adb-server container writes its version
   into `adbinfo/`, which the app mounts read-only, and the app compares it
-  with its own. A dev build reports its full version (`3.7.1-dev.1`), so a
+  with its own. A dev build reports its full version (`3.8.0-dev.1`), so a
   dev app beside a released adb-server (or the other way round) is caught too.
 - **adb protocol.** The app asks the adb server which protocol it speaks and
   compares that with its own adb client, since a mismatch there breaks
@@ -839,6 +876,19 @@ two-factor sign-in stays on but refuses every code until you reset it with
   Workflow changes are linted with a checksum-verified `actionlint`.
 - A release publishes images only for a tag on the default branch that
   matches `VERSION`, and only for a commit CI already passed.
+- Each image is pushed by digest first and scanned with Trivy
+  (`trivy.yaml`: fixable HIGH and CRITICAL in its OS packages). Only an image
+  that passes gets its version tags, and the release then checks that every
+  tag points at the scanned digest and that the image reports its own
+  version. Accepted findings go in `.trivyignore.yaml`, each with a reason and
+  an expiry.
+- Each published image carries a signed **build provenance** attestation
+  saying this workflow built it from that commit. Check one with
+  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.8.0 --repo darthrater78/adb-server`.
+- CodeQL scans the Python code and the workflows on every pull request and
+  weekly, and **dependency review** fails a pull request that brings in a
+  dependency with a known HIGH or CRITICAL advisory. A weekly scan re-checks
+  the released images and the lockfile for advisories published since.
 
 ### Recommended hardening checklist
 
@@ -946,17 +996,19 @@ docker compose -f compose.yaml -f compose.build.yaml up -d --build
 CI (`.github/workflows/ci.yml`) runs on every push and PR. It runs the same
 test script, checks that `VERSION` matches `CHANGELOG.md`, validates the
 compose file, checks that the two lockfiles agree, audits the dependencies,
-runs `bandit` (Medium and up fails the build) and builds both images. Pushing a
-`v*` tag on the default branch runs `release.yml`, which publishes the images
-to `ghcr.io/darthrater78/adb-server/{app,adb-server}` and creates the
-GitHub release, but only for a commit CI already passed.
+runs `bandit` (Medium and up fails the build) and builds both images.
+`codeql.yml` and `dependency-review.yml` run on pull requests too, and
+`security-scan.yml` weekly. Pushing a
+`v*` tag on the default branch runs `release.yml`, which scans, attests and
+publishes the images to `ghcr.io/darthrater78/adb-server/{app,adb-server}`
+and creates the GitHub release, but only for a commit CI already passed.
 
 **Dev builds** for testing a branch before it merges: tag the branch's
-commit with a suffix, such as `v3.7.0-dev.1` (the part before the `-` must
-match `VERSION`). The same workflow publishes both images as `:3.7.0-dev.1`
-only, and both report `3.7.0-dev.1` as their version, so the app's version
-check tells a dev build from the release. It never moves `:latest` or `:3.7`,
-and it makes no GitHub release.
+commit with a suffix, such as `v3.8.0-dev.1` (the part before the `-` must
+match `VERSION`). The same workflow scans and publishes both images as
+`:3.8.0-dev.1` only, and both report `3.8.0-dev.1` as their version, so the
+app's version check tells a dev build from the release. It never moves
+`:latest` or `:3.8`, and it makes no GitHub release.
 
 ## Non-goals
 

@@ -143,12 +143,13 @@ def new_upload_tmp() -> str:
 def stage_received(
     request: Request, tmp_path: str, digest: str, display_name: str, label: str,
     origin: str | None = None, refused_to: str = "/sources", notes: str | None = None,
-    artifact: dict | None = None, sign_as: str | None = None, on_verified=None,
+    artifact: dict | None = None, sign_as: str | None = None, on_verified=None, then=None,
 ) -> RedirectResponse:
     """Verifies and stages a file already on disk at tmp_path, which this
     consumes: it ends up staged or removed. `origin` describes where the file
     came from, for the flash message and the audit log; without one, a zip's
-    own name is used."""
+    own name is used. Once staged it lands on its row in the Library, or
+    wherever `then(apk_id, flash)` sends it (Stage and install)."""
     try:
         verified = _verify_file(tmp_path, digest, display_name, sign_as)
     except (UploadRejected, apk_verify.ApkVerifyError) as exc:
@@ -189,6 +190,7 @@ def stage_received(
         staged += (" It was unsigned, so it was signed with this server's key for "
                    + ("uploads." if sign_as == signing.UPLOADS else "this repo."))
     warnings = _upload_warnings(info, signer)
-    if warnings:
-        return redirect("/install", warn=" ".join([staged, *warnings]))
-    return redirect("/install", ok=staged)
+    flash = {"warn": " ".join([staged, *warnings])} if warnings else {"ok": staged}
+    if then is not None:
+        return then(apk_id, flash)
+    return redirect(f"/library#upload-{apk_id}", card="kind-artifact" if artifact else "kind-upload", **flash)

@@ -2,12 +2,14 @@
 {% block title %}Devices — ADB Server{% endblock %}
 {% block content %}
 <h1>Devices</h1>
-<p class="page-intro muted">Phones this server can push to. See what each one has on <a href="/status">Status</a>.</p>
+<p class="page-intro muted">Pairing, trust, names and connections. What each phone has, and installing to it, is on
+  <a href="/status">Status</a>.</p>
 
 {% if offer %}
 <details class="panel panel-warn fold trust-offer" id="trust-offer" open>
   <summary><h2>Trust {{ offer | device_name }}?</h2></summary>
-  <p>It's paired. Nothing is pushed to a device until you trust it, so check this is the phone you just paired.</p>
+  <p>It's paired. Nothing is pushed to a device until you trust it, so check this is the phone you just paired.
+    Trusting it takes you to its card on Status, ready to install.</p>
   <dl>
     {% if offer.model %}<dt>Model</dt><dd>{{ offer.model }}</dd>{% endif %}
     <dt>Serial</dt><dd class="mono small">{{ offer.serial }}</dd>
@@ -17,6 +19,7 @@
   <form method="post" action="/devices/{{ offer.serial | urlencode }}/trust" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="trusted" value="1">
+    <input type="hidden" name="back" value="/status">
     <label>Name <input type="text" name="nickname" maxlength="100" value="{{ offer.nickname or '' }}" placeholder="optional, e.g. Pixel 8"></label>
     <button type="submit">Trust</button>
     <a href="/devices" class="button-link secondary">Not now</a>
@@ -33,7 +36,7 @@
       connect address.</li>
     <li>Tap <strong>Pair device with pairing code</strong>. Enter the address and 6-digit code it shows,
       plus the connect address, below.</li>
-    <li>Once it's paired, press <strong>Trust</strong> on its card. Nothing is ever pushed to an untrusted device.</li>
+    <li>Once it's paired, you're asked to <strong>trust</strong> it. Nothing is ever pushed to an untrusted device.</li>
   </ol>
   <form method="post" action="/devices/pair" class="inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -48,7 +51,8 @@
 
 <h2 class="section-title">Paired devices</h2>
 {% for d in devices %}
-<details class="card row-card device-card item-card" id="dev-{{ loop.index }}">
+{% set dom = d.serial | dom_id %}
+<details class="card row-card device-card item-card" id="{{ dom }}"{% if open_card == dom or not d.trusted or devices | length == 1 %} open{% endif %}>
   <summary>
     <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg></span>
     <div>
@@ -63,6 +67,7 @@
     </span>
   </summary>
   <div class="item-body">
+    {% if open_card == dom %}{% include "_flash.html" %}{% endif %}
     <dl class="facts">
       <div><dt>Model</dt><dd>{{ d.model or "—" }}</dd></div>
       <div><dt>Serial</dt><dd class="mono small">{{ d.serial }}</dd></div>
@@ -92,25 +97,27 @@
 
     <div class="more-label">Connection</div>
     <div class="actions item-actions">
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/find" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary">Find</button>
+      </form>
       <form method="post" action="/devices/{{ d.serial | urlencode }}/connect" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="text" name="connect_addr" value="{{ d.last_connect_addr or '' }}" placeholder="ip:port" aria-label="Connect address">
         <button type="submit" class="secondary">Reconnect</button>
       </form>
-      <form method="post" action="/devices/{{ d.serial | urlencode }}/find" class="inline-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="secondary">Find</button>
-      </form>
     </div>
-    <p class="explainer">
-      <strong>What Find does:</strong> the phone picks a new port every time wireless debugging restarts, so
-      the saved address stops working. Find tries the saved address first. If nothing answers, it scans that
-      same IP for the new port and reconnects. It only accepts a port if the phone there reports this device's
-      serial, so it never latches onto a different phone. Pushes and installs do this on their own when the
-      saved port has gone stale. Use Find to check a phone is reachable before you install, or after you turn
-      wireless debugging back on. It can take a few seconds. If the phone's IP address changed, use
-      <strong>Reconnect</strong> with the new address instead.
-    </p>
+    <details class="guide">
+      <summary>What Find and Reconnect do</summary>
+      <p class="explainer">
+        The phone picks a new port every time wireless debugging restarts, so the saved address stops working.
+        <strong>Find</strong> tries the saved address first. If nothing answers, it scans that same IP for the new
+        port and reconnects. It only accepts a port if the phone there reports this device's serial, so it never
+        latches onto a different phone. Pushes and installs do this on their own when the saved port has gone
+        stale. It can take a few seconds. If the phone's IP address changed, use <strong>Reconnect</strong> with
+        the new address instead.
+      </p>
+    </details>
 
     <div class="actions item-actions danger-zone">
       <form method="post" action="/devices/{{ d.serial | urlencode }}/delete">

@@ -3,21 +3,31 @@
 {% block content %}
 <p class="breadcrumb"><a href="/sources">Sources</a> /</p>
 <h1>Builds: {{ repo.owner }}/{{ repo.repo }}</h1>
-<p class="page-intro muted">Stage an older release, or a test build straight from a workflow run. Staged builds show up
-  on <a href="/install">Install</a>.</p>
+<p class="page-intro muted">Stage an older release, or a test build straight from a workflow run, and install it on a
+  device in the same step if you like. Staged builds are kept in the <a href="/library">Library</a>.</p>
 <p><a href="/repos/{{ repo.id }}/artifacts?refresh=1" class="button-link secondary">Refresh from GitHub</a></p>
 
 {% if problem %}
 <p class="flash flash-error">{{ problem }}</p>
 <p><a href="/settings/github" class="button-link secondary">Settings → GitHub</a></p>
 {% else %}
+{# Stage, and with a trusted device picked, install it there too. A select,
+   not a script: the CSP allows no JavaScript. #}
+{% macro stage_form(action, primary=true, disabled=false) %}
+<form method="post" action="{{ action }}" class="stage-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if devices %}
+  <select name="push_to" aria-label="What to do once it's staged">
+    <option value="">Stage only</option>
+    {% for d in devices %}<option value="{{ d.serial }}">Stage and install on {{ d | device_name }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <button type="submit" class="small{{ '' if primary else ' secondary' }}"{% if disabled %} disabled title="Over the size cap"{% endif %}>Stage</button>
+</form>
+{% endmacro %}
 {% macro stage_release(r) %}
   {% if r.staged %}<span class="badge badge-muted">staged</span>
-  {% elif r.apks %}
-  <form method="post" action="/repos/{{ repo.id }}/releases/{{ r.id }}/stage">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="small secondary">Stage</button>
-  </form>
+  {% elif r.apks %}{{ stage_form("/repos/" ~ repo.id ~ "/releases/" ~ r.id ~ "/stage", primary=false) }}
   {% endif %}
 {% endmacro %}
 {% macro release_badges(r) %}
@@ -63,10 +73,7 @@
         </td>
         <td data-label="Size" class="small">{{ "%.1f" | format(a.size / 1048576) }} MB</td>
         <td>
-          <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/stage">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="small"{% if a.size > max_mb * 1048576 %} disabled title="Over the size cap"{% endif %}>Stage</button>
-          </form>
+          {{ stage_form("/repos/" ~ repo.id ~ "/artifacts/" ~ a.id ~ "/stage", disabled=a.size > max_mb * 1048576) }}
         </td>
       </tr>
       {% endfor %}

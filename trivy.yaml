@@ -1,0 +1,14 @@
+# What the release gate (release.yml) and the weekly scan fail on or report:
+# fixable HIGH and CRITICAL vulnerabilities in the images' OS packages. The
+# Python dependencies are pip-audit's job (ci.yml, security-scan.yml).
+severity:
+  - HIGH
+  - CRITICAL
+scan:
+  scanners:
+    - vuln
+pkg:
+  types:
+    - os
+vulnerability:
+  ignore-unfixed: true  # nothing to bump to yet

@@ -1,0 +1,17 @@
+{# Pushes running now and those that just finished, on Status and Library:
+   the page refreshes itself while one runs (see the page's head block). #}
+{% if activity %}
+<div class="card activity" role="status" aria-label="Pushes">
+  {% for i in activity %}
+  <div class="activity-row">
+    <span class="activity-what"><strong>{{ i.source_label }}</strong> {{ i.version_name or i.tag }}
+      <span class="muted">→ {{ i.nickname or i.device_serial }}</span></span>
+    <span class="status-{{ i.status }}">
+      {%- if i.status == "pending" %}Queued…{% elif i.status == "installing" %}Installing…
+      {%- elif i.status == "success" %}Installed{% else %}Failed{% endif -%}
+    </span>
+    <a href="/installs/{{ i.id }}" class="small">log</a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
