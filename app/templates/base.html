@@ -21,9 +21,8 @@
     <nav class="main-nav" aria-label="Main">
       {% for href, label, icon in [
           ("/status", "Status", '<path d="M3 12h4l3-7 4 14 3-7h4"/>'),
-          ("/sources", "Sources", '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
+          ("/apps", "Apps", '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
           ("/devices", "Devices", '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/>'),
-          ("/library", "Library", '<path d="M4 4h4v16H4zM10 4h4v16h-4z"/><path d="M15.8 5.2l3.4-.9 3.3 15.4-3.4.9z"/>'),
           ("/settings", "Settings", '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>')] %}
       <a href="{{ href }}"{% if href == nav_path %} class="active"{% if href == request.url.path %} aria-current="page"{% endif %}{% endif %}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ icon | safe }}</svg>{{ label }}</a>
       {% endfor %}

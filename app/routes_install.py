@@ -1,4 +1,4 @@
-"""Status, Library and install history: what each device has, what is
+"""Status, Apps and install history: what each device has, what is
 staged, and pushing one to the other."""
 
 from datetime import datetime, timedelta, timezone
@@ -14,6 +14,7 @@ import discovery
 import pushes
 import selection
 import staging
+import uploads
 from web import check_csrf, context, dom_id, moved, record_audit, redirect, templates
 
 router = APIRouter()
@@ -23,8 +24,8 @@ RUNNING = ("pending", "installing")
 
 # ---- library: every staged apk, by app ----
 
-# The Library's folded cards, one per kind of source.
-KIND_CARDS = {"release": "kind-release", "artifact": "kind-artifact", "upload": "kind-upload"}
+# Apps: the section that shows a message about a test build or an upload.
+KIND_CARDS = {"artifact": "kind-artifact", "upload": "kind-upload"}
 
 
 def apk_kind(apk) -> str:
@@ -34,12 +35,18 @@ def apk_kind(apk) -> str:
 
 
 def library_row_id(apk) -> str:
-    return f"app-{apk['repo_id']}" if apk["repo_id"] is not None else f"upload-{apk['id']}"
+    """The card an APK is on in Apps: its repo's, or its own."""
+    return f"repo-{apk['repo_id']}" if apk["repo_id"] is not None else f"upload-{apk['id']}"
+
+
+def apps_card(apk) -> str:
+    """The card on Apps that shows a message about `apk`."""
+    return f"repo-{apk['repo_id']}" if apk["repo_id"] is not None else KIND_CARDS[apk_kind(apk)]
 
 
 def library_landing(apk, **flash) -> RedirectResponse:
-    """The Library, opened on the card and row of a staged APK."""
-    return redirect(f"/library#{library_row_id(apk)}", card=KIND_CARDS[apk_kind(apk)], **flash)
+    """Apps, opened on the card of a staged APK."""
+    return redirect(f"/apps#{library_row_id(apk)}", card=apps_card(apk), **flash)
 
 
 def _install_groups() -> list[dict]:
@@ -72,59 +79,77 @@ def _install_groups() -> list[dict]:
 ACTIVITY_SECONDS = 120
 
 
+def _recent(install) -> bool:
+    """Finished in the last ACTIVITY_SECONDS: its row still says how it went."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ACTIVITY_SECONDS)).isoformat()
+    return (install["finished_at"] or "") >= cutoff
+
+
 def _activity(installs: list) -> list:
     """Pushes running now, and those that finished in the last two minutes:
-    what Status and Library show (refreshing while any runs) after a push,
+    what Status and Apps show (refreshing while any runs) after a push,
     instead of sending you to a separate progress page."""
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ACTIVITY_SECONDS)).isoformat()
     return [i for i in installs if i["status"] in RUNNING or (i["finished_at"] or "") >= cutoff][:10]
 
 
-@router.get("/library", response_class=HTMLResponse)
-def library_page(
-    request: Request, session: dict = Depends(auth.require_auth),
-    error: str | None = None, ok: str | None = None, warn: str | None = None, to: str | None = None,
-    show: str | None = None,
-):
-    """`to` picks the device every Push on the page targets (default: the
-    first trusted one); anything else falls back to the default. `show`
-    narrows the list to one kind (release, artifact, upload)."""
-    trusted = [d for d in db.list_devices() if d["trusted"]]
-    target = next((d for d in trusted if d["serial"] == to), trusted[0] if trusted else None)
-    groups = _install_groups()
-    kinds = list(dict.fromkeys(g["kind"] for g in groups))
-    show = show if show in kinds else None
-    if show:
-        groups = [g for g in groups if g["kind"] == show]
-    installed = db.device_packages_map()
-    installs = db.list_installs()
-    busy = {i["package_name"]: i for i in installs
-            if target and i["device_serial"] == target["serial"] and i["status"] in RUNNING}
+def _annotate_groups(groups: list[dict], trusted: list, target, installed: dict, installs: list) -> None:
+    """Adds to each app group where it stands: the trusted devices that have
+    its newest version, what the target device has, and its push state there."""
+    last = {}  # the newest push of each app to the target device (installs are newest first)
+    for i in installs:
+        if target and i["device_serial"] == target["serial"]:
+            last.setdefault(i["package_name"], i)
     for g in groups:
-        # Trusted devices that have this card's latest version right now.
         first = g["releases"][0]["apks"][0]
         g["on"] = [
             d for d in trusted
             if (row := installed.get((d["serial"], first["package_name"]))) is not None and row["installed"]
             and row["version_code"] is not None and row["version_code"] == first["version_code"]
         ]
-        # What the target device has of this app, if anything, and whether a push of it is running.
         row = installed.get((target["serial"], first["package_name"])) if target else None
         g["target_has"] = row if row is not None and row["installed"] else None
-        g["busy"] = busy.get(first["package_name"])
+        # A result belongs to its own card: a repo's releases, or that one build.
+        mine = ((lambda i, r=g["repo_id"]: i["repo_id"] == r) if g["repo_id"] is not None
+                else (lambda i, a=first["id"]: i["apk_id"] == a))
+        g.update(_pushed(last.get(first["package_name"]), mine))
+
+
+def render_apps(request: Request, session: dict, to: str | None = None, **extra) -> HTMLResponse:
+    """The Apps page: every watched repo as one card (its newest release,
+    what the phone being pushed to has, every action), then test builds and
+    uploads. `to` picks the device every Push on the page targets (default:
+    the first trusted one)."""
+    trusted = [d for d in db.list_devices() if d["trusted"]]
+    target = next((d for d in trusted if d["serial"] == to), trusted[0] if trusted else None)
+    groups = _install_groups()
+    installed = db.device_packages_map()
+    installs = db.list_installs()
+    _annotate_groups(groups, trusted, target, installed, installs)
+    repos = db.list_repos()
     activity = _activity(installs)
     return templates.TemplateResponse(
-        request, "library.html",
-        context(request, session, card_ids=KIND_CARDS.values(), groups=groups, kinds=kinds, show=show,
+        request, "apps.html",
+        context(request, session, card_ids=[*KIND_CARDS.values(), *(f"repo-{r['id']}" for r in repos)],
+                repos=repos, by_repo={g["repo_id"]: g for g in groups if g["repo_id"] is not None},
+                others=[g for g in groups if g["repo_id"] is None],
                 devices=trusted, target=target, activity=activity,
-                running=any(i["status"] in RUNNING for i in activity), error=error, ok=ok, warn=warn),
+                running=any(i["status"] in RUNNING for i in activity),
+                # Why a build can't be pushed to the target, if it can't (debug over a signed install).
+                blocked_for=lambda apk: pushes.debug_over_installed(target, apk, installed) if target else None,
+                max_upload_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), **extra),
     )
+
+
+@router.get("/library")
+def old_library_page(request: Request, session: dict = Depends(auth.require_auth)):
+    return moved(request, "/apps")
 
 
 @router.get("/install")
 @router.get("/staged")
 def old_install_page(request: Request, session: dict = Depends(auth.require_auth)):
-    return moved(request, "/library")
+    return moved(request, "/apps")
 
 
 @router.post("/staged/{apk_id}/delete")
@@ -136,21 +161,41 @@ def delete_staged(apk_id: int, request: Request, session: dict = Depends(auth.re
     staging.remove_file(apk["path"])
     db.mark_apk_pruned(apk_id)
     record_audit(request, "staged_delete", f"{apk['source_label']} {apk['tag']} {apk['filename']}")
-    return redirect("/library", card=KIND_CARDS[apk_kind(apk)], ok="Staged file deleted")
+    return redirect(f"/apps#{library_row_id(apk)}", card=apps_card(apk), ok="Staged file deleted")
+
+
+@router.post("/staged/{apk_id}/delete-version")
+def delete_staged_version(apk_id: int, request: Request, session: dict = Depends(auth.require_auth),
+                          csrf_token: str = Form(...)):
+    """Deletes one version of an app from Apps: every file staged for
+    that release (one per CPU), or the one upload."""
+    check_csrf(request, session, csrf_token)
+    apk = db.get_staged_apk(apk_id)
+    if apk is None or apk["pruned_at"]:
+        raise HTTPException(status_code=404)
+    same = ([a for a in db.list_staged_apks(apk["repo_id"]) if a["tag"] == apk["tag"]]
+            if apk["repo_id"] is not None else [apk])
+    for a in same:
+        staging.remove_file(a["path"])
+        db.mark_apk_pruned(a["id"])
+    record_audit(request, "staged_delete", f"{apk['source_label']} {apk['tag']} ({len(same)} file{'' if len(same) == 1 else 's'})")
+    n = len(same)
+    return redirect(f"/apps#{library_row_id(apk)}", card=apps_card(apk),
+                    ok=f"Deleted {apk['version_name'] or apk['tag']}: {n} file{'' if n == 1 else 's'}")
 
 
 # ---- push ----
 
 # Where a push was started from, and so where it leads back to: the two
 # pages that offer one.
-PUSH_BACK_PATHS = {"/status", "/library"}
+PUSH_BACK_PATHS = {"/status", "/apps"}
 
 
 def _back(path: str, device) -> str:
-    """The page to return to after a push. Library keeps the device it was
+    """The page to return to after a push. Apps keeps the device it was
     pushing to selected."""
-    if path == "/library" and device is not None:
-        return f"/library?to={quote(device['serial'], safe='')}"
+    if path == "/apps" and device is not None:
+        return f"/apps?to={quote(device['serial'], safe='')}"
     return path if path in PUSH_BACK_PATHS else "/status"
 
 
@@ -163,8 +208,8 @@ def status_row_id(apk, device) -> str:
 def _landing(back: str, device, apk, **flash) -> RedirectResponse:
     """Back where the push started, opened on the card and row it came from,
     which shows it running (the page refreshes itself until it's done)."""
-    if back.startswith("/library"):
-        return redirect(f"{back}#{library_row_id(apk)}", card=KIND_CARDS[apk_kind(apk)], **flash)
+    if back.startswith("/apps"):
+        return redirect(f"{back}#{library_row_id(apk)}", card=apps_card(apk), **flash)
     return redirect(f"/status#{status_row_id(apk, device)}", card=dom_id(device["serial"]), **flash)
 
 
@@ -190,7 +235,7 @@ def push(
     csrf_token: str = Form(...),
     device_serial: str = Form(...),
     apk_id: int = Form(...),
-    back: str = Form("/library"),
+    back: str = Form("/apps"),
 ):
     check_csrf(request, session, csrf_token)
     device = db.get_device(device_serial)
@@ -275,6 +320,7 @@ def _pushed(last, mine) -> dict:
     (of any build: one at a time), or this row's own last push having failed."""
     status = last["status"] if last is not None else None
     return {"busy": last if status in RUNNING else None,
+            "done": last if status == "success" and mine(last) and _recent(last) else None,
             "failed": last if status == "failed" and mine(last) else None}
 
 
@@ -306,6 +352,7 @@ def _staged_rows(d, dom: str, extras: list, installed: dict, last_push: dict) ->
             "installed": have if have is not None and have["installed"] else None,
             "state": selection.update_state(have, apk), "origin": selection.origin(have),
             "fits": selection.compatible(apk["abis"], d["abis"]),
+            "blocked": pushes.debug_over_installed(d, apk, installed),
             **_pushed(last_push.get((d["serial"], apk["package_name"])), lambda i, a=apk["id"]: i["apk_id"] == a),
         })
     return rows
@@ -359,7 +406,7 @@ def _setup_steps(cards: list[dict]) -> list[dict]:
     has_trusted = any(c["device"]["trusted"] for c in cards)
     has_install = any(i["status"] == "success" for c in cards for i in c["recent"])
     return [
-        {"done": has_source, "href": "/sources", "title": "Add a source",
+        {"done": has_source, "href": "/apps", "title": "Add an app",
          "hint": "Watch a GitHub repo for releases, or upload an APK."},
         {"done": has_trusted, "href": "/devices", "title": "Pair and trust a device",
          "hint": "Pair with the phone's wireless debugging code, then trust it."},
@@ -473,7 +520,7 @@ def installs_page(request: Request, session: dict = Depends(auth.require_auth)):
 
 def _safe_back(back: str | None) -> str:
     """Rebuilt from its parts, never echoed: one of the two pages, plus the
-    device Library had selected if that device exists."""
+    device Apps had selected if that device exists."""
     parts = urlsplit(back or "")
     if parts.scheme or parts.netloc or parts.path not in PUSH_BACK_PATHS:
         return "/status"
@@ -481,7 +528,7 @@ def _safe_back(back: str | None) -> str:
     return _back(parts.path, db.get_device(to) if to else None)
 
 
-def _progress_page(request: Request, session: dict, installs: list, back: str | None) -> HTMLResponse:
+def _progress_page(request: Request, session: dict, installs: list, back: str | None, **flash) -> HTMLResponse:
     """One push (or a batch) on its own, with its log: reached from install
     history and the activity strip. Refreshes while anything is running."""
     back = _safe_back(back)
@@ -489,7 +536,8 @@ def _progress_page(request: Request, session: dict, installs: list, back: str | 
     return templates.TemplateResponse(
         request, "install_status.html",
         context(request, session, installs=installs, running=running, back=back,
-                back_label="Library" if back.startswith("/library") else "Status"),
+                back_label="Apps" if back.startswith("/apps") else "Status",
+                blocked_by_existing=pushes.blocked_by_existing, **flash),
     )
 
 
@@ -506,10 +554,34 @@ def install_batch_page(request: Request, session: dict = Depends(auth.require_au
     return _progress_page(request, session, installs, back)
 
 
-@router.get("/installs/{install_id}", response_class=HTMLResponse)
-def install_status_page(install_id: int, request: Request, session: dict = Depends(auth.require_auth),
-                        back: str | None = None):
+@router.post("/installs/{install_id}/remove-everywhere")
+def remove_everywhere(install_id: int, request: Request, session: dict = Depends(auth.require_auth),
+                      csrf_token: str = Form(...), back: str | None = Form(None)):
+    """After a push the phone refused because of the copy it already has:
+    uninstalls that app from every profile on the device, so the push can be
+    tried again. Only offered for that failure, and only on a trusted device."""
+    check_csrf(request, session, csrf_token)
     install = db.get_install(install_id)
     if install is None:
         raise HTTPException(status_code=404)
-    return _progress_page(request, session, [install], back)
+    here = f"/installs/{int(install_id)}?back={quote(_safe_back(back), safe='')}"
+    device = db.get_device(install["device_serial"])
+    if not pushes.blocked_by_existing(install["log"]) or device is None or not device["trusted"]:
+        return redirect(here, error="That app can't be removed from here")
+    try:
+        _, addr = discovery.ensure_connected(device)
+        adb_client.uninstall_everywhere(addr, install["package_name"])
+    except adb_client.AdbError as exc:
+        return redirect(here, error=f"Couldn't remove it: {exc}")
+    pushes.refresh_installed(device["serial"], addr, install["package_name"])
+    record_audit(request, "uninstall_everywhere", f"{install['package_name']} on {device['serial']}")
+    return redirect(here, ok=f"Removed {install['package_name']} from every profile. Push it again now.")
+
+
+@router.get("/installs/{install_id}", response_class=HTMLResponse)
+def install_status_page(install_id: int, request: Request, session: dict = Depends(auth.require_auth),
+                        back: str | None = None, error: str | None = None, ok: str | None = None):
+    install = db.get_install(install_id)
+    if install is None:
+        raise HTTPException(status_code=404)
+    return _progress_page(request, session, [install], back, error=error, ok=ok)

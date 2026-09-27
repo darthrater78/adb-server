@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_push.html" import confirm_delete with context %}
 {% block title %}Push status — ADB Server{% endblock %}
 {% block head %}
 {# No JavaScript (CSP): a meta refresh polls while anything runs. #}
@@ -26,6 +27,15 @@
     {% if install.finished_at %}<span class="muted small">· {{ install.finished_at | when }}</span>{% endif %}
   </p>
   {% if install.log and install.status == "failed" %}<pre class="log">{{ install.log }}</pre>
+  {% if blocked_by_existing(install.log) and installs | length == 1 %}
+  <div class="actions" id="install-{{ install.id }}">
+  {% call confirm_delete("remove-everywhere-" ~ install.id, "install-" ~ install.id, "Remove " ~ install.package_name ~ " from every profile?",
+      "/installs/" ~ install.id ~ "/remove-everywhere", {"back": back}, "Remove from every profile", trigger_class="danger-link") %}
+  <p>Uninstalls it from every profile on {{ install.nickname or install.device_serial }}, Private space and work
+    profiles included, and <strong>deletes its data in each</strong>. Then push it again.</p>
+  {% endcall %}
+  </div>
+  {% endif %}
   {% elif install.log and not running %}<details class="nested"><summary>Log</summary><pre class="log">{{ install.log }}</pre></details>{% endif %}
 </section>
 {% endfor %}

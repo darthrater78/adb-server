@@ -28,11 +28,8 @@
 {% endif %}
 {% endmacro %}
 {# A push running for this row, or the last one having failed. #}
-{% macro push_outcome(row) %}
-{% if row.busy %}<span class="status-installing">{{ "Queued…" if row.busy.status == "pending" else "Installing…" }}</span>
-{% elif row.failed %}<span class="status-failed">Last push failed</span> · <a href="/installs/{{ row.failed.id }}">log</a>{% endif %}
-{% endmacro %}
-{% from "_push.html" import confirm_dialog with context %}
+{% from "_push.html" import confirm_dialog, push_state with context %}
+{% macro push_outcome(row) %}{{ push_state(row.busy, row.done, row.failed) }}{% endmacro %}
 {% block content %}
 {% set update_count = cards | map(attribute="updates") | map("length") | sum %}
 <div class="page-head">
@@ -189,13 +186,13 @@
       {% endif %}
     </div>
     <div class="row-state{{ ' update' if app.state == 'update' else '' }}">
-      {%- if app.busy %}{{ staged }} · {{ push_outcome(app) }}
+      {%- if app.busy %}{{ staged }} {{ push_outcome(app) }}
       {%- else %}
       {%- if app.state == "current" %}Up to date
       {%- elif app.state == "update" %}{{ staged }} available
       {%- elif app.state == "newer" %}<span title="Installed version is newer than the latest staged release">Newer than {{ staged }}</span>
       {%- else %}{{ staged }} staged{% endif %}
-      {%- if app.failed %} · {{ push_outcome(app) }}{% endif %}
+      {%- if app.failed or app.done %} {{ push_outcome(app) }}{% endif %}
       {%- endif -%}
     </div>
     <div class="row-actions">
@@ -258,11 +255,14 @@
       <span class="row-line"><span class="version">{{ version }}</span>
         {% if s.kind == "artifact" %}<span class="badge badge-artifact">Test build</span>{% else %}<span class="badge badge-muted">Upload</span>{% endif %}
         {% if a.is_debug %}<span class="badge badge-warn">Debug</span>{% endif %}</span>
-      {%- if s.busy or s.failed %} {{ push_outcome(s) }}{% elif s.state == "current" %} <span class="muted small">installed</span>{% endif -%}
+      {%- if s.busy or s.failed or s.done %} {{ push_outcome(s) }}{% elif s.state == "current" %} <span class="muted small">installed</span>{% endif -%}
+      {% if s.blocked %}<div class="small status-failed push-blocked-why">Debug build over a signed install: the phone would refuse it. Push the signed build, or uninstall the app first.</div>{% endif %}
     </div>
     <div class="row-actions">
       {% if not s.busy %}
-        {% if s.fits %}
+        {% if s.blocked %}
+        <span class="badge badge-error push-blocked" title="{{ s.blocked }}">Push blocked</span>
+        {% elif s.fits %}
         {% set verb = "Install" if not s.installed else "Push" %}
         {% call confirm_dialog("confirm-upload-" ~ a.id ~ "-" ~ dom, s.row, verb ~ " " ~ label ~ "?",
             "/push", {"apk_id": a.id, "device_serial": d.serial, "back": "/status"}, verb ~ " now", verb,
@@ -298,7 +298,7 @@
   </div>
   {% endfor %}
   {% elif d.trusted %}
-  <p class="card-note">No apps yet. <a href="/sources">Add a source</a>: watch a GitHub repo, or upload an APK.</p>
+  <p class="card-note">No apps yet. <a href="/apps">Add an app</a>: watch a GitHub repo, or upload an APK.</p>
   {% endif %}
 
   {% if card.recent %}

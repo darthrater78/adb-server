@@ -220,7 +220,12 @@ input[type="file"]::file-selector-button {
   text-decoration: none;
 }
 .main-nav a:hover { color: var(--fg); }
-.main-nav a.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--link); font-weight: 600; }
+.main-nav a.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--link);
+  font-weight: 700;
+}
 .main-nav svg { display: none; }
 
 .header-tools { display: flex; align-items: center; gap: 14px; }
@@ -345,6 +350,8 @@ button.secondary, .button-link.secondary {
 button.secondary:hover, .button-link.secondary:hover { filter: none; border-color: var(--muted); }
 button.danger { background: var(--control-bg); border-color: var(--control-border); color: var(--danger); }
 button.danger:hover { filter: none; border-color: var(--danger); }
+.button-link.danger-link { color: var(--danger); }
+.button-link.danger-link:hover { border-color: var(--danger); }
 button.small, .button-link.small { height: 30px; padding: 0 11px; font-size: 13px; border-radius: 8px; }
 button svg, .button-link svg { flex: none; }
 
@@ -412,6 +419,7 @@ tr.has-notes td { border-bottom: none; }
   max-height: 60vh;
   overflow: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;  /* long URLs wrap instead of scrolling sideways */
   font-family: var(--font);
   font-size: 14px;
   line-height: 1.55;
@@ -445,6 +453,10 @@ tr.has-notes td { border-bottom: none; }
   animation: progress-indeterminate 1.1s ease-in-out infinite;
 }
 .progress-bar.success { width: 100%; background: var(--ok); }
+/* The same bar, small, inside the row that was pushed. */
+.push-state { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.row-progress { display: block; width: 100%; max-width: 220px; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.row-progress .progress-bar { display: block; }
 .progress-bar.failed { width: 100%; background: var(--danger); }
 
 @keyframes progress-indeterminate {
@@ -460,6 +472,7 @@ tr.has-notes td { border-bottom: none; }
   max-height: 100px;
   overflow: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-family: var(--mono);
   font-size: 12px;
   margin: 0;
@@ -548,7 +561,7 @@ button.preset.current { border: 2px solid var(--fg); padding: 0 13px 0 5px; }
 /* A saved pair: the pill, with its delete button tucked against its end. */
 .saved-pair { display: inline-flex; align-items: center; }
 .saved-pair button.preset { border-radius: 999px 0 0 999px; }
-button.preset-delete {
+button.preset-delete, a.preset-delete {
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--control-border);
@@ -559,7 +572,8 @@ button.preset-delete {
   font-size: 18px;
   line-height: 1;
 }
-button.preset-delete:hover { filter: none; color: var(--danger); border-color: var(--danger); }
+a.preset-delete { display: inline-flex; align-items: center; text-decoration: none; }
+button.preset-delete:hover, a.preset-delete:hover { filter: none; color: var(--danger); border-color: var(--danger); }
 .save-pair { display: inline-flex; align-items: center; gap: 8px; }
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -764,6 +778,29 @@ section { margin-bottom: 24px; }
 }
 .card-foot { padding: 12px 20px; font-size: 13px; color: var(--muted); }
 
+/* ---- Sources: a watched repo's card ---- */
+.repo-card { margin-bottom: 16px; }
+.repo-card-error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.repo-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 10px; }
+.repo-title { min-width: 0; }
+.repo-latest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 20px 0 68px; }
+.repo-latest-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.repo-version { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--fg); }
+.build-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.repo-error { margin: 8px 20px 0 68px; }
+.repo-actions { padding: 12px 20px 10px 68px; margin: 0; }
+.repo-actions form { margin: 0; }
+.repo-remove { margin-left: auto; }
+.repo-card .card-flash { padding: 0 20px 0 68px; }
+.avatar.repo-avatar { display: flex; width: 36px; height: 36px; border-radius: 10px; font-size: 15px; }
+.repo-on { margin-top: 6px; font-size: 14px; }
+.repo-on .push-state { flex-basis: 100%; }
+.status-update { color: var(--chip-art-fg); font-weight: 600; }
+.file-rows { margin-top: 4px; }
+.file-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.file-info { flex: 1 1 280px; min-width: 0; }
+.repo-card .debug-advice { margin: 8px 20px 0 68px; }
+
 /* ---- Status ---- */
 .summary-card { display: none; }
 .device-switch { display: none; }
@@ -946,7 +983,7 @@ main > details.panel.fold, .add-grid > details.panel.fold { margin-bottom: 16px;
 
 /* Builds: stage, or stage and install, in one form. */
 .stage-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
-.stage-form select { width: auto; max-width: 16rem; font-size: 13px; padding: 4px 8px; }
+.stage-form select { width: auto; max-width: min(16rem, 100%); min-width: 0; font-size: 13px; padding: 4px 8px; }
 
 /* Sources: the devices a newly watched repo installs on. */
 fieldset.follow-pick { border: 0; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 6px; flex-basis: 100%; }
@@ -980,9 +1017,21 @@ details.add-details[open] > form { margin-top: 10px; }
 .commit-group { margin: 10px 0 14px; }
 .release-card { margin: 10px 0 14px; } .release-card .actions { margin-top: 8px; }
 .commit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
-details.fold > summary.commit-head { flex-wrap: wrap; gap: 8px; }
-details.fold > summary.commit-head::after { margin-left: auto; }
+/* A folded list says what's in it: its first few tags or commits. */
+details.fold > summary > h3:has(+ .fold-peek) { flex: none; }
+.fold-peek { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.fold-peek .tag-pill.staged { border-color: var(--accent); color: var(--link); }
+.settings-section > h2 .muted { font-weight: 400; margin-left: 6px; }
 .commit-group table { margin-top: 6px; }
+.build-rows { margin-top: 8px; }
+.build-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.build-info { flex: 1 1 280px; min-width: 0; }
+.build-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.build-name { overflow-wrap: anywhere; }
+.build-sub { margin-top: 3px; overflow-wrap: anywhere; }
+.build-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; }
+.build-actions form { margin: 0; }
+.fold-peek .tag-pill { white-space: normal; overflow-wrap: anywhere; max-width: 100%; height: auto; }
 .commit-head .tag-pill, .artifact-origin .tag-pill { white-space: normal; overflow-wrap: anywhere; max-width: 100%; height: auto; min-height: 22px; }
 .debug-advice { margin: 8px 0; font-size: 14px; white-space: normal; } .debug-advice .actions { margin-top: 8px; }
 .advice-row td { padding-top: 0; } .advice-row .debug-advice { margin: 0 0 8px; }
@@ -1115,8 +1164,21 @@ fieldset.choice legend { font-size: 13px; font-weight: 600; color: var(--muted);
     font-weight: 500;
     color: var(--muted);
   }
-  .main-nav a.active { background: transparent; color: var(--link); font-weight: 700; }
-  .main-nav svg { display: block; }
+  .main-nav a { position: relative; }
+  .main-nav a.active { background: transparent; box-shadow: none; color: var(--link); font-weight: 700; }
+  /* The tab you're on: a bar along its top edge and a pill behind its icon. */
+  .main-nav a.active::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 22%;
+    right: 22%;
+    height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: var(--accent);
+  }
+  .main-nav svg { display: block; box-sizing: content-box; padding: 2px 14px; border-radius: 999px; }
+  .main-nav a.active svg { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 
   /* 16px stops iOS zooming into a focused field. */
   input, select, button, textarea { font-size: 16px; }
@@ -1323,3 +1385,24 @@ details.panel.fold > summary:focus-visible, .device-card > summary:focus-visible
 
 /* An open card's head carries the accent on its leading edge. */
 details.panel.fold:not(.panel-warn)[open] > summary, .device-card[open] > summary { box-shadow: inset 3px 0 0 var(--accent); }
+
+@media (max-width: 960px) {
+  .repo-head { padding: 14px 16px 8px; }
+  .repo-latest, .repo-actions, .repo-card .card-flash { padding-left: 16px; padding-right: 16px; }
+  .repo-error { margin-left: 16px; margin-right: 16px; }
+  .repo-remove { margin-left: 0; }
+}
+@media (max-width: 960px) {
+  .repo-card .debug-advice { margin-left: 16px; margin-right: 16px; }
+}
+
+/* Every action on an Apps card is the same size, Push and Delete included. */
+.repo-actions .button-link, .repo-actions button { height: 34px; padding: 0 14px; font-size: 13.5px; }
+
+/* Devices: where each one stands. */
+.device-state { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; }
+.device-state-connected { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.device-state-unauthorized { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.connection-actions { align-items: center; }
+.connection-actions form { margin: 0; }
+.connection-actions input[type="text"] { width: 14rem; max-width: 100%; }

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_push.html" import confirm_delete with context %}
 {% block title %}GitHub — Settings — ADB Server{% endblock %}
 {% block content %}
 {% include "_settings_nav.html" %}
@@ -48,10 +49,11 @@
       <button type="submit" class="secondary">Test token</button>
     </form>
     {% if token_source in ("settings", "unreadable") %}
-    <form method="post" action="/settings/github-token/clear">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="danger">Remove saved token</button>
-    </form>
+    {% call confirm_delete("remove-token", "token", "Remove the saved GitHub token?", "/settings/github-token/clear",
+        {}, "Remove saved token", trigger_class="secondary danger-link") %}
+    <p>Checks then use <code>GITHUB_TOKEN</code> from .env if it's set. Without any token, GitHub allows fewer requests,
+      and test builds from workflow artifacts can't be fetched.</p>
+    {% endcall %}
     {% endif %}
   </div>
   {% endif %}
@@ -82,7 +84,7 @@
   </table>
   </div>
   {% else %}
-  <p class="muted">No repos watched yet. Add one on <a href="/sources">Sources</a>.</p>
+  <p class="muted">No repos watched yet. Add one on <a href="/apps">Apps</a>.</p>
   {% endif %}
 </details>
 {% endif %}

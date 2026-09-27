@@ -9,24 +9,74 @@
   the page comes back with that card open, scrolled to it (or to the row you
   used), and the result is shown inside the card instead of at the top.
 - Changed: **cards that want you start open.** A device with updates, an
-  untrusted device, a device with a push running, a repo whose last check
-  failed, the setup checklist, or the only card on a page start open; quiet
-  ones stay folded. Before, everything outside Settings started folded, so
-  even seeing your updates took a click.
-- Changed: **Status is where you install, and Install is now the Library.**
-  Each device's card on Status now offers everything you can put on it:
-  every watched app (**Update** or **Install**, with **What's in …** release
-  notes folded under the row instead of a link to another page), and every
-  test build and upload staged (**Push** or **Install**). The Install page
-  becomes the **Library** (`/library`; `/install` still leads there): every
-  staged APK, for older versions, a specific CPU's build and deleting files.
-  The nav reads **Status · Sources · Devices · Library · Settings**.
-- Changed: **a push stays on the row you pushed from.** No more separate
-  progress page that bounced you back after the install: the row shows
-  **Installing…**, the page refreshes itself until it's done, and a strip at
-  the top lists pushes running now and those just finished, each with its
-  log. A row whose last push failed says so, with the log. Each push's own
-  page (from its log link or install history) no longer sends you away.
+  untrusted device, a device with a push running, the setup checklist, or
+  the only card on a page start open; quiet ones stay folded. Before,
+  everything outside Settings started folded, so even seeing your updates
+  took a click.
+- Changed: **Sources and Install are one page: Apps.** Every app this server
+  installs, where it comes from and every version staged, on one page
+  (`/apps`; `/sources`, `/library`, `/install` and the other old addresses
+  lead there). Each watched repo is a card that never folds: its latest
+  release and staged CPU builds, how it's signed, what the chosen device has
+  (**2.4.0 ✓**, **update available**, **not installed**), and every action
+  (**Push**, **Delete**, **Builds**, **Check now**, **Pre-releases**,
+  **Remove**) on its face; older versions and each file sit under **Show
+  details**. Test builds and uploads follow, one card each. A line above the
+  repos sums up how many are up to date, to update or not installed on the
+  chosen device. Each device's card on Status still offers every watched app
+  (**Update** or **Install**, with **What's in …** release notes under the
+  row) and every test build and upload. The nav reads **Status · Apps ·
+  Devices · Settings**, and always marks the page you're on, including a
+  repo's Builds (under Apps) and a push's page (under Status).
+- Changed: **a push shows its progress where you pushed it.** No more
+  separate progress page that bounced you back after the install: the row
+  shows a moving bar and **Installing 2.4.0…**, the page refreshes itself,
+  and when it's done the bar fills green with **✓ Installed 2.4.0 just now**,
+  or red with **Push failed** and a link to why. A strip at the top also
+  lists pushes running now and those just finished, each with its log. Each
+  push's own page (from its log link or install history) no longer sends you
+  away.
+- Added: **every remove or delete asks first.** Deleting a version or a
+  file, removing a repo, forgetting a device, revoking a trusted browser,
+  removing a notification service, a saved colour or the GitHub token all
+  open a confirmation naming what goes and what stays.
+- Added: **a debug build is never pushed over a signed install.** A phone
+  that has an app from another key refuses a debug build of it, and getting
+  past that means uninstalling the app and losing its data. Such a build now
+  shows **Push blocked** with the reason, and the server refuses it however
+  it's asked (Apps, Status, **Stage and install**, auto-update). A debug
+  build this server pushed with the same key can still be replaced.
+- Fixed: **an older version wouldn't install after uninstalling a newer
+  one**, not even from the APK by hand, on a phone with a Private space or
+  work profile. `adb install` put every push into every profile, so
+  uninstalling from the main one left a copy elsewhere, and Android refused
+  the older version. Pushes now go only into the profile in use, an app only
+  in another profile no longer shows as installed, and a push refused because
+  of the copy already on the phone names the profile that has it and offers
+  **Remove from every profile** (after a confirmation: it deletes the app's
+  data there).
+- Fixed: **Check now didn't update the page.** The page asked to reload
+  itself at its own address, which a browser takes as a scroll, so it waited
+  forever; and the check was marked done a moment before its files were
+  saved. It now reloads until the release is staged, then shows it.
+- Changed: **Devices shows where each phone stands.** Each card's heading
+  shows its live connection (**Connected**, **Offline**, **Key refused**,
+  **Not connected**) beside **Trusted**, and its current address; inside, one
+  line says what to do about it, with how many apps it has and its last
+  push. The connection row reads address, **Reconnect**, **Find**, side by
+  side, and **Add a device** asks for the connect address first, then the
+  pairing address and code.
+- Changed: **Builds never scrolls sideways.** Each test build is a row that
+  wraps: its name, version once staged, signing, workflow run, size and
+  **Stage**. Every build of the newest commit shows, and the folded **older
+  releases** and **older commits** name what's inside them. Long release
+  notes and install logs wrap too.
+- Changed: **GitHub is asked less, and in parallel.** Builds asks only for
+  the workflow runs its builds came from, side by side, instead of the
+  repo's 50 latest runs, and sends its other requests together: it loads in
+  about half the time, and every build is labelled even when its run is
+  older than those 50. A release's CPU builds download a few at a time, a
+  poll checks a few repos at once, and requests reuse open connections.
 - Added: **a device's tools on its Status card.** **Find** (for a phone whose
   port changed), **Auto-update all** (on for every watched app it has, or
   off for all), and, for an untrusted device, **Trust** right there. When
@@ -40,10 +90,10 @@
 - Added: **Stage and install** on Builds. Beside each **Stage**, pick a
   trusted device, and the release or test build is staged, then installed on
   it; you land on its row on Status. Staged only, you land on it in the
-  Library rather than at the top of the page.
+  app's card on Apps rather than at the top of the page.
 - Changed: **Install history** sits under Status (a **History** button there),
   still linked from Settings. Devices folds its explanation of **Find** and
-  **Reconnect**, and puts **Find** first.
+  **Reconnect**.
 - Security: **images are scanned before they're published.** A release now
   pushes each image by digest, scans it with Trivy (fixable HIGH and
   CRITICAL in its OS packages), and only then tags it; it then checks every

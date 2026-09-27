@@ -206,18 +206,18 @@ def test_an_installed_upload_is_its_row_not_an_other_app(authed, device):
     assert page.count("Nothing staged for it") == 1 and "com.elsewhere" in page
 
 
-def test_no_apps_yet_points_at_sources(authed, device):
-    assert 'No apps yet. <a href="/sources">Add a source</a>' in authed.get("/status").text
+def test_no_apps_yet_points_at_apps(authed, device):
+    assert 'No apps yet. <a href="/apps">Add an app</a>' in authed.get("/status").text
 
 
-# ---- Library ----
+# ---- Apps ----
 
 def test_library_shows_a_push_running_on_its_row(authed, device):
     rid = db.create_repo("o", "r", "*.apk")
     apk = _stage(rid, "v2")
     db.insert_install("SER", apk, status="installing")
-    page = authed.get("/library").text
-    row = page[page.index(f'id="app-{rid}"'):]
+    page = authed.get("/apps").text
+    row = page[page.index(f'id="repo-{rid}"'):]
     row = row[:row.index("app-card-more")]
     assert "Installing 2.0…" in row and 'action="/push-latest"' not in row
     assert '<meta http-equiv="refresh" content="2">' in page
@@ -226,10 +226,10 @@ def test_library_shows_a_push_running_on_its_row(authed, device):
 def test_deleting_a_file_comes_back_to_its_kind(authed, device):
     up = _upload()
     r = authed.post(f"/staged/{up}/delete", data={"csrf_token": CSRF}, follow_redirects=False)
-    assert r.headers["location"] == "/library?ok=Staged%20file%20deleted&open=kind-upload#kind-upload"
+    assert r.headers["location"] == f"/apps?ok=Staged%20file%20deleted&open=kind-upload#upload-{up}"
 
 
-# ---- Sources ----
+# ---- Apps: watched repos ----
 
 @pytest.fixture
 def lookup(monkeypatch):
@@ -269,15 +269,18 @@ def test_watching_a_repo_checks_it_now_and_follows_the_ticked_devices(authed, de
     [repo] = db.list_repos()
     assert db.follows_set() == {("SER", repo["id"])}
     assert lookup == [(repo["id"], True)]  # its first check, right away
-    assert r.headers["location"].startswith(f"/sources?checking={repo['id']}&since=")
+    assert r.headers["location"].startswith(f"/apps?checking={repo['id']}&since=")
     assert r.headers["location"].endswith(f"&open=repo-{repo['id']}#repo-{repo['id']}")
 
 
 def test_a_check_waits_on_the_repos_card(authed, device):
     rid = db.create_repo("o", "r", "*.apk")
-    page = authed.get(f"/sources?checking={rid}&since={db.now()}&open=repo-{rid}").text
-    assert f'url=/sources?checking={rid}&amp;since=' in page and f'open=repo-{rid}#repo-{rid}"' in page
-    card = page[page.index(f'id="repo-{rid}" open>'):]
+    page = authed.get(f"/apps?checking={rid}&since={db.now()}&open=repo-{rid}").text
+    assert f'url=/apps?checking={rid}&amp;since=' in page and f'&amp;tick=1#repo-{rid}"' in page
+    # Each reload asks for a new URL: the same URL with the same #fragment is only a scroll to a browser.
+    again = authed.get(f"/apps?checking={rid}&since={db.now()}&open=repo-{rid}&tick=1").text
+    assert f'&amp;tick=2#repo-{rid}"' in again
+    card = page[page.index(f'id="repo-{rid}">'):]
     assert "Checking o/r…" in card
 
 
@@ -286,7 +289,7 @@ def test_check_now_and_prereleases_come_back_to_the_card(authed, lookup):
     r = authed.post(f"/repos/{rid}/check-now", data={"csrf_token": CSRF}, follow_redirects=False)
     assert r.headers["location"].endswith(f"&open=repo-{rid}#repo-{rid}")
     r = authed.post(f"/repos/{rid}/prereleases", data={"csrf_token": CSRF, "include": "1"}, follow_redirects=False)
-    assert r.headers["location"] == f"/sources?ok=Pre-releases%20included&open=repo-{rid}#repo-{rid}"
+    assert r.headers["location"] == f"/apps?ok=Pre-releases%20included&open=repo-{rid}#repo-{rid}"
 
 
 # ---- Builds: stage, or stage and install ----
@@ -306,10 +309,10 @@ def past_release(monkeypatch):
     return rid
 
 
-def test_staging_a_release_lands_on_it_in_the_library(authed, past_release):
+def test_staging_a_release_lands_on_its_card(authed, past_release):
     r = authed.post(f"/repos/{past_release}/releases/9/stage", data={"csrf_token": CSRF}, follow_redirects=False)
     assert r.headers["location"] == \
-        f"/library?ok=Staged%20v1%20%282%20APKs%29&open=kind-release#app-{past_release}"
+        f"/apps?ok=Staged%20v1%20%282%20APKs%29&open=repo-{past_release}#repo-{past_release}"
 
 
 def test_stage_and_install_a_release_pushes_the_build_for_the_cpu(authed, device, queued, past_release):

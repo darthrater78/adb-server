@@ -36,14 +36,14 @@ def _nav(page):
     return page[page.index('<nav class="main-nav"'):page.index("</nav>")]
 
 
-def test_nav_has_the_five_steps_in_order(authed):
+def test_nav_has_the_four_steps_in_order(authed):
     nav = _nav(authed.get("/status").text)
     hrefs = [part.split('"')[0] for part in nav.split('href="')[1:]]
-    assert hrefs == ["/status", "/sources", "/devices", "/library", "/settings"]
+    assert hrefs == ["/status", "/apps", "/devices", "/settings"]
 
 
-@pytest.mark.parametrize("old,new", [("/repos", "/sources"), ("/upload", "/sources"), ("/staged", "/library"),
-                                     ("/install", "/library")])
+@pytest.mark.parametrize("old,new", [("/repos", "/apps"), ("/upload", "/apps"), ("/staged", "/apps"),
+                                     ("/install", "/apps"), ("/sources", "/apps"), ("/library", "/apps")])
 def test_old_pages_redirect_and_keep_their_flash(authed, old, new):
     r = authed.get(f"{old}?ok=Saved", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == f"{new}?ok=Saved"
@@ -65,7 +65,7 @@ def test_activity_pages_sit_under_their_page(authed, trusted_device, path, under
 
 def test_status_shows_the_setup_checklist_until_everything_is_done(authed, trusted_device):
     page = authed.get("/status").text
-    assert "Get set up" in page and 'href="/sources"><strong>Add a source' in page
+    assert "Get set up" in page and 'href="/apps"><strong>Add an app' in page
     rid = db.create_repo("o", "r", "*.apk")
     apk = _stage(rid, "v2", "app.apk")
     install = db.insert_install("SER", apk, "pending")
@@ -104,10 +104,10 @@ def test_install_groups_releases_by_app_newest_first(authed, trusted_device):
     old = _stage(rid, "v1", "app.apk", version_name="1.0")
     new = _stage(rid, "v2", "app.apk", version_name="2.0", notes="Fresh notes")
     up = _stage_upload("dev build")
-    page = authed.get("/library").text
-    card = page[page.index(f'id="app-{rid}"'):page.index(f'id="upload-{up}"')]
+    page = authed.get("/apps").text
+    card = page[page.index(f'id="repo-{rid}"'):page.index(f'id="upload-{up}"')]
     # The latest release is pushed by repo, so the right CPU build is picked.
-    assert 'action="/push-latest"' in card and 'name="back" value="/library"' in card
+    assert 'action="/push-latest"' in card and 'name="back" value="/apps"' in card
     assert 'Push<span class="push-what"> 2.0' in card and "1 older" in card and "Fresh notes" in card
     assert card.index(f'id="apk-{new}"') < card.index(f'id="apk-{old}"')
     upload = page[page.index(f'id="upload-{up}"'):]
@@ -117,11 +117,11 @@ def test_install_groups_releases_by_app_newest_first(authed, trusted_device):
 def test_install_page_without_trusted_devices_points_to_devices(authed):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
-    page = authed.get("/library").text
+    page = authed.get("/apps").text
     assert 'href="/devices">Pair and trust one' in page and "/push-latest" not in page
 
 
-@pytest.mark.parametrize("back,expected", [("/library", "/library?to=SER&"), ("/status", "/status?"),
+@pytest.mark.parametrize("back,expected", [("/apps", "/apps?to=SER&"), ("/library", "/status?"), ("/status", "/status?"),
                                            ("https://evil.example", "/status?"), ("/settings", "/status?")])
 def test_push_latest_returns_only_to_known_pages(authed, trusted_device, back, expected):
     db.create_repo("o", "r", "*.apk")  # nothing staged, so the push is refused
@@ -131,14 +131,12 @@ def test_push_latest_returns_only_to_known_pages(authed, trusted_device, back, e
     assert r.headers["location"].startswith(f"{expected}error=")
 
 
-def test_sources_adds_uploads_and_install_lists_them(authed):
-    db.create_repo("octo", "hello", "*.apk")
+def test_apps_lists_repos_and_uploads_together(authed):
+    rid = db.create_repo("octo", "hello", "*.apk")
     up = _stage_upload("dev build")
-    page = authed.get("/sources").text
-    assert "octo/hello" in page and "dev build.apk" not in page and f"/staged/{up}/delete" not in page
-    assert '1 upload and test build staged' in page and 'see them in the <a href="/library">Library</a>' in page
-    install = authed.get("/library").text
-    assert f'id="upload-{up}"' in install and f'action="/staged/{up}/delete"' in install
+    page = authed.get("/apps").text
+    assert page.index(f'id="repo-{rid}"') < page.index('id="kind-upload"') < page.index(f'id="upload-{up}"')
+    assert "octo/hello" in page and f'action="/staged/{up}/delete-version"' in page
 
 
 def test_status_summary_points_at_the_first_update(authed, trusted_device):

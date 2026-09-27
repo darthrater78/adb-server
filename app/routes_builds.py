@@ -28,6 +28,17 @@ router = APIRouter()
 
 # ---- workflow artifacts: test builds straight from a watched repo ----
 
+def _cannot_fetch(repo) -> str | None:
+    """Why a repo's artifacts can't be fetched at all, before asking GitHub."""
+    if not poller.github_token():
+        return ("Fetching workflow artifacts needs a GitHub token: GitHub serves artifact downloads only to "
+                "an authenticated caller, even for a public repo. Add one under Settings → GitHub, "
+                "with Actions: read on this repo.")
+    if repo["github_id"] is None:
+        return "This repo's GitHub ID isn't pinned yet. Press Check now on Apps first."
+    return None
+
+
 async def _pinned_repo(repo_id: int) -> tuple[sqlite3.Row, str | None]:
     """The repo row, and why its artifacts can't be fetched right now (or
     None). Same identity rule as the poller: the name must still be the repo
@@ -35,12 +46,8 @@ async def _pinned_repo(repo_id: int) -> tuple[sqlite3.Row, str | None]:
     repo = db.get_repo(repo_id)
     if repo is None:
         raise HTTPException(status_code=404)
-    if not poller.github_token():
-        return repo, ("Fetching workflow artifacts needs a GitHub token: GitHub serves artifact downloads only to "
-                      "an authenticated caller, even for a public repo. Add one under Settings → GitHub, "
-                      "with Actions: read on this repo.")
-    if repo["github_id"] is None:
-        return repo, "This repo's GitHub ID isn't pinned yet. Press Check now on Sources first."
+    if problem := _cannot_fetch(repo):
+        return repo, problem
     try:
         info = await github_client.get_repo_info(repo["owner"], repo["repo"], poller.github_token())
     except github_client.GithubError as exc:
@@ -63,6 +70,32 @@ def _by_commit(artifacts: list[github_client.Artifact], runs: dict[int, dict]) -
     return list(groups.values())
 
 
+def _staged_builds(repo_id: int, artifacts: list[github_client.Artifact]) -> dict[int, sqlite3.Row]:
+    """The staged APK of each listed artifact that has one, by artifact id:
+    it's the only place a test build's version is known."""
+    staged = [a for a in db.list_staged_apks() if a["artifact_repo_id"] == repo_id]
+    found = {}
+    for art in artifacts:
+        # A staged artifact is tagged "<artifact name> <branch>@<sha7>" (stage_artifact).
+        match = next((a for a in staged if a["artifact_run_id"] == art.run_id
+                      and a["tag"].startswith(f"{art.name} ")), None)
+        if match is not None:
+            found[art.id] = match
+    return found
+
+
+def _release_rows(repo, listed: list[dict]) -> list[dict]:
+    """GitHub's releases as the Builds page lists them: what each is, how many
+    APKs match the repo's glob, and whether it's staged or the current one."""
+    staged_tags = {a["tag"] for a in db.list_staged_apks(repo["id"])}
+    return [{"id": r["id"], "tag": r["tag_name"], "name": r.get("name") or "",
+             "published": (r.get("published_at") or "")[:10], "prerelease": bool(r.get("prerelease")),
+             "apks": len(github_client.find_matching_assets(r, repo["asset_glob"])),
+             "staged": r["tag_name"] in staged_tags, "current": r["tag_name"] == repo["last_tag"],
+             "notes": (r.get("body") or "").strip()}
+            for r in listed]
+
+
 @router.get("/repos/{repo_id}/artifacts", response_class=HTMLResponse)
 async def artifacts_page(
     repo_id: int, request: Request, session: dict = Depends(auth.require_auth),
@@ -72,37 +105,49 @@ async def artifacts_page(
         repo_row = db.get_repo(repo_id)
         if repo_row is not None:
             github_client.forget_cached(repo_row["owner"], repo_row["repo"])
-    repo, problem = await _pinned_repo(repo_id)
-    artifacts, releases, signing = [], [], {}
+    repo = db.get_repo(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404)
+    problem = _cannot_fetch(repo)
+    artifacts, releases, signing, staged_builds = [], [], {}, {}
     token = poller.github_token()
+    owner, name = repo["owner"], repo["repo"]
+    if problem is None:
+        # Two rounds of requests, each sent together. First: the identity
+        # check (nothing is shown unless the name is still the pinned repo)
+        # with the release and artifact lists.
+        try:
+            info, listed, all_artifacts = await asyncio.gather(
+                github_client.get_repo_info(owner, name, token),
+                github_client.list_releases(owner, name, token),
+                github_client.list_artifacts(owner, name, repo["github_id"], token),
+            )
+            problem = poller.identity_problem(repo, info)
+        except github_client.GithubError as exc:
+            problem = str(exc)
     if problem is None:
         try:
-            listed = await github_client.list_releases(repo["owner"], repo["repo"], token)
-            staged_tags = {a["tag"] for a in db.list_staged_apks(repo_id)}
-            releases = [{"id": r["id"], "tag": r["tag_name"], "name": r.get("name") or "",
-                         "published": (r.get("published_at") or "")[:10], "prerelease": bool(r.get("prerelease")),
-                         "apks": len(github_client.find_matching_assets(r, repo["asset_glob"])),
-                         "staged": r["tag_name"] in staged_tags, "current": r["tag_name"] == repo["last_tag"],
-                         "notes": (r.get("body") or "").strip()}
-                        for r in listed]
+            releases = _release_rows(repo, listed)
             tags = {r["tag"] for r in releases}
-            # A build of a release (its tag's run, or its tagged commit) is that
-            # release: it arrives through Releases, with the release checks.
-            release_shas = await github_client.release_commits(repo["owner"], repo["repo"], tags, token)
             flt = artifact_filter()
-            shown = [a for a in await github_client.list_artifacts(repo["owner"], repo["repo"], repo["github_id"], token)
-                     if artifact_shown(a, flt) and a.branch not in tags and a.head_sha not in release_shas]
-            try:
-                runs = await github_client.list_runs(repo["owner"], repo["repo"], token)
-            except github_client.GithubError:
-                runs = {}  # the list still works; it just can't say what each build is
+            candidates = [a for a in all_artifacts if artifact_shown(a, flt) and a.branch not in tags]
+            # Second: which commits are releases' (a build of a release arrives
+            # through Releases, with the release checks), and the runs that
+            # built the candidates, so each can say what it is.
+            release_shas, runs = await asyncio.gather(
+                github_client.release_commits(owner, name, tags, token),
+                github_client.get_runs(owner, name, {a.run_id for a in candidates}, token),
+            )
+            shown = [a for a in candidates if a.head_sha not in release_shas]
             artifacts = _by_commit(shown, runs)
             signing = db.artifact_signing_map(repo_id)
+            staged_builds = _staged_builds(repo_id, shown)
         except github_client.GithubError as exc:
             problem = str(exc)
     return templates.TemplateResponse(
         request, "artifacts.html",
         context(request, session, repo=repo, artifacts=artifacts, releases=releases, problem=problem, signing=signing,
+                staged_builds=staged_builds,
                 devices=[d for d in db.list_devices() if d["trusted"]],
                 max_mb=uploads.MAX_UPLOAD_BYTES // (1024 * 1024), error=error, ok=ok, warn=warn),
     )
@@ -197,22 +242,27 @@ async def stage_artifact(
     except BaseException:
         staging.remove_file(tmp_path)
         raise
-    try:
-        notes = await github_client.get_build_notes(owner, name, artifact, token)
-    except github_client.GithubError as exc:
-        # Notes are a courtesy: the build still stages without them.
-        logger.warning("build notes for %s/%s run %d: %s", owner, name, artifact.run_id, exc)
-        notes = None
+    async def notes_or_none() -> str | None:
+        try:
+            return await github_client.get_build_notes(owner, name, artifact, token)
+        except github_client.GithubError as exc:
+            # Notes are a courtesy: the build still stages without them.
+            logger.warning("build notes for %s/%s run %d: %s", owner, name, artifact.run_id, exc)
+            return None
+
+    async def siblings_or_none() -> list[dict]:
+        try:  # other builds of the same commit, for advice if this one is debug-signed
+            listed = await github_client.list_artifacts(owner, name, repo["github_id"], token)
+        except github_client.GithubError:
+            return []
+        return [{"id": a.id, "name": a.name} for a in listed
+                if a.head_sha == artifact.head_sha and a.id != artifact.id
+                and not a.name.lower().endswith(".dockerbuild")][:10]
+
+    notes, siblings = await asyncio.gather(notes_or_none(), siblings_or_none())
     sha = artifact.head_sha[:7]
     origin = f" from {owner}/{name} artifact {artifact.name} ({artifact.branch} @ {sha}, run {artifact.run_id})"
     label = f"{artifact.name} {artifact.branch}@{sha}"
-    try:  # other builds of the same commit, for advice if this one is debug-signed
-        listed = await github_client.list_artifacts(owner, name, repo["github_id"], token)
-        siblings = [{"id": a.id, "name": a.name} for a in listed
-                    if a.head_sha == artifact.head_sha and a.id != artifact.id
-                    and not a.name.lower().endswith(".dockerbuild")][:10]
-    except github_client.GithubError:
-        siblings = []
     marker = f"Commit {artifact.head_sha[:7]}:\n"  # get_build_notes puts the commit message after this
     subject = notes.split(marker, 1)[1].split("\n", 1)[0] if notes and marker in notes else ""
     provenance = {"repo": f"{owner}/{name}", "run_id": artifact.run_id, "branch": artifact.branch,

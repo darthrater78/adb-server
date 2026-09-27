@@ -25,8 +25,35 @@ def devices_page(request: Request, session: dict = Depends(auth.require_auth), e
     return templates.TemplateResponse(
         request, "devices.html",
         context(request, session, card_ids=[dom_id(d["serial"]) for d in devices], devices=devices, offer=offer,
-                error=error, ok=ok),
+                state=_device_states(devices), error=error, ok=ok),
     )
+
+
+def _device_states(devices) -> dict[str, dict]:
+    """How each device stands right now, by serial: its connection as the
+    adb server reports it, how many apps it has from here, and its last push."""
+    try:
+        transports = adb_client.transport_states()
+    except adb_client.AdbError:
+        transports = None
+    installed = db.device_packages_map()
+    last_push = {}
+    for i in db.list_installs():  # newest first
+        last_push.setdefault(i["device_serial"], i)
+    states = {}
+    for d in devices:
+        addr = d["last_connect_addr"]
+        if transports is None:
+            link = "unknown"
+        else:
+            link = {"device": "connected", "unauthorized": "unauthorized"}.get(transports.get(addr or ""),
+                                                                               "offline" if addr in transports else "disconnected")
+        states[d["serial"]] = {
+            "link": link,
+            "apps": sum(1 for (serial, _), row in installed.items() if serial == d["serial"] and row["installed"]),
+            "last_push": last_push.get(d["serial"]),
+        }
+    return states
 
 
 def _back(back: str, serial: str, **flash):

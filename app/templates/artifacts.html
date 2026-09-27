@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Builds: {{ repo.owner }}/{{ repo.repo }} — ADB Server{% endblock %}
 {% block content %}
-<p class="breadcrumb"><a href="/sources">Sources</a> /</p>
+<p class="breadcrumb"><a href="/apps#repo-{{ repo.id }}">Apps</a> /</p>
 <h1>Builds: {{ repo.owner }}/{{ repo.repo }}</h1>
 <p class="page-intro muted">Stage an older release, or a test build straight from a workflow run, and install it on a
-  device in the same step if you like. Staged builds are kept in the <a href="/library">Library</a>.</p>
+  device in the same step if you like. Staged builds show on <a href="/apps#repo-{{ repo.id }}">Apps</a>.</p>
 <p><a href="/repos/{{ repo.id }}/artifacts?refresh=1" class="button-link secondary">Refresh from GitHub</a></p>
 
 {% if problem %}
@@ -34,63 +34,73 @@
   {% if r.current %}<span class="badge badge-ok">current</span>{% endif %}
   {% if r.prerelease %}<span class="badge badge-muted">pre-release</span>{% endif %}
 {% endmacro %}
-{% macro commit_group(c, open=false) %}
-<details class="panel commit-group fold"{% if open %} open{% endif %}>
-  <summary class="commit-head">
+{% macro signing_badge(sig) %}
+  {% if sig.kind == "signed" %}
+    {% if repo.signer_sha256 and sig.signer == repo.signer_sha256 %}<span class="badge badge-ok" title="Updates the app installed from releases">signed · same key as releases</span>
+    {% elif repo.signer_sha256 %}<span class="badge badge-ok" title="A phone with the release installed refuses it">signed · different key</span>
+    {% else %}<span class="badge badge-ok">signed</span>{% endif %}
+  {% elif sig.kind == "debug" %}<span class="badge badge-warn" title="Signed with a throwaway debug key">debug build</span>
+  {% elif sig.kind == "unsigned" %}<span class="badge badge-error" title="Can't be installed unless this server signs it">unsigned</span>
+  {% else %}<span class="badge badge-error" title="{{ sig.detail }}">not a valid build</span>{% endif %}
+{% endmacro %}
+{# One commit and every build made from it, always shown in full: the
+   artifacts, how each is signed, its version once staged, and Stage. #}
+{% macro commit_group(c) %}
+<section class="panel commit-group">
+  <div class="commit-head">
+    <span class="badge badge-artifact">Test build</span>
     <span class="tag-pill" title="Branch">{{ c.branch or "?" }}</span>
     <a class="mono small" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/commit/{{ c.sha }}" rel="noopener noreferrer">{{ c.sha[:7] }}</a>
     <strong class="commit-subject">{{ c.subject or "(no commit message available)" }}</strong>
     <span class="muted small">{{ c.created | when }}</span>
-  </summary>
+  </div>
   {% if c.message and c.message != c.subject %}
   <details><summary>Commit message</summary><pre class="release-notes">{{ c.message }}</pre></details>
   {% endif %}
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>Artifact</th><th>Signing</th><th>Workflow run</th><th>Size</th><th></th></tr></thead>
-    <tbody>
-      {% for item in c.artifacts %}{% set a = item.a %}
-      {% set sig = signing.get(a.id) %}
-      <tr id="artifact-{{ a.id }}">
-        <td data-label="Artifact"><span class="clip" title="{{ a.name }}">{{ a.name }}</span></td>
-        <td data-label="Signing">
-          {% if not sig %}
-          <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/check">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="small secondary" title="Downloads it, checks the signature, deletes it">Check signing</button>
-          </form>
-          {% elif sig.kind == "signed" %}
-            {% if repo.signer_sha256 and sig.signer == repo.signer_sha256 %}<span class="badge badge-ok" title="Updates the app installed from releases">signed · same key as releases</span>
-            {% elif repo.signer_sha256 %}<span class="badge badge-ok" title="A phone with the release installed refuses it">signed · different key</span>
-            {% else %}<span class="badge badge-ok">signed</span>{% endif %}
-          {% elif sig.kind == "debug" %}<span class="badge badge-warn" title="Signed with a throwaway debug key">debug build</span>
-          {% elif sig.kind == "unsigned" %}<span class="badge badge-error" title="Can't be installed unless this server signs it">unsigned</span>
-          {% else %}<span class="badge badge-error" title="{{ sig.detail }}">not a valid build</span>{% endif %}
-        </td>
-        <td data-label="Workflow run" class="small">
+  {# Rows, not a table: each wraps to the width it has, so nothing scrolls sideways. #}
+  <div class="build-rows">
+    {% for item in c.artifacts %}{% set a = item.a %}
+    {% set sig = signing.get(a.id) %}
+    {% set st = staged_builds.get(a.id) %}
+    <div class="build-row" id="artifact-{{ a.id }}">
+      <div class="build-info">
+        <div class="build-line">
+          <strong class="build-name">{{ a.name }}</strong>
+          {% if st %}<span class="version">{{ st.version_name or "?" }}</span>
+          <a class="badge badge-muted" href="/apps?open=kind-artifact#upload-{{ st.id }}" title="Staged: open it on Apps">staged</a>
+          {% endif %}
+          {% if sig %}{{ signing_badge(sig) }}{% endif %}
+        </div>
+        <div class="build-sub muted small">
           <a href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/actions/runs/{{ a.run_id }}" rel="noopener noreferrer">{{ item.run.title or "run" }}{% if item.run.number %} #{{ item.run.number }}{% endif %}</a>
-          {% if item.run.event %}<span class="muted">{{ item.run.event }}</span>{% endif %}
-        </td>
-        <td data-label="Size" class="small">{{ "%.1f" | format(a.size / 1048576) }} MB</td>
-        <td>
-          {{ stage_form("/repos/" ~ repo.id ~ "/artifacts/" ~ a.id ~ "/stage", disabled=a.size > max_mb * 1048576) }}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          {% if item.run.event %}· {{ item.run.event }}{% endif %} · {{ "%.1f" | format(a.size / 1048576) }} MB
+          {% if not st %}· <span title="A test build's version is read from its APK when it's staged">version known once staged</span>{% endif %}
+        </div>
+      </div>
+      <div class="build-actions">
+        {% if not sig %}
+        <form method="post" action="/repos/{{ repo.id }}/artifacts/{{ a.id }}/check">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="small secondary" title="Downloads it, checks the signature, deletes it">Check signing</button>
+        </form>
+        {% endif %}
+        {{ stage_form("/repos/" ~ repo.id ~ "/artifacts/" ~ a.id ~ "/stage", disabled=a.size > max_mb * 1048576) }}
+      </div>
+    </div>
+    {% endfor %}
   </div>
-</details>
+</section>
 {% endmacro %}
 
 <section class="settings-section">
-  <h2>Releases</h2>
+  <h2>Releases <span class="muted small">published on GitHub, checked like a polled release</span></h2>
   <p class="muted small">Each goes through the same checks as a polled release: uploaded by the owner or a workflow,
     signed with the repo's pinned certificate, and not a debug build. An older release staged here doesn't become
     "latest": auto-update and <strong>Push latest</strong> keep using the newest release.</p>
   {% if releases %}{% set r = releases[0] %}
   <div class="panel release-card">
     <div class="commit-head">
+      <span class="badge badge-ok">Release</span>
       <a class="tag-pill" href="https://github.com/{{ repo.owner }}/{{ repo.repo }}/releases/tag/{{ r.tag | urlencode }}" rel="noopener noreferrer">{{ r.tag }}</a>
       {% if r.name and r.name != r.tag %}<strong class="commit-subject">{{ r.name }}</strong>{% endif %}
       {{ release_badges(r) }}
@@ -102,7 +112,8 @@
   </div>
   {% if releases | length > 1 %}
   <details class="fold sub">
-    <summary><h3>{{ releases | length - 1 }} older release{{ "" if releases | length == 2 else "s" }}</h3></summary>
+    <summary><h3>{{ releases | length - 1 }} older release{{ "" if releases | length == 2 else "s" }}</h3>
+      <span class="fold-peek">{% for r in releases[1:6] %}<span class="tag-pill{{ ' staged' if r.staged else '' }}"{% if r.staged %} title="Staged"{% endif %}>{{ r.tag }}{{ " ✓" if r.staged else "" }}</span>{% endfor %}{% if releases | length > 6 %}<span class="muted small">+{{ releases | length - 6 }} more</span>{% endif %}</span></summary>
     <div class="table-wrap">
     <table>
       <thead><tr><th>Release</th><th>Published</th><th>APKs</th><th></th></tr></thead>
@@ -130,7 +141,7 @@
 </section>
 
 <section class="settings-section">
-  <h2>Test builds from workflow artifacts</h2>
+  <h2>Test builds <span class="muted small">from workflow runs, not released</span></h2>
   <p class="muted small">Staging one is like uploading its zip: it must hold exactly one APK, up to {{ max_mb }} MB,
     whose signature verifies. Debug builds are allowed and marked. Only builds from this repo's own branches are
     listed: never one from a pull request opened from a fork, and never a release's own build (that's under
@@ -153,10 +164,11 @@
       downloads it, checks it and deletes it; staging one records it too.</p>
   </details>
   {% if artifacts %}
-  {{ commit_group(artifacts[0], open=true) }}
+  {{ commit_group(artifacts[0]) }}
   {% if artifacts | length > 1 %}
   <details class="fold sub">
-    <summary><h3>{{ artifacts | length - 1 }} older commit{{ "" if artifacts | length == 2 else "s" }}</h3></summary>
+    <summary><h3>{{ artifacts | length - 1 }} older commit{{ "" if artifacts | length == 2 else "s" }}</h3>
+      <span class="fold-peek">{% for c in artifacts[1:4] %}<span class="tag-pill" title="{{ c.subject }}">{{ c.branch or "?" }} @ {{ c.sha[:7] }}</span>{% endfor %}{% if artifacts | length > 4 %}<span class="muted small">+{{ artifacts | length - 4 }} more</span>{% endif %}</span></summary>
     {% for c in artifacts[1:] %}{{ commit_group(c) }}{% endfor %}
   </details>
   {% endif %}

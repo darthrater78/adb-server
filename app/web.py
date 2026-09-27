@@ -119,10 +119,19 @@ VALID_THEMES = {"flashbang", "dark", "oled"}
 # theme form is client-supplied, and an open redirect is exactly what a
 # permissive check here would hand an attacker.
 SETTINGS_PAGES = ("general", "security", "notifications", "github", "appearance")
-KNOWN_NAV_PATHS = {"/status", "/sources", "/devices", "/library", "/settings", "/installs", "/audit",
+KNOWN_NAV_PATHS = {"/status", "/apps", "/devices", "/settings", "/installs", "/audit",
                    *(f"/settings/{p}" for p in SETTINGS_PAGES)}
 # Pages reached from another page rather than the top bar highlight that page.
 NAV_SECTION = {"/installs": "/status", "/audit": "/settings", **{f"/settings/{p}": "/settings" for p in SETTINGS_PAGES}}
+# ...and so do the pages under one: a repo's Builds, one push's progress.
+NAV_PREFIX = (("/repos/", "/apps"), ("/installs/", "/status"), ("/settings/", "/settings"))
+
+
+def nav_section(path: str) -> str:
+    """The top-bar entry a page belongs to, so the bar always shows where you are."""
+    if path in NAV_SECTION:
+        return NAV_SECTION[path]
+    return next((section for prefix, section in NAV_PREFIX if path.startswith(prefix)), path)
 
 # The card a redirect asks a page to open (and scroll to, with the same id
 # as its fragment). Only ids the page itself offers are honoured.
@@ -164,7 +173,7 @@ def context(request: Request, session: dict | None = None, card_ids=(), **extra)
         "accent_version": (db.get_meta("accent_color") or "default").replace("#", ""),
         "theme": _get_theme(request),
         "current_path": request.url.path if request.url.path in KNOWN_NAV_PATHS else "/status",
-        "nav_path": NAV_SECTION.get(request.url.path, request.url.path),
+        "nav_path": nav_section(request.url.path),
         "open_card": wanted if _CARD_ID.fullmatch(wanted) and wanted in set(card_ids) else None,
     }
     if session is not None:

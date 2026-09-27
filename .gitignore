@@ -10,3 +10,6 @@ __pycache__/
 
 # runtime data (sqlite db, staged apks) — lives in a docker volume, not the repo
 data/
+.dev-skills-gates.md
+.dev-skills-handoff.md
+HANDOFF.md

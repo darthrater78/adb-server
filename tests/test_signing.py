@@ -188,7 +188,7 @@ def test_the_repo_opt_in_needs_the_explanation_acknowledged(authed):
 
 
 def test_explanation_is_shown_where_the_opt_in_is_offered(authed):
-    assert "can&#39;t install an unsigned APK" in authed.get("/sources").text
+    assert "can&#39;t install an unsigned APK" in authed.get("/apps").text
 
 
 def test_signing_leaves_no_side_files(tools, tmp_path):

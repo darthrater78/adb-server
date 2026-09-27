@@ -105,9 +105,9 @@ async def list_artifacts(owner, repo, github_id, token):
     return list(ARTIFACTS.get(repo, []))
 
 
-async def list_runs(owner, repo, token, per_page=50):
+async def get_runs(owner, repo, run_ids, token):
     return {rid: {"title": t, "event": e, "number": n, "message": m, "subject": m.split("\n", 1)[0]}
-            for rid, (t, e, n, m) in RUNS.items()}
+            for rid, (t, e, n, m) in RUNS.items() if rid in run_ids}
 
 
 async def check_token(token):
@@ -122,7 +122,7 @@ async def artifact_lists_apk(owner, repo, artifact_id, token):
     return True
 
 
-for _fn in (get_repo_info, list_releases, get_latest_release, release_commits, list_artifacts, list_runs,
+for _fn in (get_repo_info, list_releases, get_latest_release, release_commits, list_artifacts, get_runs,
             check_token, can_download_artifact, artifact_lists_apk):
     assert hasattr(gh, _fn.__name__), _fn.__name__  # the app renamed something: fix the mock
     setattr(gh, _fn.__name__, _fn)

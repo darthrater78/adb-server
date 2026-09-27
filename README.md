@@ -206,7 +206,7 @@ images yourself instead, see [Development](#development).
 Then open `http://<server>:8080` and sign in. The home page walks you through
 the rest:
 
-1. **Sources**: watch the GitHub repos you want to follow, or upload an APK.
+1. **Apps**: watch the GitHub repos you want to follow, or upload an APK.
 2. **Devices**: pair your phone with its pairing code, and trust it.
 3. **Status**: install an app on it from the device's card.
 
@@ -228,30 +228,46 @@ Then turn on two-factor sign-in under **Settings → Security**.
 
 ## Features
 
-The app follows the order you use it in: **Status · Sources · Devices ·
-Library · Settings**. **Status** is where you work day to day: every device,
-what it has, and everything you can install on it. The others are for
-setting things up (Sources, Devices) and for everything staged (Library).
+The app follows the order you use it in: **Status · Apps · Devices ·
+Settings**. **Status** is where you work day to day: every device, what it
+has, and one-tap updates. **Apps** is every app this server installs and
+where it comes from, with every version it has staged. **Devices** pairs and
+connects phones. The top bar always marks the page you're on, including the
+pages under it (a repo's Builds sits under Apps, a push's log under Status).
 
-Every card, panel and section folds: click its heading, which sums up
-what's inside (a device's updates, a repo's newest release, how many apps in
-a group need updating). A card **starts open when it wants you**: a device
-with updates, an untrusted device or a push running on it, a repo whose
-last check failed, a question waiting on you (a repo to confirm, a signing
-change, a device to trust), or the only card on its page. Quiet ones start
-folded.
+A device's card and the add and settings panels fold: click the heading,
+which sums up what's inside. A card **starts open when it wants you**: a
+device with updates, an untrusted device or a push running on it, a
+question waiting on you (a repo to confirm, a signing change, a device to
+trust), or the only card on its page. Quiet ones start folded. An app's card
+on Apps never folds: what it is, its newest version and what you can do with
+it are always on its face, and only reference details sit under **Show
+details**.
+
+**Every remove or delete asks first**, in a dialog naming what goes and what
+stays: a version's files, a watched repo, a device, a trusted browser, a
+notification service, a saved colour, the GitHub token.
 
 **Every action brings you back to where you took it.** Save a name, press
 **Find**, toggle auto-update or **Check now**, and the page comes back with
 that card open, scrolled to it, and the result shown inside it, not at the
 top of the page.
 
-**Every push works the same way**, from Status or the Library: the button
-asks you to confirm (what, to which device, replacing which version), and
-you stay on the row you pushed from. It shows **Installing…** and the page
-refreshes itself until the push is done; a strip at the top lists pushes
-running now and those that just finished, each with its log. A row whose
-last push failed says so, with a link to the log.
+**Every push works the same way**, from Status or Apps: the button asks you
+to confirm (what, to which device, replacing which version), and you stay on
+the row you pushed from. It shows a moving progress bar and **Installing
+2.4.0…**, and the page refreshes itself until the push is done; then the
+bar fills green with **✓ Installed 2.4.0 just now**, or red with **Push
+failed** and a link to why. A strip at the top also lists pushes running now
+and those that just finished, each with its log.
+
+**A debug build never goes over a signed install.** A phone that has an app
+signed with one key refuses an update signed with another, and the only way
+past that is uninstalling the app, which deletes its data. So when a phone
+already has an app, a debug build of it shows **Push blocked** with the
+reason instead of a push button, and the server refuses it however it's
+asked (including **Stage and install** and auto-update). A debug build this
+server pushed with the same key may still be replaced by the next one.
 
 ### Status: the home page
 
@@ -296,13 +312,30 @@ button for it, or **Update all** when a device has several) and a switcher
 between devices.
 
 <img src="docs/screenshots/phone-status.png" alt="Status page on a phone" width="195">
-<img src="docs/screenshots/phone-library.png" alt="Library page on a phone" width="195">
+<img src="docs/screenshots/phone-apps.png" alt="Apps page on a phone" width="195">
 
-### Sources: repos and uploads
+### Apps: repos, builds and uploads
 
-Everything APKs come from, on one page. What they stage is installed from
-[Status](#status-the-home-page) and kept in the [Library](#library); Sources
-only says how many uploads there are.
+Every app this server installs, where it comes from, and every version it
+has staged, on one page. **Pushing to ▾** at the top picks the device every
+**Push** on the page goes to (the most recently paired one to start), and
+the line above the repos sums up where they stand on it: how many are **to
+update**, **up to date**, **other version** or **not installed**.
+
+Each watched repo is one card, never folded. Its face shows the latest
+staged release, which CPU builds of it are staged, how it's signed, and what
+the chosen device has (**2.4.0 ✓**, **2.3.1, update available** or **not
+installed**, plus which other devices have it). Its actions sit right there:
+**Push** (the newest release, in the build that fits the device's CPU),
+**Delete** (every file of that version), **Builds**, **Check now**,
+**Pre-releases** and **Remove**. **Show details** opens the repo's details,
+the release notes, and every staged version and file, each with **Push
+this** and **Delete file**. Test builds and uploads follow, one card each
+under **Test builds** and **Uploads**, with the same face and actions. A test
+build is marked **Test build**, with its branch and commit linked to the
+workflow run, so it can't be mistaken for a release. Devices are named by
+their nickname, else their model and the end of their serial (e.g. `Google
+Pixel 8 · …005KT`).
 
 **Watch a GitHub repo** as a URL, `owner/repo` or an SSH remote, plus an asset
 glob (default `*.apk`). **Look up repo** first shows what GitHub says it is:
@@ -320,14 +353,11 @@ its card until the check is done.
 Repos are polled every `POLL_INTERVAL_MINUTES`
 (default 10). **Check now** checks immediately, in the background: the page
 reloads itself until the check is done, then says what it found. If you
-deleted the current release's files in the Library, **Check now** downloads and
-verifies it again; the scheduled poll leaves a deleted release alone.
-
-Each watched repo is one folded card. Its heading shows the most recent
-staged release (or **not staged** if its files were deleted) and whether the
-last check went through; open it for that release's builds and notes, the
-repo's details, and **Builds**, **Check now**, **Pre-releases** and
-**Remove**.
+deleted the current release's files, **Check now** downloads and verifies it
+again (the card shows **files deleted** until then); the scheduled poll
+leaves a deleted release alone. A release's CPU builds download side by
+side, a few at a time, and the poll checks a few repos at once, so one big
+download doesn't hold up the others.
 Pre-releases are ignored unless you turn **Pre-releases** on for that repo.
 Polls use conditional requests (ETags); with `GITHUB_TOKEN` set, an unchanged
 repo doesn't use up GitHub's rate limit (GitHub only waives it for
@@ -340,18 +370,19 @@ with **Stage** right there; the rest sit under a fold below it
 (**N older releases**, **N older commits**). Beside each **Stage** is a
 choice of **Stage only** or **Stage and install on** a trusted device: pick a
 device and it's staged, then installed on it (the build for its CPU), and you
-land on its row on Status watching it install. Staged only, you land on it in
-the Library:
+land on its row on Status watching it install. Staged only, you land on its
+card on Apps:
 
 - **Releases**: its published releases. The newest shows its name, date,
   APK count and release notes. **Stage** an older one and it goes
   through every release check (uploader, signature, the pin, no debug
   builds). It doesn't become "latest": auto-update and **Push latest** go by
   release date, so they keep using the newest release.
-- **Test builds from workflow artifacts**: builds from its recent workflow
-  runs, grouped by commit, each commit with its message. **Stage** treats
-  one exactly like an uploaded zip (below) and records the repo, run, branch
-  and commit it came from. Its **build notes** in the Library stand in for
+- **Test builds**: builds from its recent workflow runs, grouped by commit,
+  each commit with its message and every build of it shown, with its
+  workflow run, size and, once staged, its version. **Stage** treats one
+  exactly like an uploaded zip (below) and records the repo, run, branch and
+  commit it came from. Its **build notes** on Apps stand in for
   release notes: the run, the pull request's description if it was built for
   one, and the full commit message. Each build is badged by how it's signed
   (**signed · same key as releases**, **signed · different key**, **debug
@@ -408,21 +439,39 @@ build whose commit also produced other builds is flagged **Better not install
 this debug build**, with a button to stage the other one instead: a phone with
 the signed app refuses a debug build as an update.
 
-![Sources: the add forms folded away, a signing-key change awaiting review, and the watched repos](docs/screenshots/sources.png)
+When a release has several APKs that match the glob (per-ABI builds such as
+`arm64-v8a`, `armeabi-v7a` or universal), all of them are staged, up to 6.
+Only the newest `KEEP_RELEASES_PER_REPO` releases per repo (default 3) are
+kept on disk. Older ones are deleted automatically. Install history is kept
+either way.
+
+![Apps: a watched repo with its latest release, what the phone has, and every action on its face](docs/screenshots/apps.png)
+
+Every push runs in the background, and its row shows it running (see
+above). Each one's own page, reached from its **log** link or from install
+history, has `adb`'s output.
+
+![A failed push, with adb's output](docs/screenshots/install-status.png)
+
 
 ### Devices
 
 Follow the steps at the top of the page. On the phone, open Settings →
 Developer options → Wireless debugging → *Pair device with pairing code*, then
-enter the pairing address and 6-digit code the phone shows, plus its connect
-address. A new device starts **untrusted**. As soon as it's paired, the page
+enter its connect address (from the Wireless debugging screen), then the
+pairing address and 6-digit code the pairing dialog shows. A new device starts **untrusted**. As soon as it's paired, the page
 asks **Trust it?**, showing its model, serial, CPU and address so you can
 check it's the phone you just paired, with a box to name it at the same
 time. **Trust** then takes you to its card on Status, ready to install.
 **Not now** leaves it untrusted; **Trust** on its card here or on Status does
-the same later. Each paired device is one card: its heading shows its name,
-serial and trust, and it opens to its details, naming and trust, and its
-connection. Nothing is pushed to an untrusted device.
+the same later. Each paired device is one card. Its heading shows its name,
+current address, when it was last seen, whether it's **Trusted**, and its
+live connection as the adb server reports it: **Connected**, **Offline**,
+**Key refused** (pair it again), **Not connected**, or **Connection unknown**
+when the adb server can't be reached. Inside, one line says where it stands
+and what to do about it, then its details (with how many apps it has and
+its last push), naming and trust, and its connection. Nothing is pushed to
+an untrusted device.
 
 The connect port changes whenever wireless debugging restarts. Before every
 push, the app reconnects to the device. If the stored port is dead, it scans
@@ -431,48 +480,20 @@ accepts a port only if the device there reports the **same hardware serial**.
 **Find** does this on demand, here or on the device's card on Status (**What
 Find and Reconnect do** on each card explains it): use it to check a phone is
 reachable before you install, or after turning wireless debugging back on.
-If the phone's IP itself changed, use **Reconnect** with its new address. Nicknames, trust and forgetting a device
+If the phone's IP itself changed, use **Reconnect** with its new address:
+the address field comes first, then **Reconnect** and **Find** side by side. Nicknames, trust and forgetting a device
 are all on this page. Phones list this server as `@adbserver`.
 
+**Phones with a Private space or work profile.** A push installs the app
+only in the profile in use. If an older push (before 3.8.0) or an install
+from elsewhere left a copy in another profile, uninstalling it from the main
+one isn't enough: Android keeps one version per app across all profiles, so
+it refuses an older version or a differently signed build, from here and
+from the APK by hand. When a push is refused that way, its page names the
+profile that still has the app and offers **Remove from every profile**
+(after a confirmation, since it deletes the app's data in each).
+
 ![Devices: pairing folded away, and each paired device as a folded card, the first one opened](docs/screenshots/devices.png)
-
-### Library
-
-Every verified APK this server has staged, for when you want more than the
-latest: an older version, a specific CPU's build, a test build or upload on
-its own, or deleting files. (Installing the latest on a device is done from
-[Status](#status-the-home-page).) One row per app, showing just the essentials: name,
-version, where it's from, signing, what the chosen device has of it now,
-when it was staged, and which other devices already have it. **Pushing to ▾** at the top picks the device every **Push**
-on the page goes to (the most recently paired one to start). For a watched
-repo, the newest release is pushed, in the build that fits the device's CPU.
-When a release has several APKs that match the glob (per-ABI builds such as
-`arm64-v8a`, `armeabi-v7a` or universal), all of them are staged, up to 6.
-**Push** asks you to confirm first, like Status (see above).
-**Show details** on a row opens the rest: the package name, release notes, every
-staged file (to push a specific one or delete it) and older versions.
-
-Rows are grouped as **Releases**, **Test builds from workflow artifacts** and
-**Uploads**, each a folded card whose heading sums it up: how many apps, the
-newest one, and against the device you're pushing to how many are **to
-update**, **up to date** or **not installed**. The **All · Releases · Test
-builds · Uploads** pills show just one group, opened. A test build is marked **Test build**, with its branch
-and commit linked to the workflow run, so it can't be mistaken for a release.
-Devices are named by their nickname, else its model and the
-end of its serial (e.g. `Google Pixel 8 · …005KT`), read when the app first
-talks to it.
-
-Only the newest `KEEP_RELEASES_PER_REPO` releases per repo (default 3) are
-kept on disk. Older ones are deleted automatically. Install history is kept
-either way.
-
-![Library: every app with its latest version and a push button](docs/screenshots/library.png)
-
-Every push runs in the background, and its row shows it running (see
-above). Each one's own page, reached from its **log** link or from install
-history, has `adb`'s output.
-
-![A failed push, with adb's output](docs/screenshots/install-status.png)
 
 ### Settings
 
@@ -662,20 +683,20 @@ trusted. They run before [Release verification](#release-verification).
 
 - **Trust on first use, then pinned.** The first release staged for a repo
   pins its **package name** and **signing certificate SHA-256**. Every later
-  release must match both. A mismatch is rejected and shown on the Sources page.
+  release must match both. A mismatch is rejected and shown on the Apps page.
   It is never skipped silently and never trusted automatically. This stops a
   compromised upstream account, or a malicious asset uploaded to someone
   else's release, from reaching your devices unnoticed.
 - **Every signer counts.** All of an APK's signers are checked and pinned,
   not just the first.
 - **Unsigned APKs are rejected** unless the repo opted in to having this
-  server sign them (see [Sources](#sources-repos-and-uploads)), and a
+  server sign them (see [Apps](#apps-repos-builds-and-uploads)), and a
   **debug-signed release** is always rejected. The default Android debug certificate is generated per machine
   and identifies nobody, and nobody is watching when the poller runs. A
   debug-signed release never becomes a pin.
 - **One release, one identity.** Every APK in a release must share the same
   package and signer, or the whole release is rejected.
-- **Signing-key rotation** is a reviewed decision. The Sources page shows both
+- **Signing-key rotation** is a reviewed decision. The Apps page shows both
   certificates and whether the new APK carries an APK Signature Scheme v3
   proof-of-rotation linking it to the pinned key. Accepting the new
   certificate re-pins the repo and stages that release. The acceptance is
@@ -794,9 +815,16 @@ below).
   loopback ranges (never hostnames, never public IPs), and they're checked so
   they can't be read as `adb` options. A port scan only ever touches the last
   known private IP of a device you already paired.
-- **Safe installs.** Always `adb install -r`, never `-g` (grant all
-  permissions), `-d` (allow downgrade) or `-t` (test APKs). Android's own
-  signature check still refuses an update signed by a different key.
+- **Safe installs.** Always `adb install -r --user current`, never `-g`
+  (grant all permissions), `-d` (allow downgrade) or `-t` (test APKs). An app
+  goes only into the profile in use, never quietly into a Private space or
+  work profile too. Android's own signature check still refuses an update
+  signed by a different key, and a debug build is refused here first when the
+  phone already has the app from another key.
+- **Removing an app from every profile** is offered only on a push the phone
+  refused because of the copy it already has, only for a trusted device, and
+  only for that push's own package (validated before it reaches the phone's
+  shell). It asks first, since it deletes the app's data in every profile.
 
 ### Manual uploads
 
@@ -902,7 +930,7 @@ two-factor sign-in stays on but refuses every code until you reset it with
 - [ ] `chmod 600 .env`.
 - [ ] Use a fine-grained, read-only `GITHUB_TOKEN`, or none for public repos.
 - [ ] Back up the `appdata` and `adbkeys` directories, and protect the backups.
-- [ ] Review the **Audit log** (linked from Settings) from time to time, and Sources whenever
+- [ ] Review the **Audit log** (linked from Settings) from time to time, and Apps whenever
       a signing change is flagged.
 
 ### Known limitations and accepted risks

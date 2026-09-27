@@ -21,22 +21,22 @@ def _targets(page: str) -> set[str]:
 
 def test_every_push_goes_to_the_newest_trusted_device_by_default(authed, two_devices):
     _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
-    page = authed.get("/library").text
+    page = authed.get("/apps").text
     assert _targets(page) == {"BBB"}  # paired last
     assert "Pushing to</span> <strong>Tablet</strong>" in page and "<select" not in page
 
 
 def test_the_picker_switches_the_target_device(authed, two_devices):
     _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
-    page = authed.get("/library?to=AAA").text
+    page = authed.get("/apps?to=AAA").text
     assert _targets(page) == {"AAA"}
-    assert 'href="/library?to=BBB"' in page and 'href="/library?to=AAA" aria-current="true"' in page
+    assert 'href="/apps?to=BBB"' in page and 'href="/apps?to=AAA" aria-current="true"' in page
 
 
 @pytest.mark.parametrize("to", ["EVIL", "nope", "", "<b>x</b>"])
 def test_the_picker_only_targets_trusted_devices(authed, two_devices, to):
     _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
-    page = authed.get("/library", params={"to": to}).text
+    page = authed.get("/apps", params={"to": to}).text
     assert _targets(page) == {"BBB"} and "EVIL" not in page
 
 
@@ -44,23 +44,23 @@ def test_one_device_needs_no_menu(authed):
     db.upsert_paired_device("AAA", "192.168.1.5:37000")
     db.set_device_trusted("AAA", True)
     _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
-    page = authed.get("/library").text
+    page = authed.get("/apps").text
     assert "push-target-menu" not in page and _targets(page) == {"AAA"}
 
 
 def test_a_card_shows_its_essentials_and_hides_the_rest(authed, two_devices):
     rid = db.create_repo("o", "r", "*.apk")
     apk_id = _stage(rid, "v2", "app.apk", version_code=2, version_name="2.0")
-    page = authed.get("/library").text
-    card = page[page.index(f'id="app-{rid}"'):]
+    page = authed.get("/apps").text
+    card = page[page.index(f'id="repo-{rid}"'):]
     head, more = card.split('<details class="app-card-more">', 1)
-    assert 'Push<span class="push-what"> 2.0</span></a>' in head and "Release" in head and "1 build" in head
+    assert 'Push<span class="push-what"> 2.0</span></a>' in head and "Latest release" in head and "any CPU" in head
     assert f'id="apk-{apk_id}"' in more and "Delete file" in more
 
 
 def _head(page, rid):
     """A card's row, without its confirm dialog (which names the target)."""
-    head = page.split(f'id="app-{rid}"', 1)[1].split("app-card-more", 1)[0]
+    head = page.split(f'id="repo-{rid}"', 1)[1].split("app-card-more", 1)[0]
     return head.split('class="modal"', 1)[0]
 
 
@@ -71,16 +71,16 @@ def test_a_card_says_which_devices_already_have_it(authed, two_devices):
     db.upsert_device_package("AAA", "com.example", True, 1, "1.0")  # older: not "on"
     db.upsert_device_package("EVIL", "com.example", True, 2, "2.0")  # untrusted: not shown
     def head(query=""):
-        return _head(authed.get("/library" + query).text, rid)
-    assert "Has 1.0" in head("?to=AAA") and "· also on Tablet\n" in head("?to=AAA")
-    assert "Pixel" not in head("?to=AAA") and "EVIL" not in head("?to=AAA")
-    # The target itself isn't listed again: its column already says so.
-    assert "Installed ·" in head() and " on Tablet" not in head()
+        return _head(authed.get("/apps" + query).text, rid)
+    assert "1.0, update available" in head("?to=AAA") and "· also on Tablet</span>" in head("?to=AAA")
+    assert "also on Pixel" not in head("?to=AAA") and "EVIL" not in head("?to=AAA")
+    # The target itself isn't listed again: its own line already says so.
+    assert "2.0 ✓" in head() and "also on" not in head()
 
 
 def test_no_trusted_device_means_no_picker_and_no_push(authed):
     _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
-    page = authed.get("/library").text
+    page = authed.get("/apps").text
     assert "push-target" not in page and _targets(page) == set()
     assert "Delete file" in page
 
@@ -95,31 +95,28 @@ def _upload(tag="dev build"):
                                 package_name="com.example.dev", signer_sha256="d" * 64, path=path, source="upload")
 
 
-def test_filter_pills_show_one_kind_and_keep_the_device(authed, two_devices):
+def test_repos_then_test_builds_then_uploads(authed, two_devices):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk")
     up = _upload()
-    page = authed.get("/library?to=AAA").text
-    assert 'href="/library?to=AAA&amp;show=upload"' in page and 'href="/library?to=AAA" aria-current="page"' in page
-    only = authed.get("/library?to=AAA&show=upload").text
-    assert f'id="upload-{up}"' in only and f'id="app-{rid}"' not in only
-    assert 'href="/library?to=BBB&amp;show=upload"' in only  # the device menu keeps the filter
-    assert f'id="app-{rid}"' in authed.get("/library?show=bogus").text  # unknown kind: everything
+    page = authed.get("/apps?to=AAA").text
+    assert page.index(f'id="repo-{rid}"') < page.index('id="kind-upload"') < page.index(f'id="upload-{up}"')
+    assert 'href="/apps?to=BBB"' in page  # the device menu
 
 
 def test_one_kind_needs_no_filter(authed, two_devices):
     _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
-    assert "filter-pills" not in authed.get("/library").text
+    assert "filter-pills" not in authed.get("/apps").text
 
 
 @pytest.mark.parametrize("have,text,solid", [
-    (None, "Not installed", True), ((1, "1.0"), "Has 1.0", True), ((2, "2.0"), "Installed", False)])
+    (None, "not installed", True), ((1, "1.0"), "1.0, update available", True), ((2, "2.0"), "2.0 ✓", False)])
 def test_a_row_says_what_the_target_has(authed, two_devices, have, text, solid):
     rid = db.create_repo("o", "r", "*.apk")
     _stage(rid, "v2", "app.apk", version_code=2, version_name="2.0")
     if have:
         db.upsert_device_package("BBB", "com.example", True, *have)
-    head = _head(authed.get("/library").text, rid)
-    assert f"{text} · staged" in head
+    head = _head(authed.get("/apps").text, rid)
+    assert f"On Tablet:" in head and text in head
     # The push is the solid button only when it would change something.
-    assert (f'href="#push-app-{rid}" class="button-link push-link">Push<span class="push-what"> 2.0' in head) == solid
+    assert (f'href="#push-repo-{rid}" class="button-link push-link">Push<span class="push-what"> 2.0' in head) == solid
