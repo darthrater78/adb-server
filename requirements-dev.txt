@@ -23,9 +23,9 @@ anyio==4.15.1 \
     #   -c app/requirements.txt
     #   httpx
     #   starlette
-apprise==1.13.1 \
-    --hash=sha256:2ded6d00562dd2ae9eb6f1e6cc8d3fb66e06f7ede6efac0ad029031b633780f4 \
-    --hash=sha256:e7689dda71aaf739244d6c8690de13cb1361b8d0a79980fb48bb397455ca0bdd
+apprise==2.0.0 \
+    --hash=sha256:945a2500a846b88b3c126a8d6e7c0472f6e3d94d8be52c836d8819f8db50b3d7 \
+    --hash=sha256:aeb321737f951860d7cb0a9574159090cbdbcb0f1ba01c6b49c69018380adf8d
     # via
     #   -c app/requirements.txt
     #   -r app/requirements.in
@@ -824,6 +824,7 @@ urllib3==2.8.0 \
     --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
     # via
     #   -c app/requirements.txt
+    #   apprise
     #   requests
 uvicorn==0.53.0 \
     --hash=sha256:a9356f0cb89b3b8621529c5d5eebd69bfe154f4c3f68b4cf2de47e45fa855c2e \
