@@ -1,4 +1,5 @@
 """Devices: pairing, reconnecting, finding a moved port, trust and nicknames."""
+import ipaddress
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -8,9 +9,11 @@ import auth
 import db
 import discovery
 import pushes
-from web import check_csrf, context, dom_id, record_audit, redirect, templates
+from web import check_csrf, client_ip, context, dom_id, record_audit, redirect, templates
 
 router = APIRouter()
+
+ADD_CARD = "add-device"  # the Add a device panel, as a card a redirect can open
 
 
 # ---- devices ----
@@ -24,8 +27,8 @@ def devices_page(request: Request, session: dict = Depends(auth.require_auth), e
     offer = next((d for d in devices if d["serial"] == trust and not d["trusted"]), None) if trust else None
     return templates.TemplateResponse(
         request, "devices.html",
-        context(request, session, card_ids=[dom_id(d["serial"]) for d in devices], devices=devices, offer=offer,
-                state=_device_states(devices), error=error, ok=ok),
+        context(request, session, card_ids=[ADD_CARD, *(dom_id(d["serial"]) for d in devices)], devices=devices,
+                offer=offer, own_ip=_own_address(request), state=_device_states(devices), error=error, ok=ok),
     )
 
 
@@ -62,23 +65,59 @@ def _back(back: str, serial: str, **flash):
     return redirect("/status" if back == "/status" else "/devices", card=dom_id(serial), **flash)
 
 
+def _own_address(request: Request) -> str:
+    """The address an Android browser is coming from: the phone itself, when
+    it's pairing itself. Only offered as the form's starting value (a proxy
+    or a VPN makes it something else), and only a private address ever is."""
+    if "android" not in request.headers.get("user-agent", "").lower():
+        return ""
+    try:
+        ip = ipaddress.ip_address(client_ip(request) or "")
+    except ValueError:
+        return ""
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    return str(ip) if ip.is_private and not ip.is_loopback else ""
+
+
+def _port(value: str) -> str:
+    """A port as typed. Someone copying the whole "192.168.1.50:41235" off
+    the phone still means its port."""
+    return value.strip().rpartition(":")[2]
+
+
 @router.post("/devices/pair")
 def pair_device(
     request: Request,
     session: dict = Depends(auth.require_auth),
     csrf_token: str = Form(...),
-    pairing_addr: str = Form(...),
+    ip: str = Form(...),
+    pairing_port: str = Form(...),
     pairing_code: str = Form(...),
-    connect_addr: str = Form(...),
+    connect_port: str = Form(""),
 ):
+    """Sync route, so Starlette runs it in a threadpool: without a connect
+    port, the phone's is found by a port scan that can take several seconds."""
     check_csrf(request, session, csrf_token)
-    addr = connect_addr.strip()
+    ip, pairing_port, connect_port = ip.strip().strip("[]"), _port(pairing_port), _port(connect_port)
     try:
-        adb_client.pair(pairing_addr.strip(), pairing_code.strip())
-        adb_client.connect(addr)
-        serial = adb_client.get_serialno(addr)
+        adb_client.pair(adb_client.join_host_port(ip, pairing_port), pairing_code.strip())
     except adb_client.AdbError as exc:
-        return redirect("/devices", error=str(exc))
+        return redirect("/devices", card=ADD_CARD, error=f"{exc}. The port and code only work while the pairing dialog "
+                                                         "is open on the phone: open it again for new ones")
+    try:
+        if connect_port:
+            addr = adb_client.join_host_port(ip, connect_port)
+            adb_client.connect(addr)
+            serial = adb_client.get_serialno(addr)
+        else:
+            found = discovery.find_paired_port(ip, int(pairing_port))
+            if found is None:
+                raise adb_client.AdbError(f"nothing on {ip} answered")
+            serial, addr = found
+    except adb_client.AdbError as exc:
+        return redirect("/devices", card=ADD_CARD, error=f"The phone accepted the code, but connecting to it failed ({exc}). "
+                                                         "Pair again with a new code, and fill in Connect port: the port "
+                                                         "beside IP address & Port on the Wireless debugging screen")
     return _register_paired(request, serial, addr)
 
 

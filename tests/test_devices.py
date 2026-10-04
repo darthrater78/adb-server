@@ -1,4 +1,5 @@
 import subprocess
+from urllib.parse import unquote
 
 import pytest
 
@@ -7,7 +8,9 @@ import apk_verify
 import db
 import discovery
 import pushes
+import routes_devices
 import selection
+from conftest import CSRF
 
 
 def _proc(stdout="", returncode=0, stderr=""):
@@ -306,3 +309,91 @@ def test_push_rechecks_trust_when_it_runs(monkeypatch, device):
     pushes.run_push(install_id, dict(db.get_device("SER")), dict(apk))
     install = db.get_install(install_id)
     assert install["status"] == "failed" and "no longer trusted" in install["log"]
+
+
+# ---- pairing ----
+
+PHONE = {"user-agent": "Mozilla/5.0 (Linux; Android 16; Pixel 8) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36"}
+
+
+def _pair_form(page):
+    start = page.index('action="/devices/pair"')
+    return page[start:page.index("</form>", start)]
+
+
+def test_pairing_form_asks_a_phone_for_two_numbers(authed, monkeypatch):
+    # The phone pairing itself types in half a screen: its IP is filled in
+    # from where the browser comes from, and both fields get a number pad.
+    monkeypatch.setattr(routes_devices, "client_ip", lambda request: "192.168.1.50")
+    page = authed.get("/devices", headers=PHONE).text
+    form = _pair_form(page)
+    assert 'name="ip" value="192.168.1.50"' in form
+    for field in ("pairing_port", "pairing_code"):
+        tag = form[form.index(f'name="{field}"'):]
+        assert 'inputmode="numeric"' in tag[:tag.index(">")]
+    assert "Split screen" in page
+
+
+@pytest.mark.parametrize("agent,ip", [
+    ("Mozilla/5.0 (X11; Linux x86_64) Firefox/143.0", "192.168.1.50"),  # a desktop: not the phone
+    (PHONE["user-agent"], "8.8.8.8"),  # not a LAN address
+    (PHONE["user-agent"], "127.0.0.1"),
+])
+def test_pairing_form_fills_in_only_a_phones_own_lan_address(authed, monkeypatch, agent, ip):
+    monkeypatch.setattr(routes_devices, "client_ip", lambda request: ip)
+    page = authed.get("/devices", headers={"user-agent": agent}).text
+    assert 'name="ip" value=""' in _pair_form(page) and "Split screen" not in page
+
+
+def _post_pair(authed, **fields):
+    data = {"csrf_token": CSRF, "ip": "192.168.1.50", "pairing_port": "40001", "pairing_code": "123456", **fields}
+    return authed.post("/devices/pair", data=data, follow_redirects=False)
+
+
+def test_pairing_finds_the_connect_port_itself(authed, monkeypatch):
+    paired = []
+    monkeypatch.setattr(adb_client, "pair", lambda addr, code: paired.append((addr, code)))
+    fake = FakeAdb(monkeypatch, "192.168.1.50:41999", serial="NEWPHONE1")
+    monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
+
+    async def open_ports(ip, ports):
+        return [40001, 40500, 41999]  # the pairing port, something else, the phone
+    monkeypatch.setattr(discovery, "_open_ports", open_ports)
+    r = _post_pair(authed)
+    assert paired == [("192.168.1.50:40001", "123456")]
+    assert fake.connects == ["192.168.1.50:40500", "192.168.1.50:41999"]  # never the pairing port
+    device = db.get_device("NEWPHONE1")
+    assert (device["last_connect_addr"], device["trusted"]) == ("192.168.1.50:41999", 0)
+    assert r.headers["location"].startswith("/devices?trust=NEWPHONE1")
+
+
+def test_pairing_takes_a_whole_address_pasted_as_the_port(authed, monkeypatch):
+    paired = []
+    monkeypatch.setattr(adb_client, "pair", lambda addr, code: paired.append(addr))
+    FakeAdb(monkeypatch, "192.168.1.50:41999", serial="NEWPHONE1")
+    monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
+    _post_pair(authed, pairing_port="192.168.1.50:40001", connect_port="41999")
+    assert paired == ["192.168.1.50:40001"]
+    assert db.get_device("NEWPHONE1")["last_connect_addr"] == "192.168.1.50:41999"
+
+
+def test_a_failed_pairing_comes_back_to_the_open_form(authed, monkeypatch):
+    def refuse(addr, code):
+        raise adb_client.AdbError("Failed: Unable to start pairing client")
+    monkeypatch.setattr(adb_client, "pair", refuse)
+    r = _post_pair(authed)
+    assert r.headers["location"].endswith("open=add-device#add-device")
+    page = authed.get(r.headers["location"]).text
+    panel = page[page.index('id="add-device" open'):]
+    assert "only work while the pairing dialog is open" in panel[:panel.index("<ol")]
+    assert db.list_devices() == []
+
+
+def test_pairing_says_when_the_phone_paired_but_was_not_found(authed, monkeypatch):
+    monkeypatch.setattr(adb_client, "pair", lambda addr, code: "Successfully paired")
+
+    async def open_ports(ip, ports):
+        return []
+    monkeypatch.setattr(discovery, "_open_ports", open_ports)
+    r = _post_pair(authed)
+    assert "accepted the code" in unquote(r.headers["location"]) and db.list_devices() == []

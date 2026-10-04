@@ -1425,6 +1425,19 @@ details.panel.fold:not(.panel-warn)[open] > summary, .device-card[open] > summar
 .connection-actions form { margin: 0; }
 .connection-actions input[type="text"] { width: 14rem; max-width: 100%; }
 
+/* Devices: pairing. On a phone the form is used in half a screen (split with
+   Settings), so the two numbers to type sit side by side under the address. */
+.pair-note { margin: 0 0 10px; padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); font-size: 14px; }
+.pair-form { align-items: flex-end; }
+.pair-form .pair-more { flex-basis: 100%; }
+.pair-form .pair-more label { max-width: 12rem; margin-top: 8px; }
+@media (max-width: 960px) {
+  .pair-form label { width: auto; flex: 1 1 100%; }
+  .pair-form > label:has([name="pairing_port"]), .pair-form > label:has([name="pairing_code"]) { flex: 1 1 40%; min-width: 0; }
+  .pair-form > button { flex: 1 1 100%; }
+  .pair-form .pair-more label { max-width: none; }
+}
+
 /* Settings → Appearance: the theme switcher, as in the top bar. */
 .theme-setting { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 18px; }
 .theme-setting .theme-switcher { display: inline-flex; }

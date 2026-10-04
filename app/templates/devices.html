@@ -28,24 +28,59 @@
 </details>
 {% endif %}
 
-<details class="panel fold">
+{# The phone pairing itself is the hard case: Android cancels the pairing code
+   as soon as Settings leaves the screen, so the code can't be read there and
+   typed here unless both are on screen at once. #}
+<details class="panel fold" id="add-device"{% if open_card == "add-device" %} open{% endif %}>
   <summary><h2>Add a device</h2></summary>
+  {% if open_card == "add-device" %}{% include "_flash.html" %}{% endif %}
+  {% if own_ip %}
+  <p class="pair-note"><strong>Adding the phone you're holding?</strong> Keep this page and Settings on screen
+    together. Android cancels the pairing code the moment Settings is out of view, so switching between the two
+    apps never works.</p>
+  <ol class="steps">
+    <li>Open <strong>Recents</strong>, tap this browser's icon above its preview and choose
+      <strong>Split screen</strong>. Open <strong>Settings</strong> in the other half.</li>
+    <li>In Settings, go to <strong>Developer options → Wireless debugging</strong>, turn it on, and tap
+      <strong>Pair device with pairing code</strong>.</li>
+    <li>The dialog shows a 6-digit code and an address such as <span class="mono">{{ own_ip }}:41235</span>. Type
+      the number after the colon as the pairing port, then the code, and press <strong>Pair</strong> while the
+      dialog is still open.</li>
+    <li>Once it's paired, you're asked to <strong>trust</strong> it. Nothing is ever pushed to an untrusted device.</li>
+  </ol>
+  {% else %}
   <ol class="steps">
     <li>On the phone, turn on <strong>Settings → Developer options → Wireless debugging</strong>. The phone and
       this server must be on the same network.</li>
-    <li>Note the <strong>IP address &amp; port</strong> shown on the Wireless debugging screen. That's the
-      connect address.</li>
-    <li>Tap <strong>Pair device with pairing code</strong>. Enter the connect address below, then the
-      pairing address and 6-digit code the dialog shows.</li>
+    <li>Tap <strong>Pair device with pairing code</strong>. The dialog shows a 6-digit code and an address such as
+      <span class="mono">192.168.1.50:41235</span>.</li>
+    <li>Enter that address's IP, its port and the code below, and press <strong>Pair</strong> while the dialog is
+      still open. Closing it, or leaving Settings, cancels the code.</li>
     <li>Once it's paired, you're asked to <strong>trust</strong> it. Nothing is ever pushed to an untrusted device.</li>
   </ol>
-  <form method="post" action="/devices/pair" class="inline-form">
+  <p class="muted small">Pairing a phone from its own browser? Open this page on that phone for the steps that
+    work there.</p>
+  {% endif %}
+  <form method="post" action="/devices/pair" class="inline-form pair-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Connect address <input type="text" name="connect_addr" placeholder="192.168.1.50:37251" required></label>
-    <label>Pairing address <input type="text" name="pairing_addr" placeholder="192.168.1.50:41235" required></label>
-    <label>Pairing code <input type="text" name="pairing_code" pattern="\d{6}" maxlength="6" required></label>
+    <label>Phone's IP address <input type="text" name="ip" value="{{ own_ip }}" placeholder="192.168.1.50"
+           inputmode="decimal" autocomplete="off" required></label>
+    <label>Pairing port <input type="text" name="pairing_port" placeholder="41235" inputmode="numeric"
+           pattern="\d{1,5}" maxlength="5" autocomplete="off" required></label>
+    <label>Pairing code <input type="text" name="pairing_code" placeholder="6 digits" inputmode="numeric"
+           pattern="\d{6}" maxlength="6" autocomplete="off" required></label>
     <button type="submit">Pair</button>
+    <details class="guide pair-more">
+      <summary>Connect port (only if the phone isn't found)</summary>
+      <label>Connect port <input type="text" name="connect_port" placeholder="37251" inputmode="numeric"
+             pattern="\d{1,5}" maxlength="5" autocomplete="off"></label>
+      <p class="explainer">After pairing, the server looks for the phone's connect port on that IP by itself, which
+        takes a few seconds. If it can't find it, enter the port shown beside <strong>IP address &amp; Port</strong>
+        on the Wireless debugging screen (not the one in the pairing dialog) and pair again.</p>
+    </details>
   </form>
+  {% if own_ip %}<p class="muted small"><span class="mono">{{ own_ip }}</span> is the address this browser comes
+    from. If the dialog shows a different one, use the dialog's.</p>{% endif %}
   <p class="muted small">The connect port changes whenever wireless debugging restarts. Pushes find the new port
     automatically by scanning the device's last known IP; <strong>Find</strong> does the same on demand.</p>
 </details>

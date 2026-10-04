@@ -12,6 +12,7 @@ private — the same rule as every other address this app touches."""
 import asyncio
 import logging
 import os
+from collections.abc import Iterator
 
 import adb_client
 import db
@@ -92,21 +93,35 @@ def record(stored: str, confirmed: str, addr: str) -> str:
     return confirmed
 
 
-def find_device_port(ip: str, serial: str) -> tuple[str, str] | None:
-    """Returns (confirmed serial, ip:port) where `serial` now answers, or
-    None. Blocking — call from a worker thread, never from the event loop."""
+def _answering(ip: str, skip: tuple[int, ...] = ()) -> Iterator[tuple[str, str]]:
+    """Yields (serial, ip:port) for each open port on `ip` that answers as a
+    device paired with this server. Blocking — call from a worker thread,
+    never from the event loop."""
     adb_client._validate_addr(adb_client.join_host_port(ip, 5555))  # private-IP check on the host part
-    open_ports = asyncio.run(_open_ports(ip, _port_range()))
+    open_ports = [p for p in asyncio.run(_open_ports(ip, _port_range())) if p not in skip]
     for port in open_ports[:MAX_CANDIDATES]:
         addr = adb_client.join_host_port(ip, port)
         try:
             adb_client.connect(addr)
-            confirmed = adb_client.get_serialno(addr)
+            yield adb_client.get_serialno(addr), addr
         except adb_client.AdbError:
             continue
-        if is_same_device(serial, addr, confirmed):
-            return confirmed, addr
-    return None
+
+
+def find_device_port(ip: str, serial: str) -> tuple[str, str] | None:
+    """Returns (confirmed serial, ip:port) where `serial` now answers, or
+    None."""
+    return next(((confirmed, addr) for confirmed, addr in _answering(ip)
+                 if is_same_device(serial, addr, confirmed)), None)
+
+
+def find_paired_port(ip: str, pairing_port: int) -> tuple[str, str] | None:
+    """Right after pairing, when the phone's serial isn't known yet and nobody
+    typed its connect port: (serial, ip:port) of the first port on `ip` that
+    completes adb's handshake, or None. A phone only completes it for a key
+    it has paired with, and the device still starts untrusted. The pairing
+    port can still be open, and never answers as a device."""
+    return next(_answering(ip, skip=(pairing_port,)), None)
 
 
 def ensure_connected(device, allow_scan: bool = True) -> tuple[str, str]:
