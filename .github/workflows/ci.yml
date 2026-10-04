@@ -18,6 +18,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A docs-only change (README, CHANGELOG, DESIGN.md, screenshots) skips the
+  # tests and the image builds: nothing they read has changed. Static checks
+  # always run: they read VERSION, CHANGELOG.md and the compose file.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash scripts/ci-changes.sh "$BASE" >> "$GITHUB_OUTPUT"
+
   static:
     name: Static checks
     runs-on: ubuntu-latest
@@ -83,6 +102,9 @@ jobs:
           /tmp/bandit/bin/bandit -q -r app -ll
 
   test:
+    needs: changes
+    # A failed `changes` job runs the tests anyway.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -92,7 +114,7 @@ jobs:
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.13'  # matches the app image's base
+          python-version: '3.14'  # matches the app image's base
           cache: pip
           cache-dependency-path: |
             app/requirements.txt
@@ -105,6 +127,10 @@ jobs:
         run: bash scripts/test.sh
 
   build:
+    needs: changes
+    # A matrix job skips by step, not by job, so each "build (...)" check
+    # still reports on a docs-only change.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -119,13 +145,16 @@ jobs:
             file: adb-server/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code != 'false'
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
+        if: needs.changes.outputs.code != 'false'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build ${{ matrix.name }} image (no push)
+        if: needs.changes.outputs.code != 'false'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
