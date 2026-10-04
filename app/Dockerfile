@@ -48,11 +48,14 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
     && rm -rf /tmp/platform-tools.zip /opt/platform-tools
 
 # ---- stage 2: runtime image ----
-FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2
+FROM python:3.14-slim@sha256:c3e521df8b2b498a7a682e7e18676771cb80c6b75b8699af886b2d554ce40151
 
 # apksigner (and keytool, for this server's own signing key) run under the
-# JRE; aapt2 and zipalign are standalone native binaries.
+# JRE; aapt2 and zipalign are standalone native binaries. The upgrade takes
+# the security fixes Debian has published since the base image was built:
+# the release gate (Trivy) fails on a fixable HIGH in between.
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends default-jre-headless \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser

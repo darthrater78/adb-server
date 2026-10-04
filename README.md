@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.8.1](https://github.com/darthrater78/adb-server/releases/tag/v3.8.1)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.9.0](https://github.com/darthrater78/adb-server/releases/tag/v3.9.0)
 
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
@@ -114,7 +114,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.8.1
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.9.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.8.1
+    image: ghcr.io/darthrater78/adb-server/app:3.9.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -168,7 +168,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.8.1), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.9.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -193,7 +193,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.8.1` and add one
+> Then, in your `compose.yaml`, set both images to `3.9.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -928,7 +928,7 @@ two-factor sign-in stays on but refuses every code until you reset it with
   an expiry.
 - Each published image carries a signed **build provenance** attestation
   saying this workflow built it from that commit. Check one with
-  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.8.1 --repo darthrater78/adb-server`.
+  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.9.0 --repo darthrater78/adb-server`.
 - CodeQL scans the Python code and the workflows on every pull request and
   weekly, and **dependency review** fails a pull request that brings in a
   dependency with a known HIGH or CRITICAL advisory. A weekly scan re-checks

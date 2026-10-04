@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.9.0 — 2026-10-04
 
 - Fixed: **a phone can pair itself from its own browser.** The steps had you
   read three values off the phone's Settings and type them into this page,
@@ -19,6 +19,9 @@
 - Fixed: **the edges of fields and outlined buttons are visible.** Their
   border was 1.3:1 to 1.45:1 against the control; it is now at least 3:1 in
   all three themes.
+- Security: `oauthlib` moves to 4.0.0 for CVE-2026-49265 (a timing leak in
+  its OAuth server code, which this app does not run; it arrives through
+  the notification library).
 - Internal: a `DESIGN.md` records the tokens, type, shapes and rules the UI
   follows, linted with `@google/design.md`. Corner radii, the dialog and menu
   shadows and the preset swatches are tokens in `style.css` now; four
