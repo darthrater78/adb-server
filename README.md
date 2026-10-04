@@ -2,6 +2,9 @@
 
 [GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.8.1](https://github.com/darthrater78/adb-server/releases/tag/v3.8.1)
 
+<!-- Dev-build banner: drawn by .github/workflows/dev-banner.yml after every release, empty when no dev build is ahead of the latest release. -->
+<a href="https://github.com/darthrater78/adb-server/releases"><img alt="Dev build status" src="https://raw.githubusercontent.com/darthrater78/adb-server/readme-banner/banner.svg" /></a>
+
 *APK Pusher*: a self-hosted app that watches GitHub repos for new APK
 releases, verifies them, stages them, and pushes them over wireless ADB to
 Android devices you've explicitly trusted.
@@ -1036,7 +1039,12 @@ commit with a suffix, such as `v3.8.0-dev.1` (the part before the `-` must
 match `VERSION`). The same workflow scans and publishes both images as
 `:3.8.0-dev.1` only, and both report `3.8.0-dev.1` as their version, so the
 app's version check tells a dev build from the release. It never moves
-`:latest` or `:3.8`, and it makes no GitHub release.
+`:latest` or `:3.8`. Its GitHub release is a **pre-release**, never
+"Latest", with the notes of the version it leads to. While a dev build is
+newer than the latest release, the top of this README shows a banner for it
+(`dev-banner.yml` draws it from the releases list after every release run),
+and the banner goes away when that version ships. A commit on the default
+branch is never tagged as a dev build.
 
 ## Non-goals
 
