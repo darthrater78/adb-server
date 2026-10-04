@@ -128,3 +128,11 @@ def test_ui_fonts_are_served_as_fonts(client):
 def test_the_theme_switcher_comes_back_to_the_page_it_was_pressed_on(authed):
     page = authed.get("/installs?ok=hi").text
     assert '<input type="hidden" name="next" value="/installs">' in page
+
+
+def test_the_theme_is_picked_on_the_appearance_page_too(authed):
+    # On a phone the top bar has no room for it, so this page is where it lives.
+    page = authed.get("/settings/appearance").text
+    section = page[page.index('class="theme-setting"'):]
+    section = section[:section.index("</section>")]
+    assert section.count('action="/theme"') == 3 and 'name="next" value="/settings/appearance"' in section

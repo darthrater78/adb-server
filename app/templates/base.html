@@ -33,16 +33,7 @@
            title="Release notes for v{{ app_version }}">v{{ app_version }}<span class="link-word"><span class="link-word-long"> release</span> notes</span></a>
         <a href="{{ repo_url }}" rel="noopener noreferrer" title="ADB Server on GitHub">GitHub</a>
       </span>
-      <div class="theme-switcher" role="group" aria-label="Theme">
-        {% for t, label in [("flashbang", "Flashbang"), ("dark", "Dark"), ("oled", "OLED")] %}
-        <form method="post" action="/theme" class="theme-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="next" value="{{ current_path }}">
-          <input type="hidden" name="theme" value="{{ t }}">
-          <button type="submit" class="theme-btn{{ ' active' if theme == t else '' }}"{% if theme == t %} aria-pressed="true"{% endif %}>{{ label }}</button>
-        </form>
-        {% endfor %}
-      </div>
+      {% include "_theme_switcher.html" %}
       <form method="post" action="/logout" class="logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="secondary">Log out</button>

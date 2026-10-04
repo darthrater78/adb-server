@@ -1155,7 +1155,9 @@ fieldset.choice legend { font-size: 13px; font-weight: 600; color: var(--muted);
   }
   .header-tools { margin-left: auto; gap: 8px; }
   .header-links { display: none; }
-  button.theme-btn { height: 30px; padding: 0 8px; }
+  /* The bar keeps the name and Log out; the theme is picked on Settings → Appearance. */
+  .site-header .theme-switcher { display: none; }
+  button.theme-btn { height: 36px; padding: 0 14px; font-size: 14px; }
   .logout-form button { height: 36px; padding: 0 12px; font-size: 13px; }
 
   /* The nav is a bottom tab bar: five icons with labels. */
@@ -1273,7 +1275,6 @@ fieldset.choice legend { font-size: 13px; font-weight: 600; color: var(--muted);
   .row-grid > .row-follow { grid-area: follow; align-self: center; }
   .row-grid > .row-follow:empty, .row-grid > .row-actions:empty { display: none; }
   .push-what, .sig-ok { display: none; }
-  .brand-name { display: none; }
   .row-head { display: none; }
   .row-head + .row-grid, .row-head + .row-item { border-top: 0; }
   .row-grid > .row-title { display: contents; }
@@ -1423,3 +1424,7 @@ details.panel.fold:not(.panel-warn)[open] > summary, .device-card[open] > summar
 .connection-actions { align-items: center; }
 .connection-actions form { margin: 0; }
 .connection-actions input[type="text"] { width: 14rem; max-width: 100%; }
+
+/* Settings → Appearance: the theme switcher, as in the top bar. */
+.theme-setting { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 18px; }
+.theme-setting .theme-switcher { display: inline-flex; }
