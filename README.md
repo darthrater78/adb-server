@@ -458,8 +458,22 @@ history, has `adb`'s output.
 
 Follow the steps at the top of the page. On the phone, open Settings →
 Developer options → Wireless debugging → *Pair device with pairing code*, then
-enter its connect address (from the Wireless debugging screen), then the
-pairing address and 6-digit code the pairing dialog shows. A new device starts **untrusted**. As soon as it's paired, the page
+enter the phone's IP address, the pairing port and the 6-digit code the
+dialog shows, while the dialog is still open. The server then finds the
+phone's connect port by itself (a few seconds); if it can't, enter it under
+**Connect port** and pair again.
+
+**Pairing a phone from its own browser** needs this page and Settings on
+screen together: Android cancels the pairing code the moment Settings is out
+of view, so reading the code and switching to the browser never works. Opened
+on an Android phone, the page says so and gives the split-screen steps
+(Recents → the browser's icon → **Split screen**, Settings in the other
+half), fills in the phone's IP address from where the browser comes from,
+and asks for just the port and the code, each with a number pad. Behind a
+reverse proxy or a VPN that address can be something else; the dialog's is
+the one to use.
+
+A new device starts **untrusted**. As soon as it's paired, the page
 asks **Trust it?**, showing its model, serial, CPU and address so you can
 check it's the phone you just paired, with a box to name it at the same
 time. **Trust** then takes you to its card on Status, ready to install.
@@ -603,9 +617,11 @@ or Settings tab, checkboxes and the edge of an open card. Status badges
 (Release, Test build, debug, errors) keep their own colours, because the
 colour is what they mean. Pick a preset or any custom colour; name a custom
 one and **Save as preset** to keep it. The accent is darkened or lightened per
-theme so text stays readable (WCAG AA contrast). The header's
+theme so text stays readable (WCAG AA contrast). The
 **Flashbang / Dark / OLED** buttons pick a theme for this browser: light,
-dark, or dark on true black. Without one, the app follows your OS's
+dark, or dark on true black. They sit in the top bar on wide screens and on
+**Settings → Appearance** everywhere; on a phone that page is the only place,
+so the top bar keeps just the app's name and **Log out**. Without one, the app follows your OS's
 light/dark setting. The layout adapts to phones and tablets (a bottom tab bar
 and touch-sized rows up to 960px wide). Text is set in Figtree, versions and
 hashes in JetBrains Mono, both served by the app itself (SIL Open Font

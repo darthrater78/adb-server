@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: **a phone can pair itself from its own browser.** The steps had you
+  read three values off the phone's Settings and type them into this page,
+  but Android cancels the pairing code the moment Settings leaves the
+  screen, so on the phone itself the code was dead before you could submit
+  it. Opened on an Android phone, **Add a device** now tells you to put the
+  browser and Settings in split screen, fills in the phone's IP address
+  itself, and asks only for the pairing port and code, each with a number
+  pad.
+- Changed: **pairing asks for less.** The form takes the phone's IP address
+  once, the pairing port and the code. The connect port is found by scanning
+  that IP after pairing; **Connect port** is there for when it isn't.
+- Changed: **on a phone, the theme is picked on Settings → Appearance.** The
+  Flashbang / Dark / OLED buttons left the phone's top bar, which now shows
+  the app's name and **Log out**. Wide screens keep them in the bar too.
+- Fixed: **the edges of fields and outlined buttons are visible.** Their
+  border was 1.3:1 to 1.45:1 against the control; it is now at least 3:1 in
+  all three themes.
+- Internal: a `DESIGN.md` records the tokens, type, shapes and rules the UI
+  follows, linted with `@google/design.md`. Corner radii, the dialog and menu
+  shadows and the preset swatches are tokens in `style.css` now; four
+  off-scale radii and two off-scale text sizes moved onto the scale.
+- Fixed: **a failed pairing comes back to the open form**, with the error
+  inside it and a reminder that the code only works while the dialog is
+  open, instead of a folded panel and a message at the top of the page.
+
 ## 3.8.1 — 2026-09-27
 
 - Fixed: **a push's row updates on its own again.** After **Install**,
