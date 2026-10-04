@@ -20,7 +20,13 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
 
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin adb
+# Security fixes Debian has published since the base image was built: the
+# pinned digest only moves when the image is rebuilt upstream, and the release
+# gate (Trivy) fails on a fixable HIGH in between.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin adb
 
 COPY --from=fetch /opt/platform-tools/adb /usr/local/bin/adb
 
