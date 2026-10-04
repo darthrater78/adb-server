@@ -22,6 +22,16 @@
 - Security: `oauthlib` moves to 4.0.0 for CVE-2026-49265 (a timing leak in
   its OAuth server code, which this app does not run; it arrives through
   the notification library).
+- Changed: **a dev build is announced.** A tag with a `-suffix` (such as
+  `v3.9.0-dev.1`) now creates a GitHub pre-release, never "Latest", with the
+  notes of the version it leads to. While one is newer than the latest
+  release, the top of the README shows a banner for it with how to run it;
+  the banner goes when that version ships.
+- Security: both images take Debian's published security fixes when they
+  are built, and the Python base image moves to its current build. A scan
+  found fixable high-severity findings in OpenSSL and PCRE2.
+- Internal: CI skips the tests and the image builds when only docs changed,
+  and tests on Python 3.14, the version the image runs.
 - Internal: a `DESIGN.md` records the tokens, type, shapes and rules the UI
   follows, linted with `@google/design.md`. Corner radii, the dialog and menu
   shadows and the preset swatches are tokens in `style.css` now; four

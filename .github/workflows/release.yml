@@ -35,9 +35,9 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          # A dev build (v3.7.0-dev.1) may come from a branch: it only publishes
-          # images under its own full version, never :latest or :X.Y, and makes
-          # no GitHub release (see the publish job).
+          # A dev build (v3.7.0-dev.1) may come from a branch: it publishes
+          # images under its own full version only, never :latest or :X.Y, and
+          # its GitHub release is a pre-release (see the publish job).
           case "$GITHUB_REF_NAME" in
             *-*) echo "Pre-release tag $GITHUB_REF_NAME: any branch may build it."; exit 0 ;;
           esac
@@ -301,8 +301,9 @@ jobs:
   publish:
     name: Create GitHub release
     needs: [gate, images]
-    # Dev builds (any tag with a -suffix) publish images only.
-    if: ${{ !contains(github.ref_name, '-') }}
+    # A dev build (any tag with a -suffix) gets a GitHub pre-release: it never
+    # becomes "Latest", and the README's banner (dev-banner.yml) is drawn
+    # from it until the release it leads to ships.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -319,10 +320,13 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
+          # A dev build's changes are under the version it leads to: 3.9.0
+          # for v3.9.0-dev.1.
+          section="${version%%-*}"
           # Matches this project's heading style (`## 0.2.0 — 2026-09-16`) and
           # the bracketed Keep-a-Changelog style, without matching 0.2.0 when
           # looking for 0.2.
-          awk -v v="$version" '
+          awk -v v="$section" '
             function esc(s) { gsub(/[.]/, "\\.", s); return s }
             BEGIN { pat = "^## \\[?" esc(v) "\\]?([^0-9.]|$)" }
             matched && /^## / { exit }
@@ -331,13 +335,18 @@ jobs:
           ' CHANGELOG.md > notes.md
           notes="$(sed -e '/./,$!d' notes.md)"
           if [ -z "$notes" ]; then
-            echo "::warning::No CHANGELOG.md section found for $version."
+            echo "::warning::No CHANGELOG.md section found for $section."
             notes="Release $version"
           fi
           # The backticks below are literal Markdown code spans in the release
           # notes, which is exactly why these format strings are single-quoted.
           # shellcheck disable=SC2016
           {
+            # The first paragraph of a dev build's notes is what the README
+            # banner shows (scripts/dev_banner.py).
+            case "$version" in
+              *-*) printf 'Dev build of %s from a branch that has not merged yet, for testing. Images only: `:latest` does not move.\n\n' "$section" ;;
+            esac
             printf '%s\n\n' "$notes"
             printf '### Container images\n\n'
             printf -- '- `ghcr.io/%s/adb-server:%s`\n' "$REPO" "$version"
