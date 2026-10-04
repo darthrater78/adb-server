@@ -101,7 +101,6 @@
    running), when it's the only device, or when an action just happened on it. #}
 <details class="card row-card device-card" id="{{ dom }}"{% if open_card == dom or card.attention or cards | length == 1 %} open{% endif %}>
   <summary>
-    <span class="device-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/></svg></span>
     <div>
       <h2 class="device-name">{{ d | device_name }}</h2>
       <div class="device-meta">
@@ -174,7 +173,6 @@
   {% set staged = latest.version_name or latest.tag %}
   <div class="row-grid status-grid" id="{{ app.row }}">
     <div class="row-title">
-      <span class="avatar" aria-hidden="true">{{ latest.source_label[:1] }}</span>
       <div><div class="row-name">{{ latest.source_label }}</div><div class="row-sub mono">{{ latest.package_name }}</div></div>
     </div>
     <div class="row-have">
@@ -189,7 +187,7 @@
       {%- if app.busy %}{{ staged }} {{ push_outcome(app) }}
       {%- else %}
       {%- if app.state == "current" %}Up to date
-      {%- elif app.state == "update" %}{{ staged }} available
+      {%- elif app.state == "update" %}<span class="offer">{{ staged }}</span> available
       {%- elif app.state == "newer" %}<span title="Installed version is newer than the latest staged release">Newer than {{ staged }}</span>
       {%- else %}{{ staged }} staged{% endif %}
       {%- if app.failed or app.done %} {{ push_outcome(app) }}{% endif %}
@@ -218,8 +216,10 @@
         <input type="hidden" name="repo_id" value="{{ app.repo_id }}">
         <input type="hidden" name="device_serial" value="{{ d.serial }}">
         <input type="hidden" name="follow" value="{{ '0' if app.following else '1' }}">
-        <button type="submit" class="secondary small" title="Push each new release to this device automatically">
-          Auto-update: {{ "on" if app.following else "off" }}
+        <button type="submit" class="switch{{ ' on' if app.following else '' }}" role="switch" aria-checked="{{ 'true' if app.following else 'false' }}"
+                title="Push each new release to this device automatically">
+          <span class="switch-label">Auto-update</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb">{{ "ON" if app.following else "OFF" }}</span></span>
         </button>
       </form>
     </div>
@@ -238,7 +238,6 @@
   {% set label = a.artifact_repo or a.tag %}
   <div class="row-grid status-grid staged-row" id="{{ s.row }}">
     <div class="row-title">
-      <span class="avatar" aria-hidden="true">{{ label[:1] }}</span>
       <div>
         <div class="row-name">{{ label }}</div>
         {% if s.kind == "artifact" %}<div class="row-sub mono">{{ a.artifact_branch or "?" }} @ {{ (a.artifact_sha or "")[:7] }}</div>
@@ -285,7 +284,6 @@
   {% for o in card.others %}
   <div class="row-grid status-grid">
     <div class="row-title">
-      <span class="avatar" aria-hidden="true">{{ o.package[:1] }}</span>
       <div><div class="row-name">{{ o.package }}</div></div>
     </div>
     <div class="row-have">

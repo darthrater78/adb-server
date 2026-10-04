@@ -84,6 +84,14 @@ with sync_playwright() as p:
         # fixed tab bar halfway down.
         shot(phone, "/status", "phone-status", False)
         shot(phone, "/apps", "phone-apps", False)
+        # Pairing a phone from its own browser: the page with the form open.
+        phone.goto(URL + "/devices")
+        phone.click("summary:has-text('Add a device')")
+        phone.wait_for_timeout(300)
+        phone.screenshot(path=f"{OUT}/phone-devices.png")
+        if phone.evaluate("document.documentElement.scrollWidth > window.innerWidth"):
+            raise SystemExit("phone-devices: the page scrolls sideways")
+        print("shot phone-devices")
     else:
         page = context(browser).new_page()
         sign_in(page, shot_mfa=True)

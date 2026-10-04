@@ -63,7 +63,7 @@ def test_status_page_shows_update_available(authed, trusted_device):
     db.upsert_device_package("SER", "com.example", installed=True, version_code=1, version_name="1.0")
     r = authed.get("/status")
     assert r.status_code == 200
-    assert '<span class="version">1.0</span>' in r.text and "2.0 available" in r.text and "Update" in r.text
+    assert '<span class="version">1.0</span>' in r.text and '<span class="offer">2.0</span> available' in r.text and "Update" in r.text
 
 
 def test_status_refresh_records_versions(authed, trusted_device, monkeypatch):
@@ -166,8 +166,8 @@ def test_repairing_a_legacy_device_keeps_its_record(authed, monkeypatch):
     monkeypatch.setattr(adb_client, "get_serialno", lambda a: "R5CT1234ABC")
     monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
     r = authed.post("/devices/pair", data={
-        "csrf_token": CSRF, "pairing_addr": "192.168.1.50:40001",
-        "pairing_code": "123456", "connect_addr": "192.168.1.50:41999",
+        "csrf_token": CSRF, "ip": "192.168.1.50", "pairing_port": "40001",
+        "pairing_code": "123456", "connect_port": "41999",
     }, follow_redirects=False)
     assert r.status_code == 303
     assert [d["serial"] for d in db.list_devices()] == ["R5CT1234ABC"]
@@ -184,7 +184,7 @@ def test_code_pairing_still_starts_untrusted(authed, monkeypatch):
     monkeypatch.setattr(adb_client, "get_serialno", lambda a: "NEWPHONE1")
     monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
     authed.post("/devices/pair", data={
-        "csrf_token": CSRF, "pairing_addr": "192.168.1.60:40001",
-        "pairing_code": "123456", "connect_addr": "192.168.1.60:41999",
+        "csrf_token": CSRF, "ip": "192.168.1.60", "pairing_port": "40001",
+        "pairing_code": "123456", "connect_port": "41999",
     })
     assert db.get_device("NEWPHONE1")["trusted"] == 0

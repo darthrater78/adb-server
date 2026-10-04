@@ -15,9 +15,12 @@
     <strong>{{ install.source_label }}</strong> {{ install.tag }}
     <span class="muted">→ {{ install.nickname or install.device_serial }}</span>
   </p>
+  {# A failure is said in words, with adb's output; the bar is for progress and success. #}
+  {% if install.status != "failed" %}
   <div class="progress-track">
-    <div class="progress-bar {{ install.status if install.status in ['success', 'failed'] else 'indeterminate' }}"></div>
+    <div class="progress-bar {{ 'success' if install.status == 'success' else 'indeterminate' }}"></div>
   </div>
+  {% endif %}
   <p class="status-{{ install.status }}">
     {% if install.status == "pending" %}Queued…
     {% elif install.status == "installing" %}Installing on device…

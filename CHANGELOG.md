@@ -1,5 +1,65 @@
 # Changelog
 
+## 3.9.0 — 2026-10-04
+
+- Changed: **a new look, "Developer options".** The app is redrawn in the
+  Holo style of the Android settings screen where adb is switched on: flat
+  and square, a top bar with capital tabs over an accent rule, each section
+  a plain panel with a heading band, thin numerals for versions. Rounded
+  cards, pills and letter avatars are gone. Every page sits on a fade to
+  blue-grey with a faint grid (plain black on OLED), and the logo is new.
+- Changed: **sign-in is a lock screen.** The app's name, two fields and an
+  unlock ring to press. A wrong password is reported the way adb reports a
+  refusal, in red under the name. The two-factor step looks the same.
+- Changed: **Apps has three tabs**: Watched repos, Test builds and Uploads,
+  each with its count, one showing at a time. A link to a particular build
+  or upload opens the tab it's in.
+- Changed: **on a phone the tabs are at the top**, under the bar, not along
+  the bottom of the screen.
+- Changed: **Auto-update is a switch** on each app's row on Status, reading
+  ON or OFF, in place of a button that said "Auto-update: off".
+- Changed: **a failed push says so in words**, with its link to why, and no
+  longer fills a red bar.
+- Changed: **the accent presets are Holo's own**: blue (the default), violet,
+  green, orange, red and graphite. If your accent was one of the old presets
+  it stays as a custom colour; nothing resets.
+- Changed: text is set in Roboto and Roboto Mono (still served by the app
+  itself) in place of Figtree and JetBrains Mono.
+- Fixed: **a phone can pair itself from its own browser.** The steps had you
+  read three values off the phone's Settings and type them into this page,
+  but Android cancels the pairing code the moment Settings leaves the
+  screen, so on the phone itself the code was dead before you could submit
+  it. Opened on an Android phone, **Add a device** now tells you to put the
+  browser and Settings in split screen, fills in the phone's IP address
+  itself, and asks only for the pairing port and code, each with a number
+  pad.
+- Changed: **pairing asks for less.** The form takes the phone's IP address
+  once, the pairing port and the code. The connect port is found by scanning
+  that IP after pairing; **Connect port** is there for when it isn't.
+- Changed: **on a phone, the theme is picked on Settings → Appearance.** The
+  Flashbang / Dark / OLED buttons left the phone's top bar, which now shows
+  the app's name and **Log out**. Wide screens keep them in the bar too.
+- Fixed: **the edge of a field is visible.** It was 1.3:1 to 1.45:1 against
+  the page; a field's underline is now at least 3:1 in all three themes.
+- Security: `oauthlib` moves to 4.0.0 for CVE-2026-49265 (a timing leak in
+  its OAuth server code, which this app does not run; it arrives through
+  the notification library).
+- Changed: **a dev build is announced.** A tag with a `-suffix` (such as
+  `v3.9.0-dev.1`) now creates a GitHub pre-release, never "Latest", with the
+  notes of the version it leads to. While one is newer than the latest
+  release, the top of the README shows a banner for it with how to run it;
+  the banner goes when that version ships.
+- Security: both images take Debian's published security fixes when they
+  are built, and the Python base image moves to its current build. A scan
+  found fixable high-severity findings in OpenSSL and PCRE2.
+- Internal: CI skips the tests and the image builds when only docs changed,
+  and tests on Python 3.14, the version the image runs.
+- Internal: a `DESIGN.md` records the tokens, type, shapes and rules the UI
+  follows, linted with `@google/design.md`.
+- Fixed: **a failed pairing comes back to the open form**, with the error
+  inside it and a reminder that the code only works while the dialog is
+  open, instead of a folded panel and a message at the top of the page.
+
 ## 3.8.1 — 2026-09-27
 
 - Fixed: **a push's row updates on its own again.** After **Install**,

@@ -37,14 +37,14 @@
     submit_class="danger") %}{{ body }}{% endcall %}
 {% endmacro %}
 
-{# How the row's push is going: a moving bar while it runs, then a full
-   green or red one saying how it went (the page stops refreshing then). #}
+{# How the row's push is going: a moving bar while it runs, a full green one
+   once it's in, and words alone when it failed (the page stops refreshing then). #}
 {% macro push_state(busy, done, failed) %}
 {% if busy %}<span class="push-state"><span class="row-progress"><span class="progress-bar indeterminate"></span></span>
   <span class="status-installing">{{ "Queued…" if busy.status == "pending" else "Installing " ~ (busy.version_name or busy.tag) ~ "…" }}</span></span>
 {%- elif done %}<span class="push-state"><span class="row-progress"><span class="progress-bar success"></span></span>
   <span class="status-success">✓ Installed {{ done.version_name or done.tag }} {{ done.finished_at | when }}</span></span>
-{%- elif failed %}<span class="push-state"><span class="row-progress"><span class="progress-bar failed"></span></span>
+{%- elif failed %}<span class="push-state">
   <span><span class="status-failed">Push failed</span> · <a href="/installs/{{ failed.id }}">why</a></span></span>
 {%- endif %}
 {% endmacro %}

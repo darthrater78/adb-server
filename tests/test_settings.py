@@ -35,7 +35,9 @@ def test_every_preset_has_a_swatch_and_a_dark_shade():
     css = open(os.path.join(os.path.dirname(appearance.__file__), "static", "style.css")).read()
     assert set(appearance.PRESET_DARK) == set(appearance.PRESETS)
     for name, colour in appearance.PRESETS.items():
-        assert f".swatch-{name} {{ background: {colour}; }}" in css
+        # The swatch draws the preset's own colour, through its token.
+        assert f"--preset-{name}: {colour};" in css
+        assert f".swatch-{name} {{ background: var(--preset-{name}); }}" in css
 
 
 @pytest.mark.parametrize("bad", ["", "red", "#fff", "#12345g", "#1234567", "#123456;}body{x"])

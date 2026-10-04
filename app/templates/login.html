@@ -3,23 +3,22 @@
 {% block body_class %}login-page{% endblock %}
 {% block flashes %}{% endblock %}
 {% block content %}
-<div class="login-card">
-  <div class="login-brand">
-    <img src="/static/logo.svg" width="64" height="64" alt="">
-    <h1>ADB Server</h1>
-    <p class="login-subtitle">APK Pusher</p>
-    <p class="login-tagline">Verified releases, straight to your devices.</p>
+<div class="lock">
+  <div class="lock-brand">
+    <h1 class="wordmark" aria-label="ADB Server"><b>ADB</b>server</h1>
+    {# adb's own voice: what it prints when it starts, and how it reports a refusal. #}
+    {% if error %}<p class="lock-line bad" role="alert">error: {{ error }}</p>
+    {% else %}<p class="lock-line" aria-hidden="true">* daemon started successfully</p>{% endif %}
   </div>
-  {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
-  <form method="post" action="/login" class="login-form">
+  <form method="post" action="/login" class="login-form{{ ' bad' if error else '' }}">
     <label>Username
       <input type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
     </label>
     <label>Password
       <input type="password" name="password" autocomplete="current-password" required>
     </label>
-    <button type="submit">Sign in <span aria-hidden="true">→</span></button>
+    {% include "_unlock.html" %}
   </form>
-  <p class="login-foot mono">v{{ app_version }} · signed · pinned · verified</p>
+  <p class="login-foot mono">v{{ app_version }} · <a href="{{ release_notes_url }}" rel="noopener noreferrer">release notes</a></p>
 </div>
 {% endblock %}

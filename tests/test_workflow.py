@@ -111,7 +111,7 @@ def test_a_failed_push_says_so_on_its_row(authed, device):
     page = authed.get("/status").text
     row = page[page.index(f'id="app-{rid}-{DOM}"'):]
     row = row[:row.index('<div class="row-follow">')]
-    assert "Push failed" in row and 'class="progress-bar failed"' in row and f'href="/installs/{install}"' in row
+    assert "Push failed" in row and "progress-bar" not in row and f'href="/installs/{install}"' in row
 
 
 def test_the_progress_page_refreshes_while_running_and_never_leaves(authed, device):
@@ -197,8 +197,8 @@ def _pair(authed, monkeypatch, serial="NEWPHONE1"):
     monkeypatch.setattr(adb_client, "get_serialno", lambda a: serial)
     monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
     monkeypatch.setattr(adb_client, "device_model", lambda a: "Pixel 8")
-    return authed.post("/devices/pair", data={"csrf_token": CSRF, "pairing_addr": "192.168.1.60:40001",
-                                              "pairing_code": "123456", "connect_addr": "192.168.1.60:41999"},
+    return authed.post("/devices/pair", data={"csrf_token": CSRF, "ip": "192.168.1.60", "pairing_port": "40001",
+                                              "pairing_code": "123456", "connect_port": "41999"},
                        follow_redirects=False)
 
 
@@ -234,7 +234,7 @@ def test_no_offer_for_a_trusted_or_unknown_device(authed, device, serial):
 
 def test_add_forms_start_folded_even_when_empty(authed):
     # Everything outside Settings starts collapsed, empty page or not.
-    assert '<details class="panel fold">\n  <summary><h2>Add a device' in authed.get("/devices").text
+    assert '<details class="panel fold" id="add-device">\n  <summary><h2>Add a device' in authed.get("/devices").text
     page = authed.get("/apps").text
     assert '<details class="panel fold" open>' not in page and 'id="upload">' in page
 
