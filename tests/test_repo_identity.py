@@ -616,7 +616,9 @@ def test_install_page_sets_artifacts_apart(authed, artifact_env):
 def test_test_builds_get_their_own_section(authed, artifact_env):
     authed.post(f"/repos/{artifact_env['rid']}/artifacts/5/stage", data={"csrf_token": CSRF})
     page = authed.get("/apps").text
-    assert 'id="kind-artifact">Test builds' in page and 'id="kind-upload"' not in page
+    builds = page[page.index('id="kind-artifact"'):page.index('id="kind-upload"')]
+    assert "Test builds" in builds and 'class="card row-card repo-card"' in builds
+    assert "Nothing uploaded yet" in page[page.index('id="kind-upload"'):]
 
 
 def test_device_names_prefer_nickname_then_model(monkeypatch):

@@ -63,7 +63,7 @@ def test_status_page_shows_update_available(authed, trusted_device):
     db.upsert_device_package("SER", "com.example", installed=True, version_code=1, version_name="1.0")
     r = authed.get("/status")
     assert r.status_code == 200
-    assert '<span class="version">1.0</span>' in r.text and "2.0 available" in r.text and "Update" in r.text
+    assert '<span class="version">1.0</span>' in r.text and '<span class="offer">2.0</span> available' in r.text and "Update" in r.text
 
 
 def test_status_refresh_records_versions(authed, trusted_device, monkeypatch):

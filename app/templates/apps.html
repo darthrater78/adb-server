@@ -231,8 +231,23 @@
 </details>
 {% endfor %}
 
+{# ---- three views of one page: watched repos, test builds, uploads ----
+   The tabs link to each view's id. CSS shows the view that is, or holds, the
+   :target, and the `start` one when nothing in a view is targeted (the CSP
+   allows no JavaScript). A browser without :has() shows all three. #}
+{% set builds = others | selectattr("kind", "equalto", "artifact") | list %}
+{% set uploaded = others | selectattr("kind", "equalto", "upload") | list %}
+{% set start = "artifact" if open_card == "kind-artifact" else "upload" if open_card == "kind-upload" else "repos" %}
+<div class="apps-view start-{{ start }}">
+<nav class="sub-tabs" aria-label="Kinds of app">
+  <a href="#kind-repos" class="tab-repos">Watched repos <span class="count">{{ repos | length }}</span></a>
+  <a href="#kind-artifact" class="tab-artifact">Test builds <span class="count">{{ builds | length }}</span></a>
+  <a href="#kind-upload" class="tab-upload">Uploads <span class="count">{{ uploaded | length }}</span></a>
+</nav>
+
 {# ---- watched repos: one card each, everything on its face ---- #}
-<h2 class="section-title">Watched repos</h2>
+<div class="app-group{{ ' start' if start == 'repos' else '' }}" id="kind-repos">
+<h2 class="visually-hidden">Watched repos</h2>
 {% if repos %}
 {% set error_count = repos | selectattr("last_error") | list | length %}
 {# Where the watched apps stand on the phone being pushed to. #}
@@ -262,7 +277,6 @@
 {% set cid = "repo-" ~ r.id %}
 <section class="card row-card repo-card{{ ' repo-card-error' if r.last_error else '' }}" id="{{ cid }}">
   <div class="repo-head">
-    <span class="avatar repo-avatar" aria-hidden="true">{{ r.repo[:1] }}</span>
     <div class="repo-title">
       <h2 class="device-name">{{ r.owner }}/{{ r.repo }}</h2>
       <div class="device-meta">{{ r.expected_package or "package pinned on first release" }}</div>
@@ -336,15 +350,18 @@
 {% else %}
 <p class="empty-state">No repos watched yet. Watch one above.</p>
 {% endfor %}
+</div>
 
 {# ---- test builds and uploads: one card per kind, one row per build ---- #}
-{% for kind, title, intro in [
-    ("artifact", "Test builds", "staged from a watched repo's workflow runs, on its Builds page"),
-    ("upload", "Uploads", "APKs uploaded here by hand")] %}
-{% set items = others | selectattr("kind", "equalto", kind) | list %}
-{% if items %}
+{% for kind, title, intro, empty in [
+    ("artifact", "Test builds", "Staged from a watched repo's workflow runs, on its Builds page.",
+     "No test builds staged. Stage one from a watched repo's Builds page."),
+    ("upload", "Uploads", "APKs uploaded here by hand.", "Nothing uploaded yet. Upload an APK above.")] %}
+{% set items = builds if kind == "artifact" else uploaded %}
 {% set cid = "kind-" ~ kind %}
-<h2 class="section-title" id="{{ cid }}">{{ title }} <span class="muted small">{{ intro }}</span></h2>
+<div class="app-group{{ ' start' if start == kind else '' }}" id="{{ cid }}">
+<h2 class="visually-hidden">{{ title }}</h2>
+{% if items %}<p class="muted group-intro">{{ intro }}</p>{% endif %}
 {% if open_card == cid %}<div class="card-flash">{% include "_flash.html" %}</div>{% endif %}
 {% for g in items %}
 {% set latest = g.releases[0] %}
@@ -352,7 +369,6 @@
 {% set did = 'upload-' ~ first.id %}
 <section class="card row-card repo-card" id="{{ did }}">
   <div class="repo-head">
-    <span class="avatar repo-avatar" aria-hidden="true">{{ g.label[:1] }}</span>
     <div class="repo-title">
       <h2 class="device-name">{{ g.label }}</h2>
       {% if kind == "artifact" %}
@@ -388,7 +404,10 @@
   </details>
   {% endif %}
 </section>
+{% else %}
+<p class="empty-state">{{ empty }}</p>
 {% endfor %}
-{% endif %}
+</div>
 {% endfor %}
+</div>
 {% endblock %}

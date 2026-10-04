@@ -84,7 +84,7 @@ def test_status_card_lists_the_devices_inventory(authed, trusted_device):
     db.finish_install(install, "failed", "boom")
     page = authed.get("/status").text
     card = page[page.index('device-card"'):]
-    assert '<span class="version">1.0</span>' in card and "2.0 available" in card and "Update" in card
+    assert '<span class="version">1.0</span>' in card and '<span class="offer">2.0</span> available' in card and "Update" in card
     assert "dev build" in card and "1.7-dev" in card  # an upload pushed to it
     assert "com.gone" not in card  # uninstalled packages aren't inventory
     assert "Recent installs" in card and f'href="/installs/{install}"' in card

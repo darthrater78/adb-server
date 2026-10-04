@@ -1,6 +1,6 @@
 """The app-wide accent colour: one colour for everything that highlights
-(solid buttons, links, focus rings, the current page in the nav, the chosen
-filter or Settings tab, checkboxes, the edge of an open card). Status badges
+(the rule under the action bar, the current tab, solid buttons, links, focus
+rings, a switch that's on, checkboxes, the version on offer). Status tags
 keep their own fixed colours: they carry meaning. Pure functions, no I/O.
 
 The colour has to work as text and as a button fill on the light and the
@@ -10,36 +10,32 @@ it is whichever of white or near-black reads better."""
 import re
 
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-# Name -> colour. The default (nothing saved) is style.css's own palette,
-# which is "teal".
+# Name -> colour: Holo's own five, and a grey. The default (nothing saved) is
+# style.css's own palette, which is "blue".
 PRESETS = {
-    "teal": "#0f766e",
-    "blue": "#1d4ed8",
-    "indigo": "#4338ca",
-    "violet": "#6d28d9",
-    "rose": "#be123c",
-    "orange": "#c2410c",
-    "green": "#15803d",
-    "graphite": "#52525b",
+    "blue": "#0099cc",
+    "violet": "#9933cc",
+    "green": "#669900",
+    "orange": "#ff8800",
+    "red": "#cc0000",
+    "graphite": "#555555",
 }
 # Hand-picked dark-theme shades for the presets. Lightening a colour by
 # mixing in white washes it out; these stay saturated. Custom colours still
 # fall back to the computed variant.
 PRESET_DARK = {
-    "teal": "#2dd4bf",
-    "blue": "#60a5fa",
-    "indigo": "#818cf8",
-    "violet": "#a78bfa",
-    "rose": "#fb7185",
-    "orange": "#fb923c",
-    "green": "#4ade80",
-    "graphite": "#a1a1aa",
+    "blue": "#33b5e5",
+    "violet": "#c58be2",
+    "green": "#99cc00",
+    "orange": "#ffbb33",
+    "red": "#ff6b6b",
+    "graphite": "#b0b0b0",
 }
-DEFAULT_PRESET = "teal"
-LIGHT_BGS = ("#ffffff", "#f6f5f2")  # Flashbang: cards, page
-DARK_BGS = ("#1e1d1b", "#161614", "#0e0e0d", "#000000")  # Dark and OLED: cards, page
+DEFAULT_PRESET = "blue"
+LIGHT_BGS = ("#ffffff", "#f3f3f3", "#e3eef3")  # Flashbang: dialogs, page, the foot of its backdrop
+DARK_BGS = ("#1c1c1c", "#0f0f0f", "#14303c", "#121212", "#000000")  # Dark and OLED: dialogs and action bar, page, backdrop
 MIN_CONTRAST = 4.5
-_DARK_TEXT = "#0b1412"
+_DARK_TEXT = "#001e2b"
 
 
 def normalize(value: str) -> str:

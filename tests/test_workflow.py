@@ -111,7 +111,7 @@ def test_a_failed_push_says_so_on_its_row(authed, device):
     page = authed.get("/status").text
     row = page[page.index(f'id="app-{rid}-{DOM}"'):]
     row = row[:row.index('<div class="row-follow">')]
-    assert "Push failed" in row and 'class="progress-bar failed"' in row and f'href="/installs/{install}"' in row
+    assert "Push failed" in row and "progress-bar" not in row and f'href="/installs/{install}"' in row
 
 
 def test_the_progress_page_refreshes_while_running_and_never_leaves(authed, device):

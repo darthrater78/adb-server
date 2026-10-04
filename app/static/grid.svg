@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="97" height="56" viewBox="0 0 97 56">
+  <!-- one tile of an isometric grid (97 x 56 gives 30 degree lines): the logo's box, repeated -->
+  <path d="M0 0 97 56M0 56 97 0M0 0V56M48.5 0V56M97 0V56" fill="none" stroke="#4aa3c7" stroke-width="1"/>
+</svg>

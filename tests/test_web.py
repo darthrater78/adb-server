@@ -121,7 +121,7 @@ def test_header_links_to_the_repo_and_this_versions_release_notes(authed):
 
 
 def test_ui_fonts_are_served_as_fonts(client):
-    r = client.get("/static/fonts/figtree-latin-wght-normal.woff2")
+    r = client.get("/static/fonts/roboto-latin-wdth-normal.woff2")
     assert r.status_code == 200 and r.headers["content-type"] == "font/woff2"
 
 
