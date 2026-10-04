@@ -428,7 +428,7 @@ button.secondary, .button-link.secondary {
 button.secondary:hover, .button-link.secondary:hover { filter: none; border-color: var(--muted); }
 button.danger { background: var(--control-bg); border-color: var(--control-bg); color: var(--danger); }
 button.danger:hover { filter: none; border-color: var(--danger); }
-.button-link.danger-link { color: var(--danger); }
+.button-link.danger-link { background: var(--control-bg); border-color: var(--control-bg); color: var(--danger); }
 .button-link.danger-link:hover { border-color: var(--danger); }
 button.small, .button-link.small { height: 30px; padding: 0 11px; font-size: 13px; border-radius: var(--radius-sm); }
 button svg, .button-link svg { flex: none; }
@@ -561,7 +561,6 @@ tr.has-notes td { border-bottom: none; }
 .push-state { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
 .row-progress { display: block; width: 100%; max-width: 220px; height: 3px; background: var(--surface-2); overflow: hidden; }
 .row-progress .progress-bar { display: block; }
-.progress-bar.failed { width: 100%; background: var(--danger); }
 
 @keyframes progress-indeterminate {
   0%   { margin-left: -40%; }
@@ -1169,6 +1168,8 @@ fieldset.follow-pick p { margin: 0; }
 .push-progress { margin-bottom: 12px; }
 .push-progress-what { margin: 0 0 10px; }
 .push-progress p:last-child { margin-bottom: 0; }
+/* The push's own page shows adb's output in full. */
+.push-progress .log { max-width: none; max-height: 50vh; margin: 0 0 14px; }
 
 /* ---- Settings: overview cards and sub-pages ---- */
 .settings-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 18px; font-size: 14px; }
