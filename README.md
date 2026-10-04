@@ -260,8 +260,8 @@ top of the page.
 to confirm (what, to which device, replacing which version), and you stay on
 the row you pushed from. It shows a moving progress bar and **Installing
 2.4.0…**, and the page refreshes itself until the push is done; then the
-bar fills green with **✓ Installed 2.4.0 just now**, or red with **Push
-failed** and a link to why. A strip at the top also lists pushes running now
+bar fills green with **✓ Installed 2.4.0 just now**, or the row says **Push
+failed** with a link to why. A strip at the top also lists pushes running now
 and those that just finished, each with its log.
 
 **A debug build never goes over a signed install.** A phone that has an app
@@ -309,7 +309,7 @@ devices, and a device that already has that version or a newer one is skipped.
 Until you've added a source, trusted a device and installed something, the
 page shows a setup checklist instead.
 
-On a phone the nav is a tab bar along the bottom, rows are big enough to tap,
+On a phone the tabs sit in a row under the top bar, rows are big enough to tap,
 and Status opens with a summary (**1 update ready**, and an **Update**
 button for it, or **Update all** when a device has several) and a switcher
 between devices.
@@ -320,7 +320,9 @@ between devices.
 ### Apps: repos, builds and uploads
 
 Every app this server installs, where it comes from, and every version it
-has staged, on one page. **Pushing to ▾** at the top picks the device every
+has staged. Three tabs split it by kind, each with its count: **Watched
+repos**, **Test builds** and **Uploads**. One shows at a time; a link to a
+particular build or upload opens the tab it's in. **Pushing to ▾** at the top picks the device every
 **Push** on the page goes to (the most recently paired one to start), and
 the line above the repos sums up where they stand on it: how many are **to
 update**, **up to date**, **other version** or **not installed**.
@@ -333,8 +335,8 @@ installed**, plus which other devices have it). Its actions sit right there:
 **Delete** (every file of that version), **Builds**, **Check now**,
 **Pre-releases** and **Remove**. **Show details** opens the repo's details,
 the release notes, and every staged version and file, each with **Push
-this** and **Delete file**. Test builds and uploads follow, one card each
-under **Test builds** and **Uploads**, with the same face and actions. A test
+this** and **Delete file**. Test builds and uploads are one card each on
+their own tabs, with the same face and actions. A test
 build is marked **Test build**, with its branch and commit linked to the
 workflow run, so it can't be mistaken for a release. Devices are named by
 their nickname, else their model and the end of their serial (e.g. `Google
@@ -614,21 +616,27 @@ General shows both versions.
 
 ### Appearance
 
-**Settings → Appearance** sets one **accent** colour for the whole app: solid
-buttons, links, focus rings, the current page in the menu, the chosen filter
-or Settings tab, checkboxes and the edge of an open card. Status badges
+The app is drawn in the Holo look of Android's **Developer options**, the
+settings screen where adb is switched on: flat and square, capital tabs
+under an accent rule, thin numerals for versions, slab ON/OFF switches, and
+a sign-in that is a lock screen. `DESIGN.md` in the repo records the rules.
+
+**Settings → Appearance** sets one **accent** colour for the whole app: the
+rule under the top bar, the current tab, solid buttons, links, focus rings, a
+switch that's on, checkboxes and the version on offer. Status tags
 (Release, Test build, debug, errors) keep their own colours, because the
-colour is what they mean. Pick a preset or any custom colour; name a custom
+colour is what they mean. Pick a preset (Holo's blue, violet, green, orange
+and red, or graphite) or any custom colour; name a custom
 one and **Save as preset** to keep it. The accent is darkened or lightened per
 theme so text stays readable (WCAG AA contrast). The
 **Flashbang / Dark / OLED** buttons pick a theme for this browser: light,
 dark, or dark on true black. They sit in the top bar on wide screens and on
 **Settings → Appearance** everywhere; on a phone that page is the only place,
 so the top bar keeps just the app's name and **Log out**. Without one, the app follows your OS's
-light/dark setting. The layout adapts to phones and tablets (a bottom tab bar
-and touch-sized rows up to 960px wide). Text is set in Figtree, versions and
-hashes in JetBrains Mono, both served by the app itself (SIL Open Font
-License, in `app/static/fonts/`).
+light/dark setting. The layout adapts to phones and tablets (tabs under the
+top bar and touch-sized rows up to 960px wide). Text is set in Roboto,
+package names and hashes in Roboto Mono, both served by the app itself (SIL
+Open Font License, in `app/static/fonts/`).
 
 ### Two-factor sign-in
 
