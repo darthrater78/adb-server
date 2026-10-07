@@ -1,7 +1,7 @@
 # Direct dependencies, pinned. app/requirements.txt is compiled from this file with
 # hashes for every package, direct and transitive: edit this file, then run
 #   (cd app && pip-compile --generate-hashes --allow-unsafe --strip-extras requirements.in)
-fastapi==0.141.1
+fastapi==0.142.2
 uvicorn==0.53.0
 httpx==0.28.1
 apscheduler==3.11.3
