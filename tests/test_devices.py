@@ -11,6 +11,7 @@ import pushes
 import routes_devices
 import selection
 from conftest import CSRF
+from web import dom_id
 
 
 def _proc(stdout="", returncode=0, stderr=""):
@@ -397,3 +398,68 @@ def test_pairing_says_when_the_phone_paired_but_was_not_found(authed, monkeypatc
     monkeypatch.setattr(discovery, "_open_ports", open_ports)
     r = _post_pair(authed)
     assert "accepted the code" in unquote(r.headers["location"]) and db.list_devices() == []
+
+
+# ---- pairing a device that is already here again ----
+
+def _post_pair_again(authed, serial="SER", **fields):
+    data = {"csrf_token": CSRF, "ip": "192.168.1.50", "pairing_port": "40001", "pairing_code": "123456",
+            "connect_port": "41999", **fields}
+    return authed.post(f"/devices/{serial}/pair", data=data, follow_redirects=False)
+
+
+@pytest.fixture
+def trusted_device(device):
+    db.set_device_trusted("SER", True)
+    db.set_device_nickname("SER", "Kitchen tablet")
+    return db.get_device("SER")
+
+
+def test_each_card_offers_pair_again_with_its_ip_filled_in(authed, trusted_device, monkeypatch):
+    monkeypatch.setattr(adb_client, "transport_states", lambda: {"192.168.1.50:37000": "unauthorized"})
+    page = authed.get("/devices").text
+    start = page.index('action="/devices/SER/pair"')
+    form = page[start:page.index("</form>", start)]
+    assert 'name="ip" value="192.168.1.50"' in form
+    assert "Disable adb authorization timeout" in page
+    # A refused key is the case it's for: the fold is open and Pair again is the one solid button.
+    assert '<button type="submit">Pair again</button>' in form
+
+
+def test_pairing_again_keeps_the_record(authed, trusted_device, monkeypatch):
+    paired = []
+    monkeypatch.setattr(adb_client, "pair", lambda addr, code: paired.append(addr))
+    FakeAdb(monkeypatch, "192.168.1.50:41999")
+    monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
+    r = _post_pair_again(authed)
+    assert paired == ["192.168.1.50:40001"]
+    device = db.get_device("SER")
+    assert (device["trusted"], device["nickname"], device["last_connect_addr"], device["paired_at"]) == (
+        1, "Kitchen tablet", "192.168.1.50:41999", trusted_device["paired_at"])
+    assert len(db.list_devices()) == 1
+    assert "Paired again" in unquote(r.headers["location"]) and r.headers["location"].endswith("#" + dom_id("SER"))
+
+
+def test_pairing_again_never_hands_the_record_to_another_phone(authed, trusted_device, monkeypatch):
+    monkeypatch.setattr(adb_client, "pair", lambda addr, code: "Successfully paired")
+    FakeAdb(monkeypatch, "192.168.1.50:41999", serial="OTHERPHONE")
+    monkeypatch.setattr(adb_client, "device_abis", lambda a: ["arm64-v8a"])
+    r = _post_pair_again(authed)
+    assert "A different phone answered" in unquote(r.headers["location"])
+    assert db.get_device("SER")["last_connect_addr"] == "192.168.1.50:37000"  # untouched
+    assert db.get_device("OTHERPHONE")["trusted"] == 0
+
+
+def test_a_failed_pair_again_comes_back_to_the_card(authed, trusted_device, monkeypatch):
+    def refuse(addr, code):
+        raise adb_client.AdbError("Failed: Unable to start pairing client")
+    monkeypatch.setattr(adb_client, "pair", refuse)
+    r = _post_pair_again(authed)
+    assert r.headers["location"].endswith(f"open={dom_id('SER')}#{dom_id('SER')}")
+    assert "only work while the pairing dialog is open" in unquote(r.headers["location"])
+    assert db.get_device("SER")["trusted"] == 1
+
+
+def test_pairing_again_needs_a_device_that_is_here(authed, monkeypatch):
+    monkeypatch.setattr(adb_client, "pair", lambda addr, code: pytest.fail("paired for an unknown device"))
+    assert _post_pair_again(authed, serial="NOSUCH").status_code == 404

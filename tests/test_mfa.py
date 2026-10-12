@@ -138,6 +138,23 @@ def test_forged_trust_cookie_is_ignored(client, enabled):
     assert login(client).headers["location"] == "/login/mfa"
 
 
+def test_recovery_codes_from_before_3_10_are_rekeyed_and_still_work(client, enabled):
+    # As 3.9 stored them: the bare SHA-256 of the code, which a copy of the
+    # database lets someone guess offline (about 49 bits).
+    bare = [mfa._hash(mfa._normalize_recovery(c)) for c in enabled]
+    db.replace_recovery_codes(bare)
+    db.init_db()
+    with db.get_conn() as conn:
+        stored = [r["code_hash"] for r in conn.execute("SELECT code_hash FROM mfa_recovery_codes")]
+    assert len(stored) == 10 and all(h.startswith("mac:v1:") for h in stored) and not set(stored) & set(bare)
+    db.init_db()  # a second start changes nothing
+    with db.get_conn() as conn:
+        assert sorted(r["code_hash"] for r in conn.execute("SELECT code_hash FROM mfa_recovery_codes")) == sorted(stored)
+    login(client)
+    r = client.post("/login/mfa", data={"code": enabled[0]}, follow_redirects=False)
+    assert r.headers["location"].startswith("/status?ok=") and db.recovery_codes_left() == 9
+
+
 def test_recovery_code_works_once(client, enabled):
     login(client)
     r = client.post("/login/mfa", data={"code": enabled[0].upper()}, follow_redirects=False)

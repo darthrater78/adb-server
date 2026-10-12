@@ -11,6 +11,8 @@ out every session). Readers get SecretUnreadable and treat the secret as
 unset, failing closed: the token and notification URLs are entered again,
 and two-factor sign-in is reset with `python mfa_admin.py reset`."""
 import base64
+import hashlib
+import hmac
 import os
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -38,6 +40,26 @@ def _box() -> Fernet:
                    info=b"database secrets v1").derive(secret.encode())
         _fernet, _fernet_for = Fernet(base64.urlsafe_b64encode(key)), secret
     return _fernet
+
+
+MAC_PREFIX = "mac:v1:"
+
+
+def is_keyed(value: str) -> bool:
+    return value.startswith(MAC_PREFIX)
+
+
+def keyed_hash(value: str) -> str:
+    """HMAC-SHA256 of `value` under a key derived from SECRET_KEY, for values
+    too short to be safe behind a bare hash (recovery codes: about 49 bits,
+    which a copy of the database would otherwise let someone guess offline).
+    Like a sealed value, it stops matching if SECRET_KEY changes."""
+    secret = os.environ.get("SECRET_KEY", "")
+    if not secret:
+        raise RuntimeError("SECRET_KEY is not set")
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=b"adb-server/secretbox",
+               info=b"keyed hashes v1").derive(secret.encode())
+    return MAC_PREFIX + hmac.new(key, value.encode(), hashlib.sha256).hexdigest()
 
 
 def is_sealed(value: str) -> bool:

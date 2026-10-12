@@ -213,6 +213,12 @@ def _seal_plaintext_secrets(conn: sqlite3.Connection) -> None:
     for row in conn.execute("SELECT id, url FROM notify_targets").fetchall():
         if not secretbox.is_sealed(row["url"]):
             conn.execute("UPDATE notify_targets SET url = ? WHERE id = ?", (secretbox.seal(row["url"]), row["id"]))
+    # Recovery codes were plain SHA-256 hashes before 3.10. Key each one over
+    # the hash it already has, so the codes people hold keep working.
+    for row in conn.execute("SELECT code_hash FROM mfa_recovery_codes").fetchall():
+        if not secretbox.is_keyed(row["code_hash"]):
+            conn.execute("UPDATE mfa_recovery_codes SET code_hash = ? WHERE code_hash = ?",
+                         (secretbox.keyed_hash(row["code_hash"]), row["code_hash"]))
 
 
 def _rebuild_staged_apks_unique() -> None:

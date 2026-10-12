@@ -1,1 +1,1 @@
-Load the dev-skills skill before any commit, push, merge or release in this repo.
+Load the dev-skills skill at session start in this repo, before any edit.

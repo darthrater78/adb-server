@@ -113,7 +113,8 @@
     <p class="device-state device-state-{{ s.link }}">
       {% if s.link == "connected" %}<strong>Connected</strong> at <span class="mono">{{ d.last_connect_addr }}</span>{% if not d.trusted %}, but
         <strong>not trusted</strong>: nothing is pushed to it until you trust it.{% else %}, ready for pushes.{% endif %}
-      {% elif s.link == "unauthorized" %}<strong>The phone refused this server's key.</strong> Pair it again under Add a device.
+      {% elif s.link == "unauthorized" %}<strong>The phone refused this server's key.</strong> Android forgets a paired
+        computer after a week unless told not to. <strong>Pair again</strong> below; its name, trust and history stay.
       {% elif s.link == "offline" %}<strong>Offline</strong> at <span class="mono">{{ d.last_connect_addr }}</span>. Unlock the
         phone and check Wireless debugging is on, then press <strong>Find</strong>.
       {% elif s.link == "unknown" %}<strong>Couldn't reach the adb server</strong>, so the connection can't be checked.
@@ -174,6 +175,36 @@
         latches onto a different phone. Pushes and installs do this on their own when the saved port has gone
         stale. It can take a few seconds. If the phone's IP address changed, use <strong>Reconnect</strong> with
         the new address instead.
+      </p>
+    </details>
+    {# Pairing this same device again, without forgetting it first. #}
+    <details class="guide"{% if s.link == "unauthorized" %} open{% endif %}>
+      <summary>Pair again</summary>
+      <p class="explainer">
+        For when this server has gone from <strong>Paired devices</strong> on the phone's Wireless debugging screen,
+        or the phone refuses its key. Tap <strong>Pair device with pairing code</strong> there and enter the port
+        and code while the dialog is open. If the phone that answers has this device's serial, its name, trust and
+        history stay as they are.
+      </p>
+      <form method="post" action="/devices/{{ d.serial | urlencode }}/pair" class="inline-form pair-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Phone's IP address <input type="text" name="ip" value="{{ s.ip }}" placeholder="192.168.1.50"
+               inputmode="decimal" autocomplete="off" required></label>
+        <label>Pairing port <input type="text" name="pairing_port" placeholder="41235" inputmode="numeric"
+               pattern="\d{1,5}" maxlength="5" autocomplete="off" required></label>
+        <label>Pairing code <input type="text" name="pairing_code" placeholder="6 digits" inputmode="numeric"
+               pattern="\d{6}" maxlength="6" autocomplete="off" required></label>
+        <button type="submit"{% if s.link != "unauthorized" %} class="secondary"{% endif %}>Pair again</button>
+        <details class="guide pair-more">
+          <summary>Connect port (only if the phone isn't found)</summary>
+          <label>Connect port <input type="text" name="connect_port" placeholder="37251" inputmode="numeric"
+                 pattern="\d{1,5}" maxlength="5" autocomplete="off"></label>
+        </details>
+      </form>
+      <p class="explainer">
+        <strong>Why it happens:</strong> Android removes a paired computer 7 days after it was paired, and
+        connecting over Wi-Fi doesn't reset that. To stop it, turn on
+        <strong>Disable adb authorization timeout</strong> in the phone's Developer options.
       </p>
     </details>
 
