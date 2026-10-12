@@ -10,7 +10,7 @@ TOTP is a few lines over the standard library (HMAC-SHA1, 30-second steps,
                            just used can't be replayed within its window
   meta.mfa_failures, meta.mfa_locked_until   the lockout (see below)
 Trusted browsers are stored only as SHA-256 hashes of their long random
-tokens; recovery codes, being short, as hashes keyed with SECRET_KEY.
+tokens; recovery codes, being short, as scrypt hashes salted from SECRET_KEY.
 
 Unlocking and resetting without the phone: `python mfa_admin.py` inside the
 app container (see that file). Shell access to the server is the proof of
@@ -161,9 +161,8 @@ def _hash(value: str) -> str:
 
 
 def _recovery_hash(code: str) -> str:
-    """How a recovery code is stored. Keyed over the plain hash, which is
-    what was stored before 3.10: startup re-keys those rows (db.init_db)."""
-    return secretbox.keyed_hash(_hash(code))
+    """How a recovery code is stored: too short for a fast hash."""
+    return secretbox.slow_hash(code)
 
 
 def _normalize_recovery(code: str) -> str:
