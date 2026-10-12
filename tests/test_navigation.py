@@ -340,3 +340,25 @@ def test_stage_and_install_needs_a_known_device(authed, past_release):
                     follow_redirects=False)
     assert r.status_code == 404 and len(db.list_staged_apks(past_release)) == 1
 
+
+
+def test_a_status_card_is_sorted_by_what_it_needs(authed):
+    """Updates first, then what the phone has; builds it could take and the
+    install history are folded away, with grey buttons."""
+    db.upsert_paired_device("SER", "192.168.1.50:37000")
+    db.set_device_trusted("SER", True)
+    behind, current, absent = (db.create_repo("o", n, "*.apk") for n in ("behind", "current", "absent"))
+    for rid, pkg in ((behind, "com.behind"), (current, "com.current"), (absent, "com.absent")):
+        db.insert_staged_apk(rid, "v2", "app.apk", "0" * 64, pkg, "a" * 64, "/nonexistent.apk",
+                             version_code=2, version_name="2.0")
+    db.upsert_device_package("SER", "com.behind", True, 1, "1.0")
+    db.upsert_device_package("SER", "com.current", True, 2, "2.0")
+    db.upsert_device_package("SER", "com.absent", False, None, None)
+    page = authed.get("/status").text
+    card = page.split('class="card row-card device-card"', 1)[1]
+    needs, rest = card.split('<div class="row-group">On this phone', 1)
+    have, fold = rest.split('<details class="row-fold"', 1)
+    assert 'Needs you <span class="count">1</span>' in needs and "o/behind" in needs and "o/current" not in needs
+    assert "o/current" in have and "Up to date" in have and "o/absent" not in have
+    assert fold.startswith(">") and "Other builds you can push" in fold and "o/absent" in fold  # folded: no `open`
+    assert 'class="button-link secondary">Install</a>' in fold and 'class="button-link">Update</a>' in needs

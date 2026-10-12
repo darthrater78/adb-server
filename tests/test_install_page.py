@@ -72,10 +72,25 @@ def test_a_card_says_which_devices_already_have_it(authed, two_devices):
     db.upsert_device_package("EVIL", "com.example", True, 2, "2.0")  # untrusted: not shown
     def head(query=""):
         return _head(authed.get("/apps" + query).text, rid)
-    assert "1.0, update available" in head("?to=AAA") and "· also on Tablet</span>" in head("?to=AAA")
-    assert "also on Pixel" not in head("?to=AAA") and "EVIL" not in head("?to=AAA")
-    # The target itself isn't listed again: its own line already says so.
-    assert "2.0 ✓" in head() and "also on" not in head()
+    card = head("?to=AAA")
+    assert "On Pixel:" in card and "1.0, update available" in card
+    # The fold lists every trusted device, the ones behind or without it too.
+    fold = card.split('class="guide on-devices"', 1)[1]
+    assert "On your devices · 1 of 2 up to date" in fold and "EVIL" not in card
+    rows = {name: row for row in fold.split('class="activity-row"')[1:]
+            for name in ("Pixel", "Tablet") if f"<strong>{name}</strong>" in row}
+    pixel, tablet = rows["Pixel"], rows["Tablet"]
+    assert "pushing to" in pixel and "1.0, update available" in pixel
+    assert 'href="/apps?to=BBB"' in tablet and "2.0 ✓" in tablet
+    db.upsert_device_package("AAA", "com.example", False, None, None)
+    assert "not installed" in head("?to=BBB").split('class="guide on-devices"', 1)[1]
+
+
+def test_one_device_gets_no_device_list(authed):
+    db.upsert_paired_device("AAA", "192.168.1.5:37000")
+    db.set_device_trusted("AAA", True)
+    _stage(db.create_repo("o", "r", "*.apk"), "v2", "app.apk")
+    assert "on-devices" not in authed.get("/apps").text
 
 
 def test_no_trusted_device_means_no_picker_and_no_push(authed):

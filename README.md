@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.10.0](https://github.com/darthrater78/adb-server/releases/tag/v3.10.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.11.0](https://github.com/darthrater78/adb-server/releases/tag/v3.11.0)
 
 <!-- Dev-build banner: drawn by .github/workflows/dev-banner.yml after every release, empty when no dev build is ahead of the latest release. -->
 <a href="https://github.com/darthrater78/adb-server/releases"><img alt="Dev build status" src="https://raw.githubusercontent.com/darthrater78/adb-server/readme-banner/banner.svg" /></a>
@@ -117,7 +117,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.10.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.11.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -140,7 +140,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.10.0
+    image: ghcr.io/darthrater78/adb-server/app:3.11.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -171,7 +171,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.10.0), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.11.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -196,7 +196,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.10.0` and add one
+> Then, in your `compose.yaml`, set both images to `3.11.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -274,16 +274,20 @@ server pushed with the same key may still be replaced by the next one.
 
 ### Status: the home page
 
-One card per device (tap its header to fold it away), with everything you
-can do for it:
+One card per device (tap its header to fold it away), sorted by what it
+needs from you:
 
-- **Each watched app**: its installed version against the latest staged
-  one, with an **Update** or **Install** button that picks the right APK for
-  the device's CPU and asks you to confirm first. When there's something new
-  to install, **What's in 2.4.0** under the row unfolds its release notes.
-- **Each test build and upload** staged, with what the device has of that
-  app and a **Push** (or **Install**) button.
-- Anything else installed from this server, and the device's last few installs.
+- **Needs you**: each watched app with an update or a failed push. Its
+  installed version sits against the latest staged one, with an **Update**
+  button that picks the right APK for the device's CPU and asks you to
+  confirm first. **What's in 2.4.0** under the row unfolds the release notes.
+- **On this phone**: what is installed and up to date, and anything on the
+  phone this server has nothing staged for.
+- **Other builds you can push**, folded: watched apps the phone doesn't
+  have, and each test build and upload, with a grey **Install** or **Push**
+  button. It opens by itself while one of them is being pushed, or when the
+  card has nothing else to show.
+- **Recent installs**, folded, with the last result on its line.
 
 The bar at the top of the card holds the device's tools: **Update all** when
 it has two or more updates (one confirmation, installed one after another),
@@ -330,7 +334,10 @@ update**, **up to date**, **other version** or **not installed**.
 Each watched repo is one card, never folded. Its face shows the latest
 staged release, which CPU builds of it are staged, how it's signed, and what
 the chosen device has (**2.4.0 ✓**, **2.3.1, update available** or **not
-installed**, plus which other devices have it). Its actions sit right there:
+installed**). With more than one trusted device, **On your devices** under
+that line unfolds every one of them and what it has, including those that
+are behind or don't have the app, each with a link that makes it the push
+target. Its actions sit right there:
 **Push** (the newest release, in the build that fits the device's CPU),
 **Delete** (every file of that version), **Builds**, **Check now**,
 **Pre-releases** and **Remove**. **Show details** opens the repo's details,
@@ -500,8 +507,9 @@ accepts a port only if the device there reports the **same hardware serial**.
 Find and Reconnect do** on each card explains it): use it to check a phone is
 reachable before you install, or after turning wireless debugging back on.
 If the phone's IP itself changed, use **Reconnect** with its new address:
-the address field comes first, then **Reconnect** and **Find** side by side. Nicknames, trust and forgetting a device
-are all on this page. Phones list this server as `@adbserver`.
+the address field comes first, then **Reconnect** and **Find** side by side. The nickname, trust and
+these connection controls share one fold on the card, **Name, trust and connection**, open while a device
+is untrusted or not connected. Forgetting a device is on this page too. Phones list this server as `@adbserver`.
 
 **When the server drops off the phone's Paired devices list.** This is
 Android, not the server: by default it removes a paired computer 7 days
@@ -951,7 +959,7 @@ two-factor sign-in stays on but refuses every code until you reset it with
   an expiry.
 - Each published image carries a signed **build provenance** attestation
   saying this workflow built it from that commit. Check one with
-  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.10.0 --repo darthrater78/adb-server`.
+  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.11.0 --repo darthrater78/adb-server`.
 - CodeQL scans the Python code and the workflows on every pull request and
   weekly, and **dependency review** fails a pull request that brings in a
   dependency with a known HIGH or CRITICAL advisory. A weekly scan re-checks

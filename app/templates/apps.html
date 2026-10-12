@@ -57,8 +57,30 @@
   {% elif has.version_code == first.version_code %}<strong class="status-success">{{ has.version_name or "this version" }} ✓</strong>
   {% elif has.version_code and first.version_code and has.version_code < first.version_code %}<strong class="status-update">{{ has.version_name or "older" }}, update available</strong>
   {% else %}<strong>{{ has.version_name or "another version" }}</strong>{% endif %}</span>
-{%- set others = g.on | rejectattr("serial", "equalto", target.serial) | list %}
-{%- if others %} <span class="muted small">· also on {% for d in others %}{{ d | device_name }}{{ ", " if not loop.last }}{% endfor %}</span>{% endif %}
+{% endif %}
+{% endmacro %}
+
+{# Every trusted device and what it has, folded: the line above is only the
+   device being pushed to. One device needs no list. #}
+{% macro on_devices(g) %}
+{% if g.devices | length > 1 %}
+{% set first = g.releases[0].apks[0] %}
+<details class="guide on-devices">
+  <summary>On your devices · {{ g.on | length }} of {{ g.devices | length }} up to date</summary>
+  <div class="on-devices-rows">
+    {% for x in g.devices %}
+    <div class="activity-row">
+      <span class="activity-what"><strong>{{ x.device | device_name }}</strong>
+        {%- if x.device.serial == target.serial %} <span class="muted">· pushing to</span>
+        {%- else %} <a href="/apps?to={{ x.device.serial | urlencode }}" class="small">push to this one</a>{% endif %}</span>
+      {% if x.state == "missing" %}<span class="muted">not installed</span>
+      {% elif x.state == "current" %}<span class="status-success">{{ x.has.version_name or "this version" }} ✓</span>
+      {% elif x.state == "behind" %}<span class="status-update">{{ x.has.version_name or "older" }}, update available</span>
+      {% else %}<span>{{ x.has.version_name or "another version" }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</details>
 {% endif %}
 {% endmacro %}
 
@@ -310,6 +332,7 @@
   {% if g %}
   <div class="repo-latest repo-on">{{ on_target(g) }}
     {% if g.busy or g.done or g.failed %}{{ push_state(g.busy, g.done, g.failed) }}{% endif %}</div>
+  {{ on_devices(g) }}
   {% endif %}
   {% if r.last_error %}<p class="repo-error error-text small">{{ r.last_error }}</p>{% endif %}
 
@@ -394,6 +417,7 @@
   </div>
   <div class="repo-latest repo-on">{{ on_target(g) }}
     {% if g.busy or g.done or g.failed %}{{ push_state(g.busy, g.done, g.failed) }}{% endif %}</div>
+  {{ on_devices(g) }}
   {% if target and blocked_for(first) %}<p class="flash flash-warn push-blocked-why">{{ blocked_for(first) }}</p>{% endif %}
   <div class="actions repo-actions">{{ version_actions(g, did) }}</div>
   {% set a = first %}{% include "_debug_advice.html" %}

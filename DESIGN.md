@@ -257,6 +257,10 @@ each end). Circles are reserved for the unlock ring and colour dots.
   (16px on phones); its summary is the head band, with a CSS chevron. It starts open only when it wants the user (an update, an
   untrusted device, a running push, the only one, or the one an action
   returned to). Add forms start folded, empty page or not.
+- **Rows in a card:** grouped under a condensed-capital label with its
+  count (Status: Needs you, On this phone). What can wait folds under a
+  link-coloured summary line, and its buttons are grey: the accent button
+  belongs to the group that needs the user.
 - **Views of a page:** where a page holds different kinds of thing (Apps:
   watched repos, test builds, uploads), each kind is a view behind a large
   thin tab (22px, weight 300) with its count, one view showing at a time.
