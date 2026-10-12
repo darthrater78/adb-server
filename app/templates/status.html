@@ -30,6 +30,133 @@
 {# A push running for this row, or the last one having failed. #}
 {% from "_push.html" import confirm_dialog, push_state with context %}
 {% macro push_outcome(row) %}{{ push_state(row.busy, row.done, row.failed) }}{% endmacro %}
+{# One row of a device's card. `quiet` rows sit in the "other builds" fold,
+   where every button is grey: the accent is kept for what needs you. #}
+{% macro app_row(app, d, dom, quiet=false) %}
+  {% set latest = app.latest %}
+  {% set staged = latest.version_name or latest.tag %}
+  <div class="row-grid status-grid" id="{{ app.row }}">
+    <div class="row-title">
+      <div><div class="row-name">{{ latest.source_label }}</div><div class="row-sub mono">{{ latest.package_name }}</div></div>
+    </div>
+    <div class="row-have">
+      {% if app.state == "missing" %}<span class="row-state">Not installed</span>
+      {% elif app.state == "unknown" %}<span class="row-state" title="Use Refresh installed versions">Unknown</span>
+      {% else %}
+      <div class="row-line"><span class="version">{{ app.installed.version_name or "?" }}</span>{{ origin_chips(app.origin) }}</div>
+      {{ origin_meta(app.origin) }}
+      {% endif %}
+    </div>
+    <div class="row-state{{ ' update' if app.state == 'update' else '' }}">
+      {%- if app.busy %}{{ staged }} {{ push_outcome(app) }}
+      {%- else %}
+      {%- if app.state == "current" %}Up to date
+      {%- elif app.state == "update" %}<span class="offer">{{ staged }}</span> available
+      {%- elif app.state == "newer" %}<span title="Installed version is newer than the latest staged release">Newer than {{ staged }}</span>
+      {%- else %}{{ staged }} staged{% endif %}
+      {%- if app.failed or app.done %} {{ push_outcome(app) }}{% endif %}
+      {%- endif -%}
+    </div>
+    <div class="row-actions">
+      {% if app.state != "current" and app.state != "newer" and not app.busy %}
+        {% if app.fits %}
+        {% set verb = "Install" if app.state == "missing" else "Update" %}
+        {% call confirm_dialog("confirm-" ~ app.repo_id ~ "-" ~ dom, app.row, verb ~ " " ~ latest.source_label ~ "?",
+            "/push-latest", {"repo_id": app.repo_id, "device_serial": d.serial, "back": "/status"}, verb ~ " now", verb, "secondary" if quiet else "") %}
+        <p>
+          {{ verb }} <strong>{{ staged }}</strong>
+          on <strong>{{ d | device_name }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
+          replacing {{ app.installed.version_name }}{% endif %}.
+        </p>
+        {% endcall %}
+        {% else %}
+        <span class="muted small">no APK for this CPU</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <div class="row-follow">
+      <form method="post" action="/follow" class="follow-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="repo_id" value="{{ app.repo_id }}">
+        <input type="hidden" name="device_serial" value="{{ d.serial }}">
+        <input type="hidden" name="follow" value="{{ '0' if app.following else '1' }}">
+        <button type="submit" class="switch{{ ' on' if app.following else '' }}" role="switch" aria-checked="{{ 'true' if app.following else 'false' }}"
+                title="Push each new release to this device automatically">
+          <span class="switch-label">Auto-update</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb">{{ "ON" if app.following else "OFF" }}</span></span>
+        </button>
+      </form>
+    </div>
+  </div>
+  {% if latest.release_notes and app.state in ("update", "missing", "unknown") %}
+  <details class="row-notes">
+    <summary>What's in {{ staged }}</summary>
+    <pre class="release-notes">{{ latest.release_notes }}</pre>
+  </details>
+  {% endif %}
+{% endmacro %}
+{% macro staged_row(s, d, dom) %}
+  {% set a = s.apk %}
+  {% set version = a.version_name or a.tag %}
+  {% set label = a.artifact_repo or a.tag %}
+  <div class="row-grid status-grid staged-row" id="{{ s.row }}">
+    <div class="row-title">
+      <div>
+        <div class="row-name">{{ label }}</div>
+        {% if s.kind == "artifact" %}<div class="row-sub mono">{{ a.artifact_branch or "?" }} @ {{ (a.artifact_sha or "")[:7] }}</div>
+        {% else %}<div class="row-sub mono">{{ a.filename }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="row-have">
+      {% if s.installed %}
+      <div class="row-line"><span class="version">{{ s.installed.version_name or "?" }}</span>{{ origin_chips(s.origin) }}</div>
+      {{ origin_meta(s.origin) }}
+      {% else %}<span class="row-state">Not installed</span>{% endif %}
+    </div>
+    <div class="row-state">
+      <span class="row-line"><span class="version">{{ version }}</span>
+        {% if s.kind == "artifact" %}<span class="badge badge-artifact">Test build</span>{% else %}<span class="badge badge-muted">Upload</span>{% endif %}
+        {% if a.is_debug %}<span class="badge badge-warn">Debug</span>{% endif %}</span>
+      {%- if s.busy or s.failed or s.done %} {{ push_outcome(s) }}{% elif s.state == "current" %} <span class="muted small">installed</span>{% endif -%}
+      {% if s.blocked %}<div class="small status-failed push-blocked-why">Debug build over a signed install: the phone would refuse it. Push the signed build, or uninstall the app first.</div>{% endif %}
+    </div>
+    <div class="row-actions">
+      {% if not s.busy %}
+        {% if s.blocked %}
+        <span class="badge badge-error push-blocked" title="{{ s.blocked }}">Push blocked</span>
+        {% elif s.fits %}
+        {% set verb = "Install" if not s.installed else "Push" %}
+        {% call confirm_dialog("confirm-upload-" ~ a.id ~ "-" ~ dom, s.row, verb ~ " " ~ label ~ "?",
+            "/push", {"apk_id": a.id, "device_serial": d.serial, "back": "/status"}, verb ~ " now", verb,
+            "secondary") %}
+        <p>
+          {{ verb }} <strong>{{ version }}</strong> on <strong>{{ d | device_name }}</strong>{% if s.installed %},
+          replacing {{ s.installed.version_name or "the installed version" }}{% endif %}.
+        </p>
+        {% if a.is_debug %}<p class="muted small">It's a debug build: a phone with the signed app refuses it as an update.</p>{% endif %}
+        {% endcall %}
+        {% else %}
+        <span class="muted small">not for this CPU</span>
+        {% endif %}
+      {% endif %}
+    </div>
+    <div class="row-follow"></div>
+  </div>
+{% endmacro %}
+{% macro other_row(o) %}
+  <div class="row-grid status-grid">
+    <div class="row-title">
+      <div><div class="row-name">{{ o.package }}</div></div>
+    </div>
+    <div class="row-have">
+      <div class="row-line"><span class="version">{{ o.installed.version_name or "installed" }}</span>{{ origin_chips(o.origin) }}</div>
+      {{ origin_meta(o.origin) }}
+    </div>
+    <div class="row-state muted small">Nothing staged for it</div>
+    <div class="row-actions"></div>
+    <div class="row-follow"></div>
+  </div>
+{% endmacro %}
 {% block content %}
 {% set update_count = cards | map(attribute="updates") | map("length") | sum %}
 <div class="page-head">
@@ -167,146 +294,50 @@
   {% endif %}
 
   {% if d.trusted and (card.apps or card.staged or card.others) %}
-  <div class="row-grid status-grid row-head" aria-hidden="true"><span>App</span><span>On device</span><span>Latest</span><span></span><span></span></div>
+  {# Sorted by what the card wants from you: updates and failed pushes, then
+     what the phone has, then (folded) everything else that could go on it. #}
+  {% set g = namespace(needs=[], have=[], rest=[], rest_open=false) %}
   {% for app in card.apps %}
-  {% set latest = app.latest %}
-  {% set staged = latest.version_name or latest.tag %}
-  <div class="row-grid status-grid" id="{{ app.row }}">
-    <div class="row-title">
-      <div><div class="row-name">{{ latest.source_label }}</div><div class="row-sub mono">{{ latest.package_name }}</div></div>
-    </div>
-    <div class="row-have">
-      {% if app.state == "missing" %}<span class="row-state">Not installed</span>
-      {% elif app.state == "unknown" %}<span class="row-state" title="Use Refresh installed versions">Unknown</span>
-      {% else %}
-      <div class="row-line"><span class="version">{{ app.installed.version_name or "?" }}</span>{{ origin_chips(app.origin) }}</div>
-      {{ origin_meta(app.origin) }}
-      {% endif %}
-    </div>
-    <div class="row-state{{ ' update' if app.state == 'update' else '' }}">
-      {%- if app.busy %}{{ staged }} {{ push_outcome(app) }}
-      {%- else %}
-      {%- if app.state == "current" %}Up to date
-      {%- elif app.state == "update" %}<span class="offer">{{ staged }}</span> available
-      {%- elif app.state == "newer" %}<span title="Installed version is newer than the latest staged release">Newer than {{ staged }}</span>
-      {%- else %}{{ staged }} staged{% endif %}
-      {%- if app.failed or app.done %} {{ push_outcome(app) }}{% endif %}
-      {%- endif -%}
-    </div>
-    <div class="row-actions">
-      {% if app.state != "current" and app.state != "newer" and not app.busy %}
-        {% if app.fits %}
-        {% set verb = "Install" if app.state == "missing" else "Update" %}
-        {% call confirm_dialog("confirm-" ~ app.repo_id ~ "-" ~ dom, app.row, verb ~ " " ~ latest.source_label ~ "?",
-            "/push-latest", {"repo_id": app.repo_id, "device_serial": d.serial, "back": "/status"}, verb ~ " now", verb) %}
-        <p>
-          {{ verb }} <strong>{{ staged }}</strong>
-          on <strong>{{ d | device_name }}</strong>{% if app.state == "update" and app.installed and app.installed.version_name %},
-          replacing {{ app.installed.version_name }}{% endif %}.
-        </p>
-        {% endcall %}
-        {% else %}
-        <span class="muted small">no APK for this CPU</span>
-        {% endif %}
-      {% endif %}
-    </div>
-    <div class="row-follow">
-      <form method="post" action="/follow" class="follow-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="repo_id" value="{{ app.repo_id }}">
-        <input type="hidden" name="device_serial" value="{{ d.serial }}">
-        <input type="hidden" name="follow" value="{{ '0' if app.following else '1' }}">
-        <button type="submit" class="switch{{ ' on' if app.following else '' }}" role="switch" aria-checked="{{ 'true' if app.following else 'false' }}"
-                title="Push each new release to this device automatically">
-          <span class="switch-label">Auto-update</span>
-          <span class="switch-track" aria-hidden="true"><span class="switch-thumb">{{ "ON" if app.following else "OFF" }}</span></span>
-        </button>
-      </form>
-    </div>
-  </div>
-  {% if latest.release_notes and app.state in ("update", "missing", "unknown") %}
-  <details class="row-notes">
-    <summary>What's in {{ staged }}</summary>
-    <pre class="release-notes">{{ latest.release_notes }}</pre>
+    {% if app.state == "update" or app.busy or app.failed %}{% set g.needs = g.needs + [app] %}
+    {% elif app.state in ("current", "newer") %}{% set g.have = g.have + [app] %}
+    {% else %}{% set g.rest = g.rest + [app] %}{% endif %}
+  {% endfor %}
+  {% for s in card.staged %}{% if s.busy or s.failed or s.done %}{% set g.rest_open = true %}{% endif %}{% endfor %}
+  {% for app in g.rest %}{% if app.done %}{% set g.rest_open = true %}{% endif %}{% endfor %}
+  {% if g.needs %}
+  <div class="row-group">Needs you <span class="count">{{ g.needs | length }}</span></div>
+  {% for app in g.needs %}{{ app_row(app, d, dom) }}{% endfor %}
+  {% endif %}
+  {% if g.have or card.others %}
+  <div class="row-group">On this phone <span class="count">{{ g.have | length + card.others | length }}</span></div>
+  {% for app in g.have %}{{ app_row(app, d, dom) }}{% endfor %}
+  {% for o in card.others %}{{ other_row(o) }}{% endfor %}
+  {% endif %}
+  {% if g.rest or card.staged %}
+  <details class="row-fold"{% if g.rest_open or not (g.needs or g.have or card.others) %} open{% endif %}>
+    <summary>Other builds you can push <span class="count">{{ g.rest | length + card.staged | length }}</span></summary>
+    {% for app in g.rest %}{{ app_row(app, d, dom, true) }}{% endfor %}
+    {% for s in card.staged %}{{ staged_row(s, d, dom) }}{% endfor %}
   </details>
   {% endif %}
-  {% endfor %}
-
-  {% for s in card.staged %}
-  {% set a = s.apk %}
-  {% set version = a.version_name or a.tag %}
-  {% set label = a.artifact_repo or a.tag %}
-  <div class="row-grid status-grid staged-row" id="{{ s.row }}">
-    <div class="row-title">
-      <div>
-        <div class="row-name">{{ label }}</div>
-        {% if s.kind == "artifact" %}<div class="row-sub mono">{{ a.artifact_branch or "?" }} @ {{ (a.artifact_sha or "")[:7] }}</div>
-        {% else %}<div class="row-sub mono">{{ a.filename }}</div>{% endif %}
-      </div>
-    </div>
-    <div class="row-have">
-      {% if s.installed %}
-      <div class="row-line"><span class="version">{{ s.installed.version_name or "?" }}</span>{{ origin_chips(s.origin) }}</div>
-      {{ origin_meta(s.origin) }}
-      {% else %}<span class="row-state">Not installed</span>{% endif %}
-    </div>
-    <div class="row-state">
-      <span class="row-line"><span class="version">{{ version }}</span>
-        {% if s.kind == "artifact" %}<span class="badge badge-artifact">Test build</span>{% else %}<span class="badge badge-muted">Upload</span>{% endif %}
-        {% if a.is_debug %}<span class="badge badge-warn">Debug</span>{% endif %}</span>
-      {%- if s.busy or s.failed or s.done %} {{ push_outcome(s) }}{% elif s.state == "current" %} <span class="muted small">installed</span>{% endif -%}
-      {% if s.blocked %}<div class="small status-failed push-blocked-why">Debug build over a signed install: the phone would refuse it. Push the signed build, or uninstall the app first.</div>{% endif %}
-    </div>
-    <div class="row-actions">
-      {% if not s.busy %}
-        {% if s.blocked %}
-        <span class="badge badge-error push-blocked" title="{{ s.blocked }}">Push blocked</span>
-        {% elif s.fits %}
-        {% set verb = "Install" if not s.installed else "Push" %}
-        {% call confirm_dialog("confirm-upload-" ~ a.id ~ "-" ~ dom, s.row, verb ~ " " ~ label ~ "?",
-            "/push", {"apk_id": a.id, "device_serial": d.serial, "back": "/status"}, verb ~ " now", verb,
-            "" if s.state in ("update", "missing", "unknown") else "secondary") %}
-        <p>
-          {{ verb }} <strong>{{ version }}</strong> on <strong>{{ d | device_name }}</strong>{% if s.installed %},
-          replacing {{ s.installed.version_name or "the installed version" }}{% endif %}.
-        </p>
-        {% if a.is_debug %}<p class="muted small">It's a debug build: a phone with the signed app refuses it as an update.</p>{% endif %}
-        {% endcall %}
-        {% else %}
-        <span class="muted small">not for this CPU</span>
-        {% endif %}
-      {% endif %}
-    </div>
-    <div class="row-follow"></div>
-  </div>
-  {% endfor %}
-
-  {% for o in card.others %}
-  <div class="row-grid status-grid">
-    <div class="row-title">
-      <div><div class="row-name">{{ o.package }}</div></div>
-    </div>
-    <div class="row-have">
-      <div class="row-line"><span class="version">{{ o.installed.version_name or "installed" }}</span>{{ origin_chips(o.origin) }}</div>
-      {{ origin_meta(o.origin) }}
-    </div>
-    <div class="row-state muted small">Nothing staged for it</div>
-    <div class="row-actions"></div>
-    <div class="row-follow"></div>
-  </div>
-  {% endfor %}
   {% elif d.trusted %}
   <p class="card-note">No apps yet. <a href="/apps">Add an app</a>: watch a GitHub repo, or upload an APK.</p>
   {% endif %}
 
   {% if card.recent %}
-  <div class="card-foot recent-strip">
-    <strong>Recent installs</strong>
+  {% set last = card.recent[0] %}
+  <details class="row-fold">
+    <summary>Recent installs <span class="count">{{ card.recent | length }}</span>
+      <span class="muted">· last one</span> <span class="status-{{ last.status }}">{{ {"success": "installed", "failed": "failed", "pending": "queued", "installing": "installing"}[last.status] }}</span></summary>
     {% for i in card.recent %}
-    <span>{{ i.source_label }} {{ i.tag }} · {{ i.started_at | when }} · <span class="status-{{ i.status }}">{{ i.status }}</span> · <a href="/installs/{{ i.id }}">log</a></span>
+    <div class="recent-row activity-row">
+      <span class="activity-what"><strong>{{ i.source_label }}</strong> {{ i.tag }} <span class="muted">· {{ i.started_at | when }}</span></span>
+      <span class="status-{{ i.status }}">{{ {"success": "Installed", "failed": "Failed", "pending": "Queued…", "installing": "Installing…"}[i.status] }}</span>
+      <a href="/installs/{{ i.id }}" class="small">log</a>
+    </div>
     {% endfor %}
-    <a href="/installs" class="all-installs">All installs</a>
-  </div>
+    <p class="small all-installs"><a href="/installs">All installs</a></p>
+  </details>
   {% endif %}
 </details>
 {% endfor %}

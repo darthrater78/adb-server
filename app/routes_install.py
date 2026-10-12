@@ -93,22 +93,34 @@ def _activity(installs: list) -> list:
     return [i for i in installs if i["status"] in RUNNING or (i["finished_at"] or "") >= cutoff][:10]
 
 
+def _on_device(device, row, newest) -> dict:
+    """Where one device stands with an app: what it has, and how that compares
+    with the newest staged version ("current", "behind", "other" or "missing")."""
+    has = row if row is not None and row["installed"] else None
+    if has is None:
+        state = "missing"
+    elif has["version_code"] is not None and has["version_code"] == newest["version_code"]:
+        state = "current"
+    elif has["version_code"] and newest["version_code"] and has["version_code"] < newest["version_code"]:
+        state = "behind"
+    else:
+        state = "other"
+    return {"device": device, "has": has, "state": state}
+
+
 def _annotate_groups(groups: list[dict], trusted: list, target, installed: dict, installs: list) -> None:
-    """Adds to each app group where it stands: the trusted devices that have
-    its newest version, what the target device has, and its push state there."""
+    """Adds to each app group where it stands: on every trusted device, which
+    of them have its newest version, what the target device has, and its push
+    state there."""
     last = {}  # the newest push of each app to the target device (installs are newest first)
     for i in installs:
         if target and i["device_serial"] == target["serial"]:
             last.setdefault(i["package_name"], i)
     for g in groups:
         first = g["releases"][0]["apks"][0]
-        g["on"] = [
-            d for d in trusted
-            if (row := installed.get((d["serial"], first["package_name"]))) is not None and row["installed"]
-            and row["version_code"] is not None and row["version_code"] == first["version_code"]
-        ]
-        row = installed.get((target["serial"], first["package_name"])) if target else None
-        g["target_has"] = row if row is not None and row["installed"] else None
+        g["devices"] = [_on_device(d, installed.get((d["serial"], first["package_name"])), first) for d in trusted]
+        g["on"] = [x["device"] for x in g["devices"] if x["state"] == "current"]
+        g["target_has"] = next((x["has"] for x in g["devices"] if target and x["device"]["serial"] == target["serial"]), None)
         # A result belongs to its own card: a repo's releases, or that one build.
         mine = ((lambda i, r=g["repo_id"]: i["repo_id"] == r) if g["repo_id"] is not None
                 else (lambda i, a=first["id"]: i["apk_id"] == a))

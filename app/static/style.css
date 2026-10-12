@@ -224,7 +224,7 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 h1 { font-size: 34px; font-weight: 300; letter-spacing: -0.01em; margin: 0 0 4px; line-height: 1.15; }
 /* Section headings and field labels: condensed capitals. */
-h2, form label, .section-title, .row-head, th, .more-label, .facts dt, .repo-latest-label {
+h2, form label, .section-title, .row-head, .row-group, th, .more-label, .facts dt, .repo-latest-label {
   font-size: 12px; font-weight: 700; font-stretch: 75%; letter-spacing: 0.06em; text-transform: uppercase;
 }
 h2 { margin: 0 0 8px; color: var(--fg); font-size: 16px; }
@@ -942,6 +942,8 @@ h2.section-title { padding-bottom: 6px; border-bottom: 2px solid var(--muted); }
 .repo-remove { margin-left: auto; }
 .repo-on { margin-top: 6px; font-size: 14px; }
 .repo-on .push-state { flex-basis: 100%; }
+.on-devices { margin-top: 8px; }
+.on-devices-rows { margin: 6px 0 4px; padding: 2px 14px; background: var(--surface-2); }
 .status-update { color: var(--link); font-weight: 500; }
 .file-rows { margin-top: 4px; }
 .file-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 0; border-top: 1px solid var(--line); }
@@ -969,9 +971,13 @@ h2.section-title { padding-bottom: 6px; border-bottom: 2px solid var(--muted); }
 .chevron { flex: none; color: var(--muted); transition: transform 0.15s; }
 .device-card[open] > summary .chevron { transform: rotate(180deg); }
 .device-card .card-note { padding: 14px 0; margin: 0; color: var(--muted); font-size: 14px; }
-.recent-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
-.recent-strip strong { color: var(--fg-soft); font-weight: 600; }
-.recent-strip .all-installs { margin-left: auto; }
+/* A device's rows on Status, grouped: a label per group, then two folds. */
+.row-group { color: var(--muted); padding: 14px 0 6px; border-top: 1px solid var(--line); }
+.row-group .count, .row-fold > summary .count { font-family: var(--mono); font-weight: 400; letter-spacing: 0; color: var(--fg-soft); margin-left: 4px; }
+.row-group + .row-grid { border-top: 0; }
+.row-fold { border-top: 1px solid var(--line); padding: 10px 0; }
+.row-fold[open] > summary { margin-bottom: 6px; }
+.row-fold .all-installs { margin: 8px 0 0; }
 .origin { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .refresh-form { margin: 0; }
 .setup + .device-card, .refresh-form + .device-card { margin-top: 0; }
@@ -1077,6 +1083,8 @@ h2.section-title { padding-bottom: 6px; border-bottom: 2px solid var(--muted); }
 .more-body { margin-top: 10px; }
 .more-label { color: var(--muted); margin: 14px 0 6px; }
 .more-body > .more-label:first-child { margin-top: 4px; }
+.facts + details.guide { margin-top: 14px; }
+details.guide > .more-label:first-of-type { margin-top: 10px; }
 .more-body table { margin: 4px 0 0; }
 details.nested { margin: 8px 0 0; }
 details.nested > summary { font-size: 13px; }
@@ -1414,7 +1422,6 @@ fieldset.choice legend { font-size: 13px; font-weight: 600; color: var(--muted);
   .switch-track { height: 32px; }
   .row-grid .origin-at { display: none; }
   .row-meta { font-size: 13px; }
-  .recent-strip .all-installs { margin-left: 0; }
 
   /* Status: summary card, device switcher, device head on two lines. */
   .page-head { margin-bottom: 16px; flex-wrap: nowrap; }

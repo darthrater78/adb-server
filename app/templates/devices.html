@@ -133,8 +133,12 @@
         {{ s.last_push.finished_at | when("") }}{% else %}none yet{% endif %}</dd></div>
     </dl>
 
-    <div class="more-label">Name and trust</div>
-    <div class="actions item-actions">
+    {# One fold for the name, trust and connection. Open while the device
+       waits for trust or isn't connected: that's when it wants the user. #}
+    <details class="guide"{% if not d.trusted or s.link in ("disconnected", "offline") %} open{% endif %}>
+      <summary>Name, trust and connection</summary>
+      <div class="more-label">Name and trust</div>
+      <div class="actions item-actions">
       <form method="post" action="/devices/{{ d.serial | urlencode }}/nickname" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="text" name="nickname" value="{{ d.nickname or '' }}" placeholder="nickname" aria-label="Nickname" maxlength="100">
@@ -150,7 +154,7 @@
         <button type="submit">Trust</button>
         {% endif %}
       </form>
-    </div>
+      </div>
 
     <div class="more-label">Connection</div>
     {# The address field first, then Reconnect and Find side by side. #}
@@ -176,6 +180,7 @@
         stale. It can take a few seconds. If the phone's IP address changed, use <strong>Reconnect</strong> with
         the new address instead.
       </p>
+    </details>
     </details>
     {# Pairing this same device again, without forgetting it first. #}
     <details class="guide"{% if s.link == "unauthorized" %} open{% endif %}>

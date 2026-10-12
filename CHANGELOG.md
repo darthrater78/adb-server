@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.11.0 — 2026-10-12
+
+- Changed: **Status sorts each device's card by what it needs.** Apps with
+  an update or a failed push come first, under **Needs you**, with the one
+  blue button. **On this phone** lists what is installed and fine. Watched
+  apps the phone doesn't have, test builds and uploads are folded under
+  **Other builds you can push**, with grey buttons; the fold opens by itself
+  while one of them is being pushed. **Recent installs** is a fold too,
+  showing the last result on its line.
+- Added: **On your devices, on each app's card.** With more than one trusted
+  device, the card unfolds a line per device: what it has, whether it's up
+  to date, behind or without the app, and a link that makes it the push
+  target. It replaces "also on", which named only the devices already up to
+  date.
+- Changed: **a device's name, trust and connection share one fold** on its
+  Devices card. It starts closed, and open while the device is untrusted or
+  not connected.
+
 ## 3.10.0 — 2026-10-12
 
 - Added: **Pair again, on each device's card.** When a phone has dropped
