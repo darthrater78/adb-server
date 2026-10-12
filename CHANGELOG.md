@@ -2,6 +2,12 @@
 
 ## 3.10.0 — 2026-10-12
 
+**After upgrading, if two-factor sign-in is on:** your saved recovery codes
+no longer work. Sign in with your authenticator app as usual, then make a
+new set under Settings → Security → **New recovery codes** (it shows
+"0 recovery codes left" until you do). Without the authenticator:
+`docker compose exec app python mfa_admin.py reset`.
+
 - Added: **Pair again, on each device's card.** When a phone has dropped
   this server from its Paired devices list, or refuses its key, the card
   takes the pairing port and code (the phone's IP is filled in) and pairs
@@ -14,13 +20,15 @@
   reset that. The card and the README say so, and name the setting that
   stops it: **Disable adb authorization timeout** in the phone's Developer
   options.
-- Security: **recovery codes are stored as keyed hashes.** They were plain
-  SHA-256 hashes, and at about 49 bits each a copy of the database was
-  enough to guess them offline. They are now HMAC-SHA256 under a key
-  derived from `SECRET_KEY`, which is never in the database. The codes you
-  already hold keep working: the stored hashes are re-keyed at the first
-  start. Like the other sealed secrets, they stop matching if `SECRET_KEY`
-  changes (`mfa_admin.py reset`).
+- Security: **recovery codes are stored as slow hashes, and the ones you
+  saved stop working.** They were plain SHA-256 hashes, and at about 49
+  bits each a copy of the database was enough to guess them offline. They
+  are now scrypt hashes salted from `SECRET_KEY`, which is never in the
+  database: a copy of the database can't be used to guess them at all, and
+  one taken together with `.env` only very slowly. Only the old hash was
+  ever kept, so existing codes can't be carried over and are removed at the
+  first start. Like the other sealed secrets, the new ones stop matching if
+  `SECRET_KEY` changes (`mfa_admin.py reset`).
 
 ## 3.9.0 — 2026-10-04
 

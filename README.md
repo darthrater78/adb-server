@@ -799,8 +799,10 @@ below).
     are counted *before* a code is checked, so a burst of parallel guesses
     can't get more than 5 tries.
   - **Recovery codes**: 10 single-use codes with about 49 bits of entropy each,
-    stored only as hashes keyed with `SECRET_KEY` (HMAC-SHA256), so a copy of
-    the database alone can't be used to guess them.
+    stored only as scrypt hashes salted from `SECRET_KEY`, so a copy of the
+    database alone can't be used to guess them, and one taken with `.env`
+    only very slowly. (Codes made before 3.10.0 were removed by that
+    upgrade: make new ones in Settings.)
   - **Trusted browsers**: a signed cookie holding a random token. Only the
     token's hash is stored, so a trusted browser can be revoked from Settings,
     and a copy of the database can't be replayed as a trust cookie.
@@ -919,7 +921,7 @@ below).
 | Database: repos, devices, audit log, settings | `/opt/docker/adb-server/appdata` (`app.db`) | Only `app` mounts it |
 | The adb-server image's version | `/opt/docker/adb-server/adbinfo` (`version`) | No secret. `adb-server` writes it, `app` mounts it read-only and accepts only a version string from it |
 | TOTP secret, notification service URLs, GitHub token saved in Settings | In the database | **Encrypted** (Fernet: AES-128-CBC + HMAC-SHA256) with a key derived from `SECRET_KEY` by HKDF. The key is never stored, so the database or a backup of it reveals none of them without `.env`. |
-| Recovery codes | In the database | HMAC-SHA256 hashes only, keyed from `SECRET_KEY` like the secrets above |
+| Recovery codes | In the database | scrypt hashes only (N=2^15, r=8), salted from `SECRET_KEY` |
 | Trusted-browser tokens (long and random) | In the database | SHA-256 hashes only |
 | This server's APK signing keys, one per source (only for sources you opted in to signing unsigned builds) | `appdata/signing/github-<repo ID>.p12`, `appdata/signing/uploads.p12` | PKCS#12 keystores, mode 600. Their passwords are encrypted in the database, like the secrets above |
 | `SECRET_KEY`, password, `GITHUB_TOKEN` | `.env` | Keep it `chmod 600`. It's gitignored and excluded from image builds. |
