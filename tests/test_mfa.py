@@ -138,27 +138,18 @@ def test_forged_trust_cookie_is_ignored(client, enabled):
     assert login(client).headers["location"] == "/login/mfa"
 
 
-@pytest.mark.parametrize("as_stored", ["sha256", "keyed"])
-def test_recovery_codes_stored_as_fast_hashes_are_dropped_at_start(client, enabled, as_stored):
-    # As 3.9 stored them (bare SHA-256), or keyed with HMAC as a 3.10 dev
-    # build did. Only the hash was kept, so there is nothing to hash slowly.
-    old = [mfa._hash(mfa._normalize_recovery(c)) for c in enabled]
-    if as_stored == "keyed":
-        old = ["mac:v1:" + h for h in old]
-    db.replace_recovery_codes(old)
+def test_recovery_codes_from_before_3_10_are_rekeyed_and_still_work(client, enabled):
+    # As 3.9 stored them: the bare SHA-256 of the code, which a copy of the
+    # database lets someone guess offline (about 49 bits).
+    bare = [mfa._hash(mfa._normalize_recovery(c)) for c in enabled]
+    db.replace_recovery_codes(bare)
     db.init_db()
-    assert db.recovery_codes_left() == 0 and mfa.enabled()
-    login(client)
-    assert client.post("/login/mfa", data={"code": enabled[0]}).status_code == 401
-    assert client.post("/login/mfa", data={"code": code(1)}, follow_redirects=False).headers["location"].startswith("/status")
-
-
-def test_recovery_codes_are_slow_hashes_and_survive_a_restart(client, enabled):
     with db.get_conn() as conn:
         stored = [r["code_hash"] for r in conn.execute("SELECT code_hash FROM mfa_recovery_codes")]
-    assert len(set(stored)) == 10 and all(h.startswith("scrypt:v1:") for h in stored)
-    db.init_db()
-    assert db.recovery_codes_left() == 10
+    assert len(stored) == 10 and all(h.startswith("mac:v1:") for h in stored) and not set(stored) & set(bare)
+    db.init_db()  # a second start changes nothing
+    with db.get_conn() as conn:
+        assert sorted(r["code_hash"] for r in conn.execute("SELECT code_hash FROM mfa_recovery_codes")) == sorted(stored)
     login(client)
     r = client.post("/login/mfa", data={"code": enabled[0]}, follow_redirects=False)
     assert r.headers["location"].startswith("/status?ok=") and db.recovery_codes_left() == 9

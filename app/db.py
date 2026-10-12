@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -8,7 +7,6 @@ from datetime import datetime, timezone
 import secretbox
 
 DB_PATH = os.environ.get("DB_PATH", "/data/app.db")
-logger = logging.getLogger("db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS repos (
@@ -215,13 +213,12 @@ def _seal_plaintext_secrets(conn: sqlite3.Connection) -> None:
     for row in conn.execute("SELECT id, url FROM notify_targets").fetchall():
         if not secretbox.is_sealed(row["url"]):
             conn.execute("UPDATE notify_targets SET url = ? WHERE id = ?", (secretbox.seal(row["url"]), row["id"]))
-    # Recovery codes were fast hashes before 3.10 (SHA-256). Only the hash was
-    # kept, so they can't be hashed again the slow way: they are dropped, and
-    # Settings asks for new ones.
-    dropped = conn.execute("DELETE FROM mfa_recovery_codes WHERE code_hash NOT LIKE ?",
-                           (secretbox.SLOW_PREFIX + "%",)).rowcount
-    if dropped:
-        logger.warning("Removed %d recovery codes stored as fast hashes; make new ones in Settings, Security", dropped)
+    # Recovery codes were plain SHA-256 hashes before 3.10. Key each one over
+    # the hash it already has, so the codes people hold keep working.
+    for row in conn.execute("SELECT code_hash FROM mfa_recovery_codes").fetchall():
+        if not secretbox.is_keyed(row["code_hash"]):
+            conn.execute("UPDATE mfa_recovery_codes SET code_hash = ? WHERE code_hash = ?",
+                         (secretbox.keyed_hash(row["code_hash"]), row["code_hash"]))
 
 
 def _rebuild_staged_apks_unique() -> None:
