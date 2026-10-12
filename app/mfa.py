@@ -9,7 +9,8 @@ TOTP is a few lines over the standard library (HMAC-SHA1, 30-second steps,
   meta.mfa_last_step       the last time step accepted, so a code that was
                            just used can't be replayed within its window
   meta.mfa_failures, meta.mfa_locked_until   the lockout (see below)
-Recovery codes and trusted browsers are stored only as SHA-256 hashes.
+Trusted browsers are stored only as SHA-256 hashes of their long random
+tokens; recovery codes, being short, as hashes keyed with SECRET_KEY.
 
 Unlocking and resetting without the phone: `python mfa_admin.py` inside the
 app container (see that file). Shell access to the server is the proof of
@@ -159,6 +160,12 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _recovery_hash(code: str) -> str:
+    """How a recovery code is stored. Keyed over the plain hash, which is
+    what was stored before 3.10: startup re-keys those rows (db.init_db)."""
+    return secretbox.keyed_hash(_hash(code))
+
+
 def _normalize_recovery(code: str) -> str:
     return "".join(c for c in (code or "").lower() if c.isalnum())
 
@@ -167,7 +174,7 @@ def new_recovery_codes() -> list[str]:
     """Replaces all recovery codes; returns the new ones, to show once."""
     alphabet = "abcdefghjkmnpqrstuvwxyz23456789"  # no 0/o, 1/l/i
     codes = ["".join(secrets.choice(alphabet) for _ in range(10)) for _ in range(RECOVERY_CODE_COUNT)]
-    db.replace_recovery_codes([_hash(c) for c in codes])
+    db.replace_recovery_codes([_recovery_hash(c) for c in codes])
     return [f"{c[:5]}-{c[5:]}" for c in codes]
 
 
@@ -194,7 +201,7 @@ def check(code: str) -> str | None:
         if db.advance_meta("mfa_last_step", step):  # a code works once, even within its 30 seconds
             db.set_meta("mfa_failures", None)
             return "totp"
-    elif len(normalized := _normalize_recovery(code)) == 10 and db.use_recovery_code(_hash(normalized)):
+    elif len(normalized := _normalize_recovery(code)) == 10 and db.use_recovery_code(_recovery_hash(normalized)):
         db.set_meta("mfa_failures", None)
         return "recovery"
     if attempt >= MAX_FAILURES:

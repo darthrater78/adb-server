@@ -53,10 +53,19 @@ def _device_states(devices) -> dict[str, dict]:
                                                                                "offline" if addr in transports else "disconnected")
         states[d["serial"]] = {
             "link": link,
+            "ip": _host(addr),
             "apps": sum(1 for (serial, _), row in installed.items() if serial == d["serial"] and row["installed"]),
             "last_push": last_push.get(d["serial"]),
         }
     return states
+
+
+def _host(addr: str | None) -> str:
+    """The IP of a stored ip:port, to start the Pair again form with."""
+    try:
+        return adb_client.split_host_port(addr or "")[0]
+    except adb_client.AdbError:
+        return ""
 
 
 def _back(back: str, serial: str, **flash):
@@ -98,27 +107,68 @@ def pair_device(
     """Sync route, so Starlette runs it in a threadpool: without a connect
     port, the phone's is found by a port scan that can take several seconds."""
     check_csrf(request, session, csrf_token)
+    try:
+        serial, addr = _pair_and_connect(ip, pairing_port, pairing_code, connect_port)
+    except adb_client.AdbError as exc:
+        return redirect("/devices", card=ADD_CARD, error=str(exc))
+    return _register_paired(request, serial, addr)
+
+
+@router.post("/devices/{serial}/pair")
+def pair_device_again(
+    serial: str,
+    request: Request,
+    session: dict = Depends(auth.require_auth),
+    csrf_token: str = Form(...),
+    ip: str = Form(...),
+    pairing_port: str = Form(...),
+    pairing_code: str = Form(...),
+    connect_port: str = Form(""),
+):
+    """Pairs a device that is already here again, from its own card: Android
+    forgets a paired computer after a week by default. The record stays as it
+    is (name, trust, history) only when the phone that answers reports this
+    device's serial. Any other phone is filed as itself, as Add a device
+    would, and never inherits this one's trust. Sync route, for the port scan."""
+    check_csrf(request, session, csrf_token)
+    if db.get_device(serial) is None:
+        raise HTTPException(status_code=404)
+    try:
+        confirmed, addr = _pair_and_connect(ip, pairing_port, pairing_code, connect_port)
+    except adb_client.AdbError as exc:
+        return _back("/devices", serial, error=str(exc))
+    if not discovery.is_same_device(serial, addr, confirmed):
+        _register_paired(request, confirmed, addr)
+        return _back("/devices", serial, error=f"A different phone answered ({confirmed}), so this device was left as "
+                                               "it is. That one is listed under its own serial")
+    serial = discovery.record(serial, confirmed, addr)
+    pushes.refresh_abis(serial, addr)
+    record_audit(request, "device_pair", f"{serial} at {addr}, paired again")
+    return _back("/devices", serial, ok="Paired again. Its name, trust and history are as they were")
+
+
+def _pair_and_connect(ip: str, pairing_port: str, pairing_code: str, connect_port: str) -> tuple[str, str]:
+    """Pairs with the phone at `ip`, then connects to it: (its serial, its
+    ip:port). An AdbError's text says which half failed and what to do."""
     ip, pairing_port, connect_port = ip.strip().strip("[]"), _port(pairing_port), _port(connect_port)
     try:
         adb_client.pair(adb_client.join_host_port(ip, pairing_port), pairing_code.strip())
     except adb_client.AdbError as exc:
-        return redirect("/devices", card=ADD_CARD, error=f"{exc}. The port and code only work while the pairing dialog "
-                                                         "is open on the phone: open it again for new ones")
+        raise adb_client.AdbError(f"{exc}. The port and code only work while the pairing dialog "
+                                  "is open on the phone: open it again for new ones") from exc
     try:
         if connect_port:
             addr = adb_client.join_host_port(ip, connect_port)
             adb_client.connect(addr)
-            serial = adb_client.get_serialno(addr)
-        else:
-            found = discovery.find_paired_port(ip, int(pairing_port))
-            if found is None:
-                raise adb_client.AdbError(f"nothing on {ip} answered")
-            serial, addr = found
+            return adb_client.get_serialno(addr), addr
+        found = discovery.find_paired_port(ip, int(pairing_port))
+        if found is None:
+            raise adb_client.AdbError(f"nothing on {ip} answered")
+        return found
     except adb_client.AdbError as exc:
-        return redirect("/devices", card=ADD_CARD, error=f"The phone accepted the code, but connecting to it failed ({exc}). "
-                                                         "Pair again with a new code, and fill in Connect port: the port "
-                                                         "beside IP address & Port on the Wireless debugging screen")
-    return _register_paired(request, serial, addr)
+        raise adb_client.AdbError(f"The phone accepted the code, but connecting to it failed ({exc}). "
+                                  "Pair again with a new code, and fill in Connect port: the port "
+                                  "beside IP address & Port on the Wireless debugging screen") from exc
 
 
 def _register_paired(request: Request, serial: str, addr: str) -> RedirectResponse:

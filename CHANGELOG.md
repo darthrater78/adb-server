@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.10.0 — 2026-10-12
+
+- Added: **Pair again, on each device's card.** When a phone has dropped
+  this server from its Paired devices list, or refuses its key, the card
+  takes the pairing port and code (the phone's IP is filled in) and pairs
+  it again without forgetting it first. If the phone that answers reports
+  the same serial, its name, trust and history stay as they were. A
+  different phone is listed as itself, untrusted, and the card's device is
+  left alone. On a card that says **Key refused** it is already open.
+- Added: **why a phone forgets the server.** Android removes a paired
+  computer 7 days after it was paired, and connecting over Wi-Fi doesn't
+  reset that. The card and the README say so, and name the setting that
+  stops it: **Disable adb authorization timeout** in the phone's Developer
+  options.
+- Security: **recovery codes are stored as keyed hashes.** They were plain
+  SHA-256 hashes, and at about 49 bits each a copy of the database was
+  enough to guess them offline. They are now HMAC-SHA256 under a key
+  derived from `SECRET_KEY`, which is never in the database. The codes you
+  already hold keep working: the stored hashes are re-keyed at the first
+  start. Like the other sealed secrets, they stop matching if `SECRET_KEY`
+  changes (`mfa_admin.py reset`).
+
 ## 3.9.0 — 2026-10-04
 
 - Changed: **a new look, "Developer options".** The app is redrawn in the

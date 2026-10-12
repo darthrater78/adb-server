@@ -1,6 +1,6 @@
 # ADB Server
 
-[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.9.0](https://github.com/darthrater78/adb-server/releases/tag/v3.9.0)
+[GitHub](https://github.com/darthrater78/adb-server) · [Release notes for v3.10.0](https://github.com/darthrater78/adb-server/releases/tag/v3.10.0)
 
 <!-- Dev-build banner: drawn by .github/workflows/dev-banner.yml after every release, empty when no dev build is ahead of the latest release. -->
 <a href="https://github.com/darthrater78/adb-server/releases"><img alt="Dev build status" src="https://raw.githubusercontent.com/darthrater78/adb-server/readme-banner/banner.svg" /></a>
@@ -117,7 +117,7 @@ doesn't re-read it.
 ```yaml
 services:
   adb-server:
-    image: ghcr.io/darthrater78/adb-server/adb-server:3.9.0
+    image: ghcr.io/darthrater78/adb-server/adb-server:3.10.0
     container_name: adb-server
     hostname: adbserver
     restart: unless-stopped
@@ -140,7 +140,7 @@ services:
       retries: 3
 
   app:
-    image: ghcr.io/darthrater78/adb-server/app:3.9.0
+    image: ghcr.io/darthrater78/adb-server/app:3.10.0
     container_name: adb-server-app
     restart: unless-stopped
     depends_on:
@@ -171,7 +171,7 @@ services:
 networks:
   internal:
 
-# image: both pinned to this release (3.9.0), updated with every release; the app warns if they differ
+# image: both pinned to this release (3.10.0), updated with every release; the app warns if they differ
 # hostname: phones list this server as "<user>@adbserver"; keep it fixed or they show a new name
 # adb-server has no ports: only app reaches it. Never use network_mode: host (its adb port has no auth)
 # env_file: .env sits next to this file (not in the data directory): login, session key, ALLOWED_HOSTS
@@ -196,7 +196,7 @@ images yourself instead, see [Development](#development).
 > sudo mkdir -p /opt/docker/adb-server/adbinfo && sudo chown 10001:10001 /opt/docker/adb-server/adbinfo && sudo chmod 700 /opt/docker/adb-server/adbinfo
 > ```
 >
-> Then, in your `compose.yaml`, set both images to `3.9.0` and add one
+> Then, in your `compose.yaml`, set both images to `3.10.0` and add one
 > `volumes:` line to each service, as in the file above:
 >
 > - `adb-server`: `- /opt/docker/adb-server/adbinfo:/adbinfo`
@@ -486,7 +486,7 @@ time. **Trust** then takes you to its card on Status, ready to install.
 the same later. Each paired device is one card. Its heading shows its name,
 current address, when it was last seen, whether it's **Trusted**, and its
 live connection as the adb server reports it: **Connected**, **Offline**,
-**Key refused** (pair it again), **Not connected**, or **Connection unknown**
+**Key refused** (use **Pair again** on the card), **Not connected**, or **Connection unknown**
 when the adb server can't be reached. Inside, one line says where it stands
 and what to do about it, then its details (with how many apps it has and
 its last push), naming and trust, and its connection. Nothing is pushed to
@@ -502,6 +502,16 @@ reachable before you install, or after turning wireless debugging back on.
 If the phone's IP itself changed, use **Reconnect** with its new address:
 the address field comes first, then **Reconnect** and **Find** side by side. Nicknames, trust and forgetting a device
 are all on this page. Phones list this server as `@adbserver`.
+
+**When the server drops off the phone's Paired devices list.** This is
+Android, not the server: by default it removes a paired computer 7 days
+after it was paired, and connecting over Wi-Fi doesn't reset that. Turn on
+**Disable adb authorization timeout** in the phone's Developer options and
+it stops. Until then, open **Pair again** on the device's card (it is open
+already when the card says **Key refused**): the phone's IP is filled in,
+so it takes the pairing port and code. The device is not forgotten first.
+If the phone that answers reports the same serial, its name, trust and
+history stay; a different phone is listed as itself, untrusted.
 
 **Phones with a Private space or work profile.** A push installs the app
 only in the profile in use. If an older push (before 3.8.0) or an install
@@ -789,7 +799,8 @@ below).
     are counted *before* a code is checked, so a burst of parallel guesses
     can't get more than 5 tries.
   - **Recovery codes**: 10 single-use codes with about 49 bits of entropy each,
-    stored only as SHA-256 hashes.
+    stored only as hashes keyed with `SECRET_KEY` (HMAC-SHA256), so a copy of
+    the database alone can't be used to guess them.
   - **Trusted browsers**: a signed cookie holding a random token. Only the
     token's hash is stored, so a trusted browser can be revoked from Settings,
     and a copy of the database can't be replayed as a trust cookie.
@@ -908,7 +919,8 @@ below).
 | Database: repos, devices, audit log, settings | `/opt/docker/adb-server/appdata` (`app.db`) | Only `app` mounts it |
 | The adb-server image's version | `/opt/docker/adb-server/adbinfo` (`version`) | No secret. `adb-server` writes it, `app` mounts it read-only and accepts only a version string from it |
 | TOTP secret, notification service URLs, GitHub token saved in Settings | In the database | **Encrypted** (Fernet: AES-128-CBC + HMAC-SHA256) with a key derived from `SECRET_KEY` by HKDF. The key is never stored, so the database or a backup of it reveals none of them without `.env`. |
-| Recovery codes, trusted-browser tokens | In the database | SHA-256 hashes only |
+| Recovery codes | In the database | HMAC-SHA256 hashes only, keyed from `SECRET_KEY` like the secrets above |
+| Trusted-browser tokens (long and random) | In the database | SHA-256 hashes only |
 | This server's APK signing keys, one per source (only for sources you opted in to signing unsigned builds) | `appdata/signing/github-<repo ID>.p12`, `appdata/signing/uploads.p12` | PKCS#12 keystores, mode 600. Their passwords are encrypted in the database, like the secrets above |
 | `SECRET_KEY`, password, `GITHUB_TOKEN` | `.env` | Keep it `chmod 600`. It's gitignored and excluded from image builds. |
 
@@ -939,7 +951,7 @@ two-factor sign-in stays on but refuses every code until you reset it with
   an expiry.
 - Each published image carries a signed **build provenance** attestation
   saying this workflow built it from that commit. Check one with
-  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.9.0 --repo darthrater78/adb-server`.
+  `gh attestation verify oci://ghcr.io/darthrater78/adb-server/app:3.10.0 --repo darthrater78/adb-server`.
 - CodeQL scans the Python code and the workflows on every pull request and
   weekly, and **dependency review** fails a pull request that brings in a
   dependency with a known HIGH or CRITICAL advisory. A weekly scan re-checks
