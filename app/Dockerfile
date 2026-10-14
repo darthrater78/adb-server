@@ -13,7 +13,7 @@
 # is also needed here: adb_client.py shells out to a local `adb` binary acting
 # as a TCP client against the adb-server container — the protocol has no
 # pure-Python client, the `adb` executable *is* the client.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS android-tools
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS android-tools
 
 # Google's repository manifest publishes only SHA-1. These SHA-256 pins were
 # computed from downloads that matched those SHA-1s (70954e99…, 477254aa…),
