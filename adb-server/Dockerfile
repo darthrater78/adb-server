@@ -1,7 +1,7 @@
 # Builds `adb` from Google's official, checksum-verified platform-tools release
 # rather than trusting a third-party pre-built image with the private key that
 # will end up holding every paired device's trust relationship.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS fetch
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS fetch
 
 # Google's repository manifest publishes only SHA-1. These SHA-256 pins were
 # computed from downloads that matched those SHA-1s (70954e99…, 477254aa…),
@@ -18,7 +18,7 @@ RUN curl -fsSL -o /tmp/platform-tools.zip "$PLATFORM_TOOLS_URL" \
     && unzip -q /tmp/platform-tools.zip -d /opt \
     && rm /tmp/platform-tools.zip
 
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 # Security fixes Debian has published since the base image was built: the
 # pinned digest only moves when the image is rebuilt upstream, and the release
